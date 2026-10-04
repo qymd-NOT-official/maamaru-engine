@@ -210,12 +210,13 @@ def train_stream(agent, team, repair_threshold='light'):
         if ready:
             for target in targets:
                 result = yield from agent.ensure_team_member_stream(team, 1, target)
-                if result.get('status') in ('ambiguous', 'not_found', 'unavailable'):
+                if result.get('result') in ('ambiguous', 'not_found', 'unavailable'):
                     yield f"[远征补花] {target['name']}没能明确选中，本次跳过"
                     # Return from the selection list before the next target.
                     yield from fresh_body_stream(agent, team)
                     continue
-                if result.get('status') not in ('changed', 'already_correct'):
+                if result.get('result') not in ('changed', 'already_correct'):
+                    yield f"[远征补花] ✗ 选人未完成：{result.get('reason') or result.get('result') or '未返回结果'}，先恢复队伍"
                     ready = False
                     break
                 # This exact member has not fought during team preparation;

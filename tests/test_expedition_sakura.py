@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from touken import expedition_sakura as training
 from touken.flows.battle import BattleMixin
+from touken.flows.formation_editor import FormationEditorMixin
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +39,7 @@ def stream_result(value):
     return value
 
 
-class Agent:
+class Agent(FormationEditorMixin):
     def __init__(self, data, result='changed', round_done=True):
         self.data = data
         self.result = result
@@ -56,7 +57,7 @@ class Agent:
         return stream_result(True)
     def ensure_team_member_stream(self, team, slot, target):
         self.calls.append(('select', target['observation_id']))
-        return stream_result({'status': self.result})
+        return stream_result(self._finish(self.result, team, slot, target, 'test selection'))
     def _check_fatigue(self, *args, **kwargs):
         return stream_result(49 if kwargs.get('in_place') else 100)
     def _auto_equip(self, slot):
@@ -77,9 +78,10 @@ class Agent:
         return True
 
 
-def test_exact_members_training_keeps_backup_and_injury_setting(tmp_path):
+@pytest.mark.parametrize('selection_result', ['changed', 'already_correct'])
+def test_exact_members_training_keeps_backup_and_injury_setting(tmp_path, selection_result):
     data = body()
-    agent = Agent(data)
+    agent = Agent(data, result=selection_result)
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
             patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)), \
             patch.object(training.sword_db, 'find_game_sword', return_value=(3, {'name': '刀'}, 'normal')):
