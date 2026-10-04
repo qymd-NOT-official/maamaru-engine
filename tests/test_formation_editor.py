@@ -1377,6 +1377,20 @@ class FilterPanelTests(unittest.TestCase):
                                         kiwame="kiwame"))]]
         return full, filtered
 
+    def test_atagi_then_monoyoshi_resets_filter_to_wakizashi(self):
+        maa, host = _std_setup(pages=[[_row("小狐丸", 150, level=35, fatigue=60)]])
+        maa.in_list = True
+        for catalog, expected in (("touken_250_atagi_kiri", "打刀"),
+                                  ("touken_067_monoyoshi_sadamune", "胁差")):
+            target, err = normalize_target({"sword_catalog_id": catalog,
+                                           "form_status": "kiwame"})
+            self.assertIsNone(err)
+            self.assertEqual(target["sword_type"], expected)
+            list(host._apply_list_filter(target))
+        self.assertEqual(maa.filter_clicks,
+                         ["取消筛选", "打刀", "极", "确定",
+                          "取消筛选", "胁差", "极", "确定"])
+
     def test_filter_narrows_scan_and_clicks_in_order(self):
         full, filtered = self._kiwame_hasebe_pages()
         maa, host = _std_setup(pages=full)

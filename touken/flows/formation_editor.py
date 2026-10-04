@@ -232,7 +232,8 @@ def normalize_target(target):
            "sword_catalog_id": sid,
            "name": name,
            "form": form,
-           "sword_type": info.get("type"),
+           "sword_type": {"脇差": "胁差", "槍": "枪", "薙刀": "薙刀", "剣": "剑"}.get(
+               info.get("type"), info.get("type")),
            "level": target.get("level"),
            "tou_level": target.get("tou_level"),
            "survival": target.get("survival"),
