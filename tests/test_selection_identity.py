@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from touken.selection_identity import identity_target, selected_serial, team_cleared
+from touken.selection_identity import identity_target, selected_serial, team_cleared, identity_unique
 from touken.flows.formation_editor import decide_match
 
 
@@ -90,6 +90,48 @@ def test_number_verification_failure_prevents_changed_result():
         with patch.object(host, '_read_list_page', side_effect=enriched), \
                 patch('touken.selection_identity.client_events', return_value=[]), \
                 patch('touken.selection_identity.identity_target', return_value=evidence), \
+                patch('touken.selection_identity.identity_unique', return_value=True), \
+                patch.object(host, '_scan_selection_list', side_effect=AssertionError('no full scan')), \
+                patch.object(host, '_goto_page', side_effect=AssertionError('no return trip')), \
                 patch('touken.selection_identity.selected_serial', side_effect=[0, actual]):
             result = _run(host, target=_target(observation_id='youzu:456'))
         assert result['result'] == expected
+        assert not maa.swipes
+
+
+def test_client_roster_uniqueness_uses_all_same_form_copies():
+    sword = {'sword_id': '3', 'level': '35', 'ranbu_level': '9', 'hp_max': '50', 'scout': '35'}
+    swords = {'456': sword, '999': {**sword, 'level': '1'}}
+    events = [event({'sword': swords})]
+    with patch('touken.selection_identity.youzu_log._event_epoch', side_effect=lambda e: e['epoch_test']):
+        assert identity_unique(events, 456, 100)
+        swords['999'] = dict(sword)
+        assert not identity_unique(events, 456, 100)
+        swords['999']['ranbu_level'] = '2'
+        assert identity_unique(events, 456, 100)
+        assert not identity_unique(events, 456, 102)
+
+
+def test_client_search_only_moves_forward_until_target_and_stops_on_single_page():
+    from test_formation_editor import _std_setup, _target, HASEBE, KOGI
+    maa, host = _std_setup()
+    target = _target()
+    row = {'sword_catalog_id': HASEBE, 'name': '压切长谷部', 'name_raw': '压切长谷部',
+           'level': 35, 'fatigue': 49, 'y': 200}
+    decoy = [{**row, 'sword_catalog_id': KOGI, 'name': '小狐丸', 'name_raw': '小狐丸'}]
+    def finish(stream):
+        while True:
+            try: next(stream)
+            except StopIteration as result: return result.value
+    with patch.object(host, '_read_list_page', side_effect=[(decoy, 0), ([row], 0)]), \
+            patch.object(host, '_scrollbar_bottom', return_value=500), \
+            patch('touken.flows.formation_editor.time.sleep'):
+        selected, page = finish(host._find_client_target_stream(target, ('name', 'level'), 60))
+        assert selected is row and page == 1
+        assert len(maa.swipes) == 1
+        assert maa.swipes[0][3] < maa.swipes[0][1]
+    maa.swipes.clear()
+    with patch.object(host, '_read_list_page', return_value=(decoy, 0)), \
+            patch.object(host, '_scrollbar_bottom', return_value=None):
+        assert finish(host._find_client_target_stream(target, ('name', 'level'), 60))[0] is None
+        assert not maa.swipes

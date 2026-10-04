@@ -84,3 +84,33 @@ def selected_serial(events, team, slot, after):
         if isinstance(member, dict):
             return youzu_log._int(member.get('serial_id'), None)
     return None
+
+
+def identity_unique(events, serial, after):
+    """Client roster proves uniqueness within the confirmed type/form filter."""
+    target = identity_target(events, serial, after)
+    if not target:
+        return False
+    for event in reversed(events):
+        body = successful_body(event)
+        if (not body or event.get('endpoint') != '/party/list'
+                or (youzu_log._event_epoch(event) or 0) < after):
+            continue
+        swords = body.get('sword')
+        if not isinstance(swords, dict) or str(serial) not in swords:
+            return False
+        for sid in swords:
+            if str(sid) == str(serial):
+                continue
+            other = identity_target([event], sid, after)
+            if not other:
+                return False
+            if (other['sword_catalog_id'], other['form']) != (target['sword_catalog_id'], target['form']):
+                continue
+            # Missing values cannot exclude a same-name copy.
+            if not any(target.get(key) is not None and other.get(key) is not None
+                       and target[key] != other[key]
+                       for key in ('level', 'tou_level', 'survival_max', 'recon')):
+                return False
+        return True
+    return False

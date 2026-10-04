@@ -931,7 +931,7 @@ class FormationEditorMixin:
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
                                 "换前观察失败：整页读不出", entry_shell=shell)
         if client_serial is not None and not ranked:
-            from ..selection_identity import client_events, identity_target, selected_serial
+            from ..selection_identity import client_events, identity_target, selected_serial, identity_unique
             events = client_events(self.maa)
             evidence = identity_target(events, client_serial, time.time() - 300)
             if (not evidence or evidence['level'] is None or evidence['tou_level'] is None
@@ -948,6 +948,10 @@ class FormationEditorMixin:
                 yield f"[编队] {slot_no}号位客户端编号已是目标，无需换人"
                 return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
                                     "本次客户端部队编号与目标一致", entry_shell=shell)
+            if not identity_unique(events, client_serial, time.time() - 300):
+                yield '[编队] 客户端同名刀的可见数值无法区分，本次跳过，不扫描到底'
+                return self._finish(AMBIGUOUS, team_no, slot_no, tgt,
+                                    '客户端身份数值不能唯一对应列表中的刀', entry_shell=shell)
         m = slot_matches_target(slot_before, tgt, match_fields)
         nonlevel_fields = tuple(field for field in match_fields if field != "level")
         nonlevel_match = slot_matches_target(slot_before, tgt, nonlevel_fields)
@@ -995,9 +999,16 @@ class FormationEditorMixin:
         swipe_next, swipe_prev = (
             (_SWIPE_RANKED_NEXT, _SWIPE_RANKED_PREV) if ranked else
             (_SWIPE_NEXT, _SWIPE_PREV))
-        pages, fps, bars, current_idx, unreadable, scan_status = \
-            yield from self._scan_selection_list(
-                max_pages, swipe_next=swipe_next, swipe_prev=swipe_prev)
+        direct_client = client_serial is not None and not ranked
+        if direct_client:
+            row, target_page = yield from self._find_client_target_stream(tgt, match_fields, max_pages)
+            pages, bars, unreadable, scan_status = [[]] * (target_page + 1), [], 0, 'complete'
+            verdict = ({'status': 'unique', 'row': row, 'page': target_page} if row else
+                       {'status': 'not_found', 'reason': '当前筛选名单没读到目标的完整数值'})
+        else:
+            pages, fps, bars, current_idx, unreadable, scan_status = \
+                yield from self._scan_selection_list(
+                    max_pages, swipe_next=swipe_next, swipe_prev=swipe_prev)
         if scan_status != "complete":
             why = {"truncated": "触达安全上限仍未到底",
                    "loop": "翻页指纹绕圈，页序异常",
@@ -1013,8 +1024,9 @@ class FormationEditorMixin:
                                 before=slot_before, team_before=team_before,
                                 pages_scanned=len(pages),
                                 scan_status=scan_status)
-        verdict = (decide_locked_highest(pages, tgt, unreadable) if ranked
-                   else decide_match(pages, tgt, match_fields, unreadable))
+        if not direct_client:
+            verdict = (decide_locked_highest(pages, tgt, unreadable) if ranked
+                       else decide_match(pages, tgt, match_fields, unreadable))
         if verdict["status"] == "not_found":
             yield f"[编队] 翻遍 {len(pages)} 页没找到目标：{verdict['reason']}"
             return self._finish(NOT_FOUND, team_no, slot_no, tgt,
@@ -1042,9 +1054,10 @@ class FormationEditorMixin:
             match_fields = ("name", "level")
         yield (f"[编队] 唯一匹配在第 {target_page + 1} 页："
                f"{row['name']} Lv{row.get('level') or '?'}")
-        row = yield from self._goto_page(
-            bars, target_page, tgt, row, match_fields,
-            swipe_next=swipe_next, swipe_prev=swipe_prev)
+        if not direct_client:
+            row = yield from self._goto_page(
+                bars, target_page, tgt, row, match_fields,
+                swipe_next=swipe_next, swipe_prev=swipe_prev)
         if row is None:
             yield "[编队] 无法在列表里重新定位目标行，停（未点决定）"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
@@ -1277,6 +1290,24 @@ class FormationEditorMixin:
                                if re.fullmatch(r'\d{1,3}', t.strip())]
                     row[field] = numbers[0] if len(numbers) == 1 else None
         return rows, unreadable
+
+    def _find_client_target_stream(self, target, match_fields, max_pages):
+        """Find a roster-proven unique instance; click on the page where found."""
+        yield '[编队] 按客户端身份找人，找到后直接选入'
+        seen = set()
+        for index in range(max_pages):
+            rows, _ = self._read_list_page()
+            row = self._match_target_row(rows, target, target, match_fields)
+            if row is not None:
+                return row, index
+            fingerprint = page_fingerprint(rows)
+            bottom = self._scrollbar_bottom()
+            if not rows or fingerprint in seen or bottom is None or bottom >= _SCROLLBAR_BOTTOM_Y:
+                break
+            seen.add(fingerprint)
+            self.maa.swipe(*_SWIPE_NEXT)
+            time.sleep(1.2)
+        return None, index
 
     def _scan_selection_list(self, max_pages, *, swipe_next=_SWIPE_NEXT,
                              swipe_prev=_SWIPE_PREV):
