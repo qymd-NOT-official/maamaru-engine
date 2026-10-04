@@ -22,7 +22,7 @@ def successful_body(event):
 
 
 def team_cleared(events, team, after):
-    """Latest fresh party response must explicitly report all six slots empty."""
+    """第一部队解散保留队长；其余位置必须明确为空。"""
     for event in reversed(events):
         body = successful_body(event)
         if not body or (youzu_log._event_epoch(event) or 0) < after:
@@ -37,10 +37,13 @@ def team_cleared(events, team, after):
         slots = party.get('slot')
         if not isinstance(slots, dict):
             return False
+        if team == 1 and not (isinstance(slots.get('1'), dict)
+                              and 'serial_id' in slots['1']):
+            return False
         return all(isinstance(slots.get(str(slot)), dict)
                    and 'serial_id' in slots[str(slot)]
                    and slots[str(slot)]['serial_id'] is None
-                   for slot in range(1, 7))
+                   for slot in range(2 if team == 1 else 1, 7))
     return False
 
 

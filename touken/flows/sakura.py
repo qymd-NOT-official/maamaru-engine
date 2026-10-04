@@ -213,13 +213,14 @@ class SakuraMixin:
         time.sleep(1)
         self.maa.screenshot(force=True)
         from ..selection_identity import client_events, team_cleared
-        # 解散会清空六槽。空槽的数字/底线会被 OCR 当成内容，不能拿它
+        # 第一部队解散保留队长，其余部队清空六槽。空槽数字/底线会被 OCR 当成内容，不能拿它
         # 推翻客户端本次响应；页面标题只确认仍在编队，人数由 JSON 确认。
         if (not self.maa.ocr('部队编成', roi_4to4(500, 0, 780, 60))
                 or not team_cleared(client_events(self.maa), team_no, cleared_since)):
             yield "[刷花] 解散后未确认队员位置清空，停止"
             return False
-        yield f"[刷花] 客户端已确认部队{team_no}六个位置清空，接下来选队长，单人轮刷"
+        cleared_label = '二至六号位清空' if team_no == 1 else '六个位置清空'
+        yield f"[刷花] 客户端已确认部队{team_no}{cleared_label}，接下来选队长，单人轮刷"
         return True
 
     def _rotate_captain_here(self, margin: int = 10):

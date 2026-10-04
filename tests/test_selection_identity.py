@@ -44,6 +44,20 @@ def test_equipped_base_scout_is_never_compared_to_displayed_bonus():
         assert identity_target([event({'sword': {'1': sword}}, epoch=99)], 1, 100) is None
 
 
+def test_first_team_dissolution_keeps_captain_but_no_other_members():
+    slots = {str(n): {'serial_id': None} for n in range(1, 7)}
+    slots['1']['serial_id'] = '31296209'
+    response = event({'party': {'1': {'slot': slots}}}, '/party/dissolution')
+    with patch('touken.selection_identity.youzu_log._event_epoch', side_effect=lambda e: e['epoch_test']):
+        assert team_cleared([response], 1, 100)
+        assert not team_cleared([response], 1, 102)
+        slots['3']['serial_id'] = '123'
+        assert not team_cleared([response], 1, 100)
+        slots['3']['serial_id'] = None
+        slots.pop('1')
+        assert not team_cleared([response], 1, 100)
+
+
 def test_post_selection_reads_requested_slot_and_rejects_old_or_failed_response():
     body = {'2': {'slot': {'3': {'serial_id': '456'}, '1': {'serial_id': '999'}}}}
     with patch('touken.selection_identity.youzu_log._event_epoch',
