@@ -12,6 +12,38 @@ type ChatLine = { who: 'fox' | 'kogi'; text: string }
 const phase = ref<Phase>('idle')
 const foxLine = ref('')
 const kogiLine = ref('')
+const clickLines = {
+  fox: ['嘿嘿，毛都被戳蓬了！', '小狐狸在呢！', '要一起喝茶吗？'],
+  kogi: ['哦呀，叫我吗？', '毛发可要轻些摸。', '来杯茶，再配些油豆腐吧。'],
+}
+const bounces = new Map<HTMLElement, Animation>()
+
+function poke(who: 'fox' | 'kogi', event: MouseEvent) {
+  const actor = event.currentTarget as HTMLElement
+  bounces.get(actor)?.cancel()
+  if (!reducedMotion.matches) {
+    const squash = who === 'fox' ? 0.77 : 0.84
+    const bounce = actor.animate([
+      { scale: '1 1', offset: 0 },
+      { scale: `1.18 ${squash}`, offset: 0.18 },
+      { scale: '0.88 1.16', offset: 0.43 },
+      { scale: '1.06 0.94', offset: 0.66 },
+      { scale: '0.98 1.03', offset: 0.84 },
+      { scale: '1 1', offset: 1 },
+    ], { duration: 560, easing: 'ease-in-out' })
+    bounces.set(actor, bounce)
+    bounce.onfinish = () => { if (bounces.get(actor) === bounce) bounces.delete(actor) }
+  }
+  clearTimers()
+  foxLine.value = who === 'fox' ? pick(clickLines.fox) : ''
+  kogiLine.value = who === 'kogi' ? pick(clickLines.kogi) : ''
+  later(() => {
+    phase.value = 'idle'
+    foxLine.value = ''
+    kogiLine.value = ''
+    scheduleNext()
+  }, 4000)
+}
 
 const idleChats: ChatLine[][] = [
   [
@@ -103,14 +135,14 @@ watch(() => props.active, (now, before) => {
 })
 
 onMounted(() => { if (!props.active) scheduleNext() })
-onBeforeUnmount(() => { disposed = true; clearTimers() })
+onBeforeUnmount(() => { disposed = true; clearTimers(); bounces.forEach(animation => animation.cancel()) })
 </script>
 
 <template>
-  <div class="stage-actors" :class="`phase-${phase}`" aria-hidden="true">
-    <div class="stage-kogi"></div>
-    <div class="stage-fox"></div>
-    <div v-if="kogiLine" class="stage-bubble bubble-kogi">{{ kogiLine }}</div>
-    <div v-if="foxLine" class="stage-bubble bubble-fox">{{ foxLine }}</div>
+  <div class="stage-actors" :class="`phase-${phase}`">
+    <button type="button" class="stage-kogi" aria-label="和小狐丸打招呼" @click="poke('kogi', $event)"></button>
+    <button type="button" class="stage-fox" aria-label="和小狐狸打招呼" @click="poke('fox', $event)"></button>
+    <div v-if="kogiLine" class="stage-bubble bubble-kogi" role="status">{{ kogiLine }}</div>
+    <div v-if="foxLine" class="stage-bubble bubble-fox" role="status">{{ foxLine }}</div>
   </div>
 </template>
