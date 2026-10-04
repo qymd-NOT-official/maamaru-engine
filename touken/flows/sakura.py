@@ -203,16 +203,18 @@ class SakuraMixin:
         if not yes:
             yield "[刷花] 未确认解散弹窗，停止"
             return False
+        cleared_since = int(time.time())
         self.maa.click(yes)
         time.sleep(1)
         self.maa.screenshot(force=True)
-        slots = self._read_team_page()
-        # 游戏的「部队解散」保留队长，接下来在1号位替换；其余五槽必须空。
-        if (len(slots) != 6 or slots[0]['slot_status'] not in ('empty', 'occupied')
-                or any(row['slot_status'] != 'empty' for row in slots[1:])):
+        from ..selection_identity import client_events, team_cleared
+        # 解散会清空六槽。空槽的数字/底线会被 OCR 当成内容，不能拿它
+        # 推翻客户端本次响应；页面标题只确认仍在编队，人数由 JSON 确认。
+        if (not self.maa.ocr('部队编成', roi_4to4(500, 0, 780, 60))
+                or not team_cleared(client_events(self.maa), team_no, cleared_since)):
             yield "[刷花] 解散后未确认队员位置清空，停止"
             return False
-        yield f"[刷花] 部队{team_no}队员已解散，接下来替换队长，单人轮刷"
+        yield f"[刷花] 客户端已确认部队{team_no}六个位置清空，接下来选队长，单人轮刷"
         return True
 
     def _rotate_captain_here(self, margin: int = 10):

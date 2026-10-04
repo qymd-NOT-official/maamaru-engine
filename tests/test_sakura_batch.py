@@ -23,6 +23,35 @@ def test_sakura_requires_confirmed_lock_and_sword_level_above_one():
             assert host._sakura_candidate_eligible(None, 200) is expected
 
 
+def test_prepare_team_uses_client_clear_confirmation_not_empty_slot_ocr():
+    class Maa:
+        def screenshot(self, force=False): pass
+        def template_match(self, *args, **kwargs): return Point(1200, 234)
+        def ocr(self, *args, **kwargs): return Point(640, 29)
+        def click(self, point): pass
+    host = SakuraMixin()
+    host.maa = Maa()
+    host.current_location = '编队'
+    def done(value):
+        if False: yield
+        return value
+    def run():
+        stream = host._prepare_sakura_team(2)
+        while True:
+            try: next(stream)
+            except StopIteration as result: return result.value
+    with patch.object(host, 'navigate_to_stream', return_value=iter(()), create=True), \
+            patch.object(host, '_select_team_confirmed', side_effect=lambda n: done(True), create=True), \
+            patch.object(host, '_read_team_page', side_effect=AssertionError('empty-slot OCR must not gate'), create=True), \
+            patch('touken.flows.sakura.time.sleep'), \
+            patch('touken.selection_identity.client_events', return_value=[]), \
+            patch('touken.selection_identity.team_cleared', return_value=True) as confirmed:
+        assert run() is True
+        assert confirmed.call_args.args[1] == 2
+        confirmed.return_value = False
+        assert run() is False
+
+
 def test_sakura_skips_ineligible_row_before_deciding():
     class Maa:
         clicks = []

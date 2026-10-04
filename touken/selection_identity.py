@@ -21,6 +21,29 @@ def successful_body(event):
             and str(body.get('status')) == '0' else None)
 
 
+def team_cleared(events, team, after):
+    """Latest fresh party response must explicitly report all six slots empty."""
+    for event in reversed(events):
+        body = successful_body(event)
+        if not body or (youzu_log._event_epoch(event) or 0) < after:
+            continue
+        endpoint = event.get('endpoint')
+        if endpoint not in ('/party/dissolution', '/party/list', '/party/setsword'):
+            continue
+        parties = body if endpoint == '/party/setsword' else body.get('party')
+        party = parties.get(str(team)) if isinstance(parties, dict) else None
+        if not isinstance(party, dict):
+            continue
+        slots = party.get('slot')
+        if not isinstance(slots, dict):
+            return False
+        return all(isinstance(slots.get(str(slot)), dict)
+                   and 'serial_id' in slots[str(slot)]
+                   and slots[str(slot)]['serial_id'] is None
+                   for slot in range(1, 7))
+    return False
+
+
 def identity_target(events, serial, after):
     for event in reversed(events):
         body = successful_body(event)

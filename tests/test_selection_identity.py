@@ -1,12 +1,32 @@
 from unittest.mock import patch
 
-from touken.selection_identity import identity_target, selected_serial
+from touken.selection_identity import identity_target, selected_serial, team_cleared
 from touken.flows.formation_editor import decide_match
 
 
 def event(body, endpoint='/party/list', epoch=101):
     return {'payload': {'status': 0, **body}, 'endpoint': endpoint,
             'status': 200, 'direction': 'S->C', 'epoch_test': epoch}
+
+
+def test_clear_confirmation_requires_fresh_complete_target_team_response():
+    slots = {str(n): {'serial_id': None} for n in range(1, 7)}
+    cleared = event({'party': {'2': {'slot': slots}}}, '/party/dissolution')
+    with patch('touken.selection_identity.youzu_log._event_epoch',
+               side_effect=lambda e: e['epoch_test']):
+        assert team_cleared([cleared], 2, 100)
+        assert not team_cleared([cleared], 3, 100)
+        assert not team_cleared([cleared], 2, 102)
+        newer = event({'2': {'slot': {**slots, '1': {'serial_id': '123'}}}},
+                      '/party/setsword', 102)
+        assert not team_cleared([cleared, newer], 2, 100)
+        slots.pop('6')
+        assert not team_cleared([cleared], 2, 100)
+        slots['6'] = {}
+        assert not team_cleared([cleared], 2, 100)
+        slots['6'] = {'serial_id': None}
+        cleared['payload']['status'] = 1
+        assert not team_cleared([cleared], 2, 100)
 
 
 def test_equipped_base_scout_is_never_compared_to_displayed_bonus():
