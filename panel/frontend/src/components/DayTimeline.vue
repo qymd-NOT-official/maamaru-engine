@@ -4,6 +4,7 @@ import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
+import { draggedMinute } from './timelineDrag'
 import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
 
 const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
@@ -58,9 +59,23 @@ const smoothNowMin = ref(0)
 let timer: number | undefined
 let clockTimer: number | undefined
 
-async function load() {
+async function load(force = false) {
+  if (!force && (drag.value || dragBusy.value)) return
   try {
-    data.value = await api.dayTimeline()
+    const fresh = await api.dayTimeline()
+    if (data.value && fresh.day_start !== data.value.day_start) suggestionDragTimes.value = {}
+    fresh.suggestions?.forEach((s, i) => {
+      const minute = suggestionDragTimes.value[`gameplay:${i}`]
+      if (minute != null) s.start_min = minute
+    })
+    fresh.expedition_suggestions.forEach(s => {
+      const minute = suggestionDragTimes.value[`expedition:${s.team_no}:${s.map_code}:${s.shift_no}`]
+      if (minute != null) {
+        movedExpeditionSources.value[s.key] = s.start_min
+        s.start_min = minute
+      }
+    })
+    data.value = fresh
     emit('timelineUpdated', data.value)
     syncSmoothClock()
     if (data.value.conductor.enabled) conductorChoice.value = data.value.conductor.workflow_id
@@ -201,7 +216,7 @@ async function saveExpeditionConfiguration() {
     const preset = expeditionPresetOptions.value.find(p => p.formation_id === expeditionFormation.value)
     if (expeditionFormation.value && !preset) throw new Error('原预设已不可用，请重新选择')
     await api.configureDayExpedition({team_no: selected.team, map_code: selected.suggestion?.map_code || selected.slot!.map_code,
-      start_min: start, ...(selected.slot ? {source_key: selected.slot.key} : {source_start_min: selected.suggestion!.start_min}),
+      start_min: start, ...(selected.slot ? {source_key: selected.slot.key} : {source_start_min: movedExpeditionSources.value[selected.suggestion!.key] ?? selected.suggestion!.start_min}),
       formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || ''})
     expeditionDialog.value?.close()
     await load()
@@ -217,7 +232,11 @@ async function removeExpeditionFromPopup() {
     adoptingSuggestion.value = suggestion.key
     expeditionMessage.value = ''
     try {
-      await api.adoptDayExpeditionSuggestion(selected.team, suggestion.map_code, suggestion.start_min, suggestion.formation_id, suggestion.formation_signature)
+      if (movedExpeditionSources.value[suggestion.key] != null) {
+        await api.configureDayExpedition({team_no: selected.team, map_code: suggestion.map_code,
+          start_min: suggestion.start_min, source_start_min: movedExpeditionSources.value[suggestion.key],
+          formation_id: suggestion.formation_id || '', formation_signature: suggestion.formation_signature || ''})
+      } else await api.adoptDayExpeditionSuggestion(selected.team, suggestion.map_code, suggestion.start_min, suggestion.formation_id, suggestion.formation_signature)
       expeditionPopup.value = null
       await load()
     } catch (error) {
@@ -686,7 +705,95 @@ const popoverBlock = computed(() => {
 })
 
 const overlappingTasks = ref<Array<{ index: number; block: DayScheduleBlock }>>([])
+const drag = ref<{ key: string; start: number; minute: number; x: number; width: number; moved: boolean; kind: 'task' | 'suggestion' | 'expedition' | 'expeditionSuggestion'; index: number } | null>(null)
+const movedExpeditionSources = ref<Record<string, number>>({})
+const suggestionDragTimes = ref<Record<string, number>>({})
+let suppressClick = false
+const dragBusy = ref(false)
+function dragLeft(key: string, original: number) { return drag.value?.key === key ? pct(drag.value.minute) : original }
+function startDrag(event: PointerEvent, key: string, kind: 'task' | 'suggestion' | 'expedition' | 'expeditionSuggestion', start: number, index = -1) {
+  if (event.button !== 0 || dragBusy.value || editing.value) return
+  if (kind === 'task') {
+    const block = data.value?.booking?.blocks[index]
+    const receipt = data.value?.conductor.blocks.find(b => b.start_min === block?.start_min && b.kind === block?.kind && b.script === block?.script)
+    if (!block || (receipt?.status && receipt.status !== 'pending')) return
+  }
+  if (kind === 'expedition') {
+    const slot = data.value?.expeditions.find(s => s.key === key)
+    if (!slot?.toggleable || !key.includes(':adhoc:') || slot.state !== 'pending') return
+  }
+  const button = event.currentTarget as HTMLButtonElement
+  drag.value = {key, kind, start, minute: start, index, x: event.clientX,
+    width: button.closest('.tl-lane')!.getBoundingClientRect().width, moved: false}
+  button.setPointerCapture(event.pointerId)
+}
+function moveDrag(event: PointerEvent) {
+  const current = drag.value
+  if (!current) return
+  if (Math.abs(event.clientX - current.x) < 5 && !current.moved) return
+  current.moved = true
+  current.minute = draggedMinute(current.start, event.clientX - current.x, current.width, smoothNowMin.value)
+}
+async function finishDrag(event: PointerEvent) {
+  const current = drag.value
+  if (!current) return
+  drag.value = null
+  if (!current.moved) return
+  suppressClick = true
+  window.setTimeout(() => { suppressClick = false }, 0)
+  if (event.type === 'pointercancel' || current.minute === current.start || !data.value) return
+  popover.value = null
+  expeditionPopup.value = null
+  dragBusy.value = true
+  planMessage.value = ''
+  try {
+    if (current.kind === 'task') {
+      const blocks = data.value.booking!.blocks.map((b, i) => i === current.index ? {...b, start_min: current.minute} : {...b})
+      const moved = blocks[current.index]!
+      const duration = (blockEndMin(moved) ?? moved.start_min + GENERIC_BLOCK_MIN) - moved.start_min
+      if (blocks.some((b, i) => i !== current.index && current.minute < (blockEndMin(b) ?? b.start_min + GENERIC_BLOCK_MIN) && current.minute + duration > b.start_min)) throw new Error('这个时间会撞上已有任务，请换个位置')
+      await persistSchedule(blocks.sort((a, b) => a.start_min - b.start_min), `已改到 ${fmtMin(current.minute)} 开工`)
+    } else if (current.kind === 'suggestion') {
+      const suggestion = data.value.suggestions?.[current.index]
+      if (suggestion && (data.value.booking?.blocks || []).some(b => current.minute < (blockEndMin(b) ?? b.start_min + GENERIC_BLOCK_MIN) && current.minute + suggestion.duration_min > b.start_min)) throw new Error('这个时间会撞上已有任务，请换个位置')
+      if (suggestion) suggestion.start_min = current.minute
+      suggestionDragTimes.value[`gameplay:${current.index}`] = current.minute
+      planMessage.value = `建议已挪到 ${fmtMin(current.minute)}，点启用后才会安排`
+    } else if (current.kind === 'expeditionSuggestion') {
+      const suggestion = data.value.expedition_suggestions.find(s => s.key === current.key)
+      if (suggestion) {
+        movedExpeditionSources.value[current.key] ??= suggestion.start_min
+        suggestion.start_min = current.minute
+        suggestionDragTimes.value[`expedition:${suggestion.team_no}:${suggestion.map_code}:${suggestion.shift_no}`] = current.minute
+      }
+      planMessage.value = `远征建议已挪到 ${fmtMin(current.minute)}，点启用后才会安排`
+    } else {
+      const slot = data.value.expeditions.find(s => s.key === current.key)!
+      const settings = await api.expeditionSettings(slot.map_code)
+      const preset = (settings.formations[String(slot.team_no)] || []).find(p => p.formation_id === slot.formation_id)
+      if (slot.formation_id && !preset) throw new Error('原预设已不可用，请先打开配置')
+      await api.configureDayExpedition({team_no: slot.team_no, map_code: slot.map_code,
+        source_key: slot.key, start_min: current.minute, formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || ''})
+      await load(true)
+      planMessage.value = `远征已改到 ${fmtMin(current.minute)} 出发`
+    }
+  } catch (error) { planMessage.value = error instanceof Error ? error.message : '没有保存，请重试' }
+  finally { dragBusy.value = false }
+}
+const dragEnd = computed(() => {
+  const current = drag.value
+  if (!current || !data.value) return null
+  let duration = GENERIC_BLOCK_MIN
+  if (current.kind === 'task') {
+    const block = data.value.booking?.blocks[current.index]
+    if (block) duration = (blockEndMin(block) ?? block.start_min + GENERIC_BLOCK_MIN) - block.start_min
+  } else if (current.kind === 'suggestion') duration = data.value.suggestions?.[current.index]?.duration_min ?? duration
+  else if (current.kind === 'expedition') duration = data.value.expeditions.find(s => s.key === current.key)?.duration_min ?? duration
+  else duration = data.value.expedition_suggestions.find(s => s.key === current.key)?.duration_min ?? duration
+  return current.minute + duration
+})
 function openLaneTask(event: MouseEvent, index: number, shadow?: typeof suggestionShadows.value[number]) {
+  if (suppressClick) return
   if (shadow) adoptSuggestion(shadow)
   else {
     const entry = taskBlocks.value.find(b => b.index === index)
@@ -888,6 +995,7 @@ const suggestionBlocks = computed(() => {
       runs: s.runs ?? undefined,
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
+      suggestionIndex: data.value!.suggestions!.indexOf(s),
       cls: 'tlx-suggest',
       title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点击配置或启用`,
       text: s.runs != null ? `建议 ${s.runs} 圈` : '建议',
@@ -1047,6 +1155,7 @@ const caption = computed(() => {
     </div>
     <template v-if="data && showDetails">
       <div class="tl-chart tl-wide">
+        <output v-if="drag?.moved" class="tl-drag-time">{{ fmtMin(drag.minute) }}<template v-if="dragEnd != null">–{{ fmtMin(dragEnd) }}</template> · 松手调整</output>
         <div class="tl-ticks">
           <span v-for="t in TICKS" :key="t" class="tl-tick" :class="{ 'tl-tick-end': t === DAY }" :style="{ left: pct(t) + '%' }">{{ tickLabel(t) }}</span>
         </div>
@@ -1059,8 +1168,8 @@ const caption = computed(() => {
           <template v-if="expeditionLanes.length">
             <div v-for="lane in expeditionLanes" :key="lane.team" class="tl-lane tl-sub-lane">
               <span class="tl-lane-tag">{{ lane.label }}</span>
-              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击配置这班' : ''}`" aria-haspopup="true" :disabled="!b.slot.toggleable || !!togglingExpedition" @click="openExpeditionPopup(lane.team, b.left, undefined, b.slot)">{{ b.text }}</button>
-              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @click="openExpeditionPopup(lane.team, s.left, s.suggestion)">{{ s.text }}</button>
+              <button v-for="b in lane.blocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title" :aria-label="`${b.time} ${b.rowTitle}，${STATE_LABELS[b.slot.state] ?? b.slot.state}${b.slot.toggleable ? '，点击配置这班' : ''}`" aria-haspopup="true" :disabled="!b.slot.toggleable || !!togglingExpedition" @pointerdown="startDrag($event, b.key, 'expedition', b.minute)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" @click="!suppressClick && openExpeditionPopup(lane.team, b.left, undefined, b.slot)">{{ b.text }}</button>
+              <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: dragLeft(s.key, s.left) + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @pointerdown="startDrag($event, s.key, 'expeditionSuggestion', s.suggestion.start_min)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" @click="!suppressClick && openExpeditionPopup(lane.team, s.left, s.suggestion)">{{ s.text }}</button>
               <div v-if="expeditionPopup?.team === lane.team" class="tl-popover" :style="{left: popoverLeft(expeditionPopup?.left || 0)}">
                 <strong>部队{{ TEAM_NAMES[lane.team] }}远征 {{ expeditionPopup?.suggestion?.map_code || expeditionPopup?.slot?.map_code }}</strong>
                 <div class="tl-popover-actions"><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="configureExpedition">配置</button><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="removeExpeditionFromPopup">{{ expeditionPopup.suggestion || !expeditionPopup.slot?.will_run ? (adoptingSuggestion || togglingExpedition ? '启用中…' : '启用') : '移除' }}</button></div>
@@ -1073,8 +1182,8 @@ const caption = computed(() => {
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
-            <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"  :data-task-index="b.index" @click="openLaneTask($event, b.index)">{{ b.text }}</button>
-            <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :data-task-index="-1" :data-suggestion-key="b.key" @click="openLaneTask($event, -1, b)">{{ b.text }}</button>
+            <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"  :data-task-index="b.index" @pointerdown="startDrag($event, b.key, 'task', b.block.start_min, b.index)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" @click="openLaneTask($event, b.index)">{{ b.text }}</button>
+            <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title" :data-task-index="-1" @pointerdown="startDrag($event, b.key, 'suggestion', b.minute, b.suggestionIndex)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" :data-suggestion-key="b.key" @click="openLaneTask($event, -1, b)">{{ b.text }}</button>
             <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活</span>
             <div v-if="popover && popover.origin !== 'booking' && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
               <section v-for="entry in overlappingTasks.length ? overlappingTasks : [{index: popover.index, block: popoverBlock}]" :key="`${entry.index}:${entry.block.start_min}`" class="tl-popover-task">
@@ -1112,11 +1221,11 @@ const caption = computed(() => {
           <span v-for="t in MINI_TICKS.slice(1, -1)" :key="`mini-grid-${t}`" class="tl-mini-grid" :style="{ left: pct(t) + '%' }"></span>
           <span class="tl-mini-reset" :style="{ left: pct(1680) + '%' }" title="04:00 日课刷新"></span>
           <span class="tl-mini-now" :style="{ left: pct(smoothNowMin) + '%' }" title="现在"></span>
-          <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
-          <span v-for="b in scheduleBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
-          <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
-          <span v-for="b in suggestionShadows" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"></span>
-          <span v-for="s in expeditionSuggestionBlocks" :key="`mini-suggest-${s.key}`" class="tl-mini-block is-suggest" :style="{ left: s.left + '%', width: s.width + '%' }" :title="s.title"></span>
+          <span v-for="b in displayedExpeditionBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-expedition" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in scheduleBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in runBlocks" :key="`mini-${b.key}`" class="tl-mini-block is-task" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="b in suggestionShadows" :key="`mini-${b.key}`" class="tl-mini-block is-suggest" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"></span>
+          <span v-for="s in expeditionSuggestionBlocks" :key="`mini-suggest-${s.key}`" class="tl-mini-block is-suggest" :style="{ left: dragLeft(s.key, s.left) + '%', width: s.width + '%' }" :title="s.title"></span>
         </div>
         <div class="tl-mini-ticks">
           <span v-for="t in MINI_TICKS" :key="`mini-tick-${t}`" :style="{ left: pct(t) + '%' }" :class="{ 'is-end': t === DAY }">{{ t >= 1440 ? `${t === 1440 ? '次日 ' : ''}${t / 60 - 24}时` : `${t / 60}时` }}</span>
@@ -1267,8 +1376,12 @@ const caption = computed(() => {
 .tl-lane:has(.tl-popover) { overflow: visible; z-index: 50; }
 .tl-popover { box-sizing: border-box; width: min(240px, 100%); min-width: 0; }
 .tl-mini-ticks { position: relative; height: 14px; }
+.tl-block { touch-action: pan-y; }
+.tl-drag-time { position: absolute; right: 0; top: -24px; z-index: 60; padding: 3px 8px; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; }
 .tl-popover-task { display: grid; gap: 5px; }
-.tl-popover-task + .tl-popover-task { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 5px; }
+.tl-popover-task + .tl-block { touch-action: pan-y; }
+.tl-drag-time { position: absolute; right: 0; top: -24px; z-index: 60; padding: 3px 8px; background: var(--paper); border: 1px solid var(--line); border-radius: 5px; }
+.tl-popover-task { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 5px; }
 .tl-mini-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .tl-mini-ticks span:first-child { transform: none; }
 .tl-mini-ticks .is-end { transform: translateX(-100%); }
