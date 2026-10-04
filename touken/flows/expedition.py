@@ -23,6 +23,7 @@
 import json
 import re
 import time
+from uuid import uuid4
 from pathlib import Path
 
 import numpy as np
@@ -680,13 +681,12 @@ class ExpeditionMixin:
             return False
         try:
             from ..runtime_paths import DEBUG_DIR
-            # 微秒级时间戳尾缀：扫地/导航路径 sequence=None（都落 s0），
-            # 同一秒两张不同结算屏也不许互相覆盖——样本攒一张是一张
+            # 系统时钟可能连续返回相同值，独立标识避免不同帧互相覆盖。
             now = time.time()
             target = DEBUG_DIR / "expedition" / (
                 f"settle-special-unknown-{via}-s{sequence or 0}-"
                 f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}"
-                f"-{int(now * 1_000_000) % 1_000_000:06d}.png")
+                f"-{uuid4().hex}.png")
             target.parent.mkdir(parents=True, exist_ok=True)
             return bool(save(str(target), force=False))
         except Exception as exc:

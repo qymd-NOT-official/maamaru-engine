@@ -444,7 +444,8 @@ class SpecialUnknownSampleTests(unittest.TestCase):
         flow = _SettleFlow(maa)
         seen = []
         with patch("touken.flows.expedition.time.strftime",
-                   return_value="20260912-120000"):  # 同一秒
+                   return_value="20260912-120000"), patch(
+                       "touken.flows.expedition.time.time", return_value=1234567890.0):
             _observe(flow, seen, sequence=None)
             maa.frame = frame2
             _observe(flow, seen, sequence=None)
