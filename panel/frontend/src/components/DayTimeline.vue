@@ -58,6 +58,19 @@ const popover = ref<{ index: number; lane: 'task' | 'daily'; left: number; origi
 const smoothNowMin = ref(0)
 let timer: number | undefined
 let clockTimer: number | undefined
+const refreshing = ref(false)
+const refreshMessage = ref('')
+
+async function refreshTimeline() {
+  if (refreshing.value || drag.value || dragBusy.value) return
+  refreshing.value = true
+  refreshMessage.value = ''
+  popover.value = null
+  expeditionPopup.value = null
+  try {
+    refreshMessage.value = await load(true) ? '已刷新' : '刷新失败，请再试一次'
+  } finally { refreshing.value = false }
+}
 
 async function load(force = false) {
   if (!force && (drag.value || dragBusy.value)) return
@@ -82,8 +95,10 @@ async function load(force = false) {
     else if (!data.value.conductor.options.some(option => option.id === conductorChoice.value)) {
       conductorChoice.value = data.value.conductor.workflow_id
     }
+    return true
   } catch {
     /* 静默失败，下轮轮询再试 */
+    return false
   }
 }
 
@@ -1147,7 +1162,9 @@ const caption = computed(() => {
         <p>{{ caption }}</p>
       </div>
       <div class="tl-card-actions">
+        <small v-if="refreshMessage" role="status">{{ refreshMessage }}</small>
         <time v-if="data">{{ fmtMin(nowMin) }}</time>
+        <button type="button" :disabled="refreshing || !!drag || dragBusy" @click="refreshTimeline">{{ refreshing ? '刷新中…' : '刷新' }}</button>
         <button v-if="props.collapsible" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
           {{ expanded ? '收起' : '展开' }}
         </button>
