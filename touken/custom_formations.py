@@ -269,7 +269,8 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
                     "reason": candidate_pool.get("reason")
                     or "指定具体一振的槽位需要可信的完整刀账"}
     else:
-        candidate_pool = candidate_pool or {}
+        if candidate_pool is None:
+            candidate_pool = _current_candidate_pool()
 
     # 同一图鉴号的普通/极刀不能同队。整队开工前检查，避免套到一半。
     seen_catalog = {}
@@ -293,6 +294,23 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
     for key in sorted(slots, key=int):
         saved = slots[key]
         if saved.get("selection_policy") == "locked_highest_level":
+            client_entries = [entry for entry in entries
+                              if candidate_pool.get("done")
+                              and str(entry.get("observation_id") or "").startswith("youzu:")]
+            if client_entries:
+                eligible = [entry for entry in client_entries
+                            if entry.get("sword_catalog_id") == saved.get("sword_catalog_id")
+                            and entry.get("form_status") == saved.get("form_status")
+                            and entry.get("locked") is True
+                            and type(entry.get("level")) is int]
+                if not eligible:
+                    return {"ok": False, "reason": f"{key}号位在刀账里没有符合条件的带锁刀剑"}
+                # 同等级按稳定实例编号选一振；策略仍留在预设里，下次重新按最新等级选。
+                chosen = max(eligible, key=lambda entry: (entry["level"],
+                             -int(entry["observation_id"].split(":")[1])))
+                resolved[key] = {**chosen, **{field: saved[field] for field in
+                                 ("treasure", "troops", "horse", "charm") if saved.get(field)}}
+                continue
             resolved[key] = saved
             continue
         direct = by_oid.get(saved.get("observation_id"))
@@ -371,6 +389,7 @@ def persist_client_slots(record: dict, resolved: dict) -> bool:
     import shutil
     upgrades = {key: entry for key, entry in resolved.items()
                 if str(entry.get("observation_id") or "").startswith("youzu:")
+                and (record.get("slots") or {}).get(key, {}).get("selection_policy") != "locked_highest_level"
                 and not str((record.get("slots") or {}).get(key, {}).get("observation_id") or "").startswith("youzu:")}
     if not upgrades:
         return False

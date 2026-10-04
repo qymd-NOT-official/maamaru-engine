@@ -250,6 +250,24 @@ def _pool_entry(oid, catalog, name, level=99, **extra):
 
 
 class ResolvePresetTests(unittest.TestCase):
+    def test_ranked_client_archive_picks_instance_without_list_scan(self):
+        ranked = {"selection_policy": "locked_highest_level",
+                  "sword_catalog_id": "touken_250_atagi_kiri", "form_status": "normal"}
+        entry = _pool_entry("youzu:123", "touken_250_atagi_kiri", "安宅切", level=50, locked=True)
+        record = _record(slots={"1": ranked})
+        result = cf.resolve_formation_slots(record, {"done": True, "entries": [entry]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["observation_id"], "youzu:123")
+        self.assertNotIn("selection_policy", result["slots"]["1"])
+        self.assertEqual(record["slots"]["1"], ranked)
+        entries = [entry, {**entry, "observation_id": "youzu:124", "level": 99, "locked": False},
+                   {**entry, "observation_id": "youzu:125", "level": 80},
+                   {**entry, "observation_id": "youzu:126", "level": 100, "form_status": "kiwame"}]
+        result = cf.resolve_formation_slots(record, {"done": True, "entries": entries})
+        self.assertEqual(result["slots"]["1"]["observation_id"], "youzu:125")
+        self.assertFalse(cf.resolve_formation_slots(record,
+            {"done": True, "entries": [{**entry, "locked": False}]})["ok"])
+
     def test_ranked_resolves_without_archive(self):
         ranked = {"selection_policy": "locked_highest_level",
                   "sword_catalog_id": "touken_003_mikazuki_munechika", "name_zh": "三日月宗近",
