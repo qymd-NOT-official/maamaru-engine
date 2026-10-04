@@ -301,6 +301,42 @@ class ResolvePresetTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIs(result["slots"]["1"], entry)
 
+    def test_legacy_client_relink_ignores_equipment_but_requires_unique_date(self):
+        saved = _pool_entry("24:4074", "touken_035", "后藤藤四郎", level=93,
+                            tou_level=9, survival_max=43,
+                            stats={"生存": 43, "侦察": 96, "打击": 94, "机动": 152})
+        saved.update(form_status="kiwame", kiwame_date="2022-4-9",
+                     troops={"1": "轻步兵·特上"})
+        current = {**saved, "observation_id": "youzu:18156485", "level": 98,
+                   "stats": {"打击": 88, "机动": 147, "侦察": 96}}
+        current.pop("troops")
+        record = _record(slots={"1": saved})
+        result = cf.resolve_formation_slots(record, {"done": True, "entries": [current]})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["slots"]["1"]["observation_id"], "youzu:18156485")
+        self.assertEqual(result["slots"]["1"]["troops"], saved["troops"])
+        duplicate = {**current, "observation_id": "youzu:2"}
+        self.assertFalse(cf.resolve_formation_slots(record,
+            {"done": True, "entries": [current, duplicate]})["ok"])
+        for changes in ({"kiwame_date": "2022-4-10"}, {"level": 1}, {"form_status": "normal"}):
+            self.assertFalse(cf.resolve_formation_slots(record,
+                {"done": True, "entries": [{**current, **changes}]})["ok"])
+
+    def test_client_upgrade_backed_up_and_does_not_overwrite_edits(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "custom_formations.json"
+            with patch.object(cf, "_formations_path", return_value=path):
+                record = _record(slots={"1": {"observation_id": "24:1", "name_zh": "后藤藤四郎"}})
+                cf.save_formations([record])
+                original = path.read_bytes()
+                entry = {"observation_id": "youzu:123", "name_zh": "后藤藤四郎"}
+                self.assertTrue(cf.persist_client_slots(record, {"1": entry}))
+                self.assertEqual(path.with_name(path.name + ".before-client-ids.bak").read_bytes(), original)
+                self.assertEqual(cf.load_formations()[0]["slots"]["1"], entry)
+                self.assertFalse(cf.persist_client_slots(record, {"1": entry}))
+
     def test_exact_slot_keeps_equipment_after_archive_relink(self):
         entry = _pool_entry("9:1", "touken_003", "三日月宗近")
         treasure = {"name": "锷·月下梅树透图", "level": 1, "affection": 0}

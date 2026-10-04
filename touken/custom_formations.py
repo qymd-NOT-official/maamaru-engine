@@ -230,6 +230,22 @@ def _current_candidate_pool() -> dict:
     return get_honmaru_profile().get("candidate_pool") or {}
 
 
+def _legacy_client_matches(saved: dict, current: dict) -> bool:
+    """旧 OCR 预设接到客户端：日期和刀种/形态作证，不混比装备加成。"""
+    if not str(current.get("observation_id") or "").startswith("youzu:"):
+        return False
+    for field in ("sword_catalog_id", "form_status", "kiwame_date"):
+        if not saved.get(field) or saved[field] != current.get(field):
+            return False
+    if saved.get("survival_max") is None or saved["survival_max"] != current.get("survival_max"):
+        return False
+    for field in ("level", "tou_level"):
+        old, new = saved.get(field), current.get(field)
+        if (type(old) is not int or type(new) is not int or new < old):
+            return False
+    return True
+
+
 def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) -> dict:
     """开工前一次性把整套预设链接到最新完整刀账。
 
@@ -289,8 +305,11 @@ def resolve_formation_slots(record: dict, candidate_pool: dict | None = None) ->
                                                       cultivation):
             matches = [direct]
         else:
-            matches = [entry for entry in entries
-                       if _fingerprint_matches(saved, entry, cultivation)]
+            matches = [entry for entry in entries if
+                       (_legacy_client_matches(saved, entry)
+                        if str(entry.get("observation_id") or "").startswith("youzu:")
+                        and saved.get("kiwame_date")
+                        else _fingerprint_matches(saved, entry, cultivation))]
         label = saved.get("name_zh") or saved.get("sword_catalog_id") or "未识别刀剑"
         if not matches:
             return {"ok": False,
@@ -341,9 +360,31 @@ def apply_formation_preset_stream(agent, record: dict,
     if not prepared.get("ok"):
         yield f"[部队预设] ✗ 开工前检查没通过：{prepared.get('reason')}，没有动游戏"
         return False
+    persist_client_slots(record, prepared["slots"])
     return (yield from agent.apply_preset_formation_stream(
         int(record["target_team"]), prepared["slots"],
         str(record.get("name") or "部队预设")))
+
+
+def persist_client_slots(record: dict, resolved: dict) -> bool:
+    """有唯一证据才升级旧编号；先备份，且不覆盖用户刚编辑的预设。"""
+    import shutil
+    upgrades = {key: entry for key, entry in resolved.items()
+                if str(entry.get("observation_id") or "").startswith("youzu:")
+                and not str((record.get("slots") or {}).get(key, {}).get("observation_id") or "").startswith("youzu:")}
+    if not upgrades:
+        return False
+    formations = load_formations()
+    current = find_formation(formations, record.get("id"))
+    if current != record:
+        return False
+    path = _formations_path()
+    backup = path.with_name(path.name + ".before-client-ids.bak")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    current["slots"] = {**current["slots"], **upgrades}
+    save_formations(formations)
+    return True
 
 
 def apply_formation_preset_by_id_stream(agent, preset_id: str,
