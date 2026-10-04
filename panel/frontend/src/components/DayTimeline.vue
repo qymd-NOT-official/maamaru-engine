@@ -685,7 +685,44 @@ const popoverBlock = computed(() => {
   return popover.value.index === -1 ? suggestedGameplay.value || undefined : data.value?.booking?.blocks[popover.value.index]
 })
 
+const overlappingTasks = ref<Array<{ index: number; block: DayScheduleBlock }>>([])
+function openLaneTask(event: MouseEvent, index: number, shadow?: typeof suggestionShadows.value[number]) {
+  if (shadow) adoptSuggestion(shadow)
+  else {
+    const entry = taskBlocks.value.find(b => b.index === index)
+    if (entry) openBlockPopover(entry)
+  }
+  const lane = (event.currentTarget as HTMLElement).closest('.tl-lane')!
+  overlappingTasks.value = [...lane.querySelectorAll<HTMLButtonElement>('button[data-task-index]')]
+    .filter(button => {
+      const rect = button.getBoundingClientRect()
+      return event.clientX >= rect.left && event.clientX <= rect.right
+    }).flatMap(button => {
+      const i = Number(button.dataset.taskIndex)
+      if (i >= 0) {
+        const block = data.value?.booking?.blocks[i]
+        return block ? [{index: i, block}] : []
+      }
+      const suggestion = suggestionShadows.value.find(s => s.key === button.dataset.suggestionKey)
+      return suggestion ? [{index: -1, block: {start_min: suggestion.minute, kind: 'raid' as const, runs: suggestion.runs ?? 1}}] : []
+    })
+}
+function selectPopoverTask(entry: { index: number; block: DayScheduleBlock }) {
+  if (!popover.value) return
+  popover.value.index = entry.index
+  suggestedGameplay.value = entry.index === -1 ? entry.block : null
+}
+function configureLaneTask(entry: { index: number; block: DayScheduleBlock }) {
+  selectPopoverTask(entry)
+  editFromPopover()
+}
+function actOnLaneTask(entry: { index: number; block: DayScheduleBlock }) {
+  selectPopoverTask(entry)
+  void removeFromSchedule()
+}
+
 function openBlockPopover(entry: { index: number; lane: 'task' | 'daily'; left: number; origin?: 'booking' }) {
+  overlappingTasks.value = []
   expeditionPopup.value = null
   suggestedGameplay.value = null
   popover.value = { index: entry.index, lane: entry.lane, left: entry.left, origin: entry.origin }
@@ -1036,17 +1073,19 @@ const caption = computed(() => {
           </div>
           <div class="tl-lane">
             <span class="tl-lane-tag">任务</span>
-            <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="openBlockPopover(b)">{{ b.text }}</button>
-            <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" @click="adoptSuggestion(b)">{{ b.text }}</button>
+            <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title"  :data-task-index="b.index" @click="openLaneTask($event, b.index)">{{ b.text }}</button>
+            <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: b.left + '%', width: b.width + '%' }" :title="b.title" :data-task-index="-1" :data-suggestion-key="b.key" @click="openLaneTask($event, -1, b)">{{ b.text }}</button>
             <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活</span>
             <div v-if="popover && popover.origin !== 'booking' && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
-              <strong>{{ blockLabel(popoverBlock) }}</strong>
-              <small>{{ fmtMin(popoverBlock.start_min) }}<template v-if="blockEndMin(popoverBlock) != null"> – {{ fmtMin(blockEndMin(popoverBlock)!) }}</template> 开工</small>
-              <small v-if="conductorBlockFor(popoverBlock)" class="tl-status" :class="blockStatusClass(conductorBlockFor(popoverBlock)!)">{{ blockStatusText(conductorBlockFor(popoverBlock)!) }}</small>
-              <div class="tl-popover-actions">
-                <button type="button" :disabled="removing" @click="editFromPopover">配置</button>
-                <button type="button" :disabled="removing" @click="removeFromSchedule">{{ popover.index === -1 ? (removing ? '启用中…' : '启用') : (removing ? '移除中…' : '移除') }}</button>
-              </div>
+              <section v-for="entry in overlappingTasks.length ? overlappingTasks : [{index: popover.index, block: popoverBlock}]" :key="`${entry.index}:${entry.block.start_min}`" class="tl-popover-task">
+                <strong>{{ blockLabel(entry.block) }}</strong>
+                <small>{{ fmtMin(entry.block.start_min) }}<template v-if="blockEndMin(entry.block) != null"> – {{ fmtMin(blockEndMin(entry.block)!) }}</template> 开工</small>
+                <small v-if="conductorBlockFor(entry.block)" class="tl-status" :class="blockStatusClass(conductorBlockFor(entry.block)!)">{{ blockStatusText(conductorBlockFor(entry.block)!) }}</small>
+                <div class="tl-popover-actions">
+                  <button type="button" :disabled="removing" @click="configureLaneTask(entry)">配置</button>
+                  <button type="button" :disabled="removing" @click="actOnLaneTask(entry)">{{ entry.index === -1 ? (removing ? '启用中…' : '启用') : (removing ? '移除中…' : '移除') }}</button>
+                </div>
+              </section>
             </div>
           </div>
 
@@ -1227,7 +1266,9 @@ const caption = computed(() => {
 .tl-mini-axis { overflow: hidden; }
 .tl-lane:has(.tl-popover) { overflow: visible; z-index: 50; }
 .tl-popover { box-sizing: border-box; width: min(240px, 100%); min-width: 0; }
-.tl-mini-ticks { position: relative; height: 14px; display: block; }
+.tl-mini-ticks { position: relative; height: 14px; }
+.tl-popover-task { display: grid; gap: 5px; }
+.tl-popover-task + .tl-popover-task { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 5px; }
 .tl-mini-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .tl-mini-ticks span:first-child { transform: none; }
 .tl-mini-ticks .is-end { transform: translateX(-100%); }
