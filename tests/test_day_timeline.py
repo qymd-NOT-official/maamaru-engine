@@ -583,6 +583,15 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         self.assertIsNone(out["suggestions"])
         self.assertIn("收工", out["hint"])
 
+    def test_running_daily_keeps_raid_suggestions_after_estimated_finish(self):
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        out = self._raid_build(_today_at(8, 0), plan,
+            active={"script": "workflow", "label": "一键日课"},
+            player_tasks=[{"start_min": 480, "end_min": 493, "label": "一键日课"}])
+        self.assertEqual(out['suggestions'][0]['start_min'], 493)
+        self.assertIsNotNone(out['activity'])
+
 
 if __name__ == "__main__":
     unittest.main()

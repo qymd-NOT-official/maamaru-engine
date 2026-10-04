@@ -1,6 +1,5 @@
 """Reserve player tasks before suggesting optional work. Durations are estimates."""
 import math
-import statistics
 
 
 def task_windows(now, day_start, plan, state, active, store, workflow_name):
@@ -14,8 +13,10 @@ def task_windows(now, day_start, plan, state, active, store, workflow_name):
                 and r.get('status') in ('success', 'completed')
                 and r.get('ended_at') and r.get('started_at')
                 and r['ended_at'] > r['started_at']]
-        samples = [(r['ended_at'] - r['started_at']) / 60 for r in rows[-10:]]
-        return max(1, math.ceil(statistics.median(samples))) if samples else 30
+        # The latest completed run reflects the current workflow settings;
+        # old overnight runs must not inflate today's ordinary daily task.
+        latest = max(rows, key=lambda r: r['started_at']) if rows else None
+        return max(1, math.ceil((latest['ended_at'] - latest['started_at']) / 60)) if latest else 30
     minute = (now - day_start) / 60
     windows = []
     if active and active.get('script'):

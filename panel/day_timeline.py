@@ -640,6 +640,9 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     if planning is None:
         planning = _load_planning_snapshot(store)
     now_min = (now - day_start) / 60
+    if player_tasks is None and active and active.get('script'):
+        from .task_reservations import task_windows
+        player_tasks = task_windows(now, day_start, None, None, active, store, lambda _: None)
     # 每队当天已出发（含已完成）及待执行的班都计数，按每队 N 班补足；
     # team_busy_until 记每队最后一班几点收工，补的班往那之后排
     committed_counts = _expedition_counts(cfg, expedition_forced, raw_records, store, day_start, now)
@@ -698,30 +701,31 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         daily_runs = _raid_daily_runs(raid_plan)
         pace = int(raid_plan["seconds_per_loop"])
         completed = int(raid_plan.get("completed_today") or 0)
-        if active and active.get("script"):
-            hint = "有任务正在运行；收工并记下圈数后，再按远征班次安排联队战。"
-        else:
-            occupied = _occupied_segments(expeditions, cfg, raid_team_no) + list(player_tasks or [])
-            # 活动收摊前留五分钟收尾，不把一圈安排到收摊之后。
-            finish_min = math.floor(now_min + raid_plan["seconds_to_end"] / 60 - 5)
-            if finish_min < DAY_MINUTES:
-                occupied.append({"start_min": finish_min,
-                                 "end_min": DAY_MINUTES, "label": "活动收摊"})
-            suggestions, remaining_runs = suggest_round_windows(
-                now_min, occupied, daily_runs, pace)
-            shortfall_seconds = remaining_runs * pace
-            activity = {"name": "联队战", "target_runs": daily_runs,
-                        "planned_runs": daily_runs - remaining_runs,
-                        "completed_today": completed,
-                        "seconds_per_loop": pace,
-                        "remaining_runs": int(raid_plan["runs_needed"]),
-                        "event_end_at": now + raid_plan["seconds_to_end"],
-                        "occupied": occupied}
-            pace_label = (f"{pace // 60} 分 {pace % 60} 秒" if pace >= 60
-                          else f"{pace} 秒")
-            hint = (f"联队战：今天已记 {completed} 圈，接下来按进度建议"
-                    f" {daily_runs} 圈；按本期实测每圈约 {pace_label}"
-                    "找远征空窗。只是建议，不会自动开工。")
+        occupied = _occupied_segments(expeditions, cfg, raid_team_no) + list(player_tasks or [])
+        # 活动收摊前留五分钟收尾，不把一圈安排到收摊之后。
+        finish_min = math.floor(now_min + raid_plan["seconds_to_end"] / 60 - 5)
+        if finish_min < DAY_MINUTES:
+            occupied.append({"start_min": finish_min,
+                             "end_min": DAY_MINUTES, "label": "活动收摊"})
+        suggestions, remaining_runs = suggest_round_windows(
+            now_min, occupied, daily_runs, pace)
+        shortfall_seconds = remaining_runs * pace
+        activity = {"name": "联队战", "target_runs": daily_runs,
+                    "planned_runs": daily_runs - remaining_runs,
+                    "completed_today": completed,
+                    "seconds_per_loop": pace,
+                    "remaining_runs": int(raid_plan["runs_needed"]),
+                    "event_end_at": now + raid_plan["seconds_to_end"],
+                    "occupied": occupied}
+        pace_label = (f"{pace // 60} 分 {pace % 60} 秒" if pace >= 60
+                      else f"{pace} 秒")
+        hint = (f"联队战：今天已记 {completed} 圈，接下来按进度建议"
+                f" {daily_runs} 圈；按本期实测每圈约 {pace_label}"
+                "找远征空窗。只是建议，不会自动开工。")
+        if active and active.get('script') == 'raid':
+            suggestions = None
+            activity = None
+            hint = '联队战正在运行；收工后按最新圈数更新建议。'
     else:
         quota = (_daily_quota_seconds(hanafuda_plan, day_end - now)
                  if hanafuda_plan else None)
