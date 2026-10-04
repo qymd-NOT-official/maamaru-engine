@@ -133,6 +133,7 @@ class SakuraMixin:
                                               auto_march=True, max_loops=1,
                                               formation_mode="auto", formation="鱼鳞阵",
                                               repair_threshold=repair_threshold,
+                                              auto_equip=False,
                                               injury_action="stop"):
                     yield msg
                     round_done |= msg == f"[出阵] ✓ 全部 1 圈跑完，部队{team_no}辛苦啦，收工！"
@@ -187,7 +188,11 @@ class SakuraMixin:
         return None
 
     def _prepare_sakura_team(self, team_no):
-        yield from self.navigate_to_stream("编队")
+        self.maa.screenshot(force=True)
+        if self.maa.ocr('部队编成', roi_4to4(500, 0, 780, 60)):
+            self.current_location = '编队'
+        else:
+            yield from self.navigate_to_stream("编队")
         if self.current_location != "编队" or not (yield from self._select_team_confirmed(team_no)):
             yield "[刷花] 目标部队未确认，停止"
             return False

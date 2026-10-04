@@ -147,6 +147,7 @@ class Batch(SakuraMixin):
         assert kw['formation'] == '鱼鳞阵'
         assert kw['injury_action'] == 'stop'
         self.last_threshold = kw['repair_threshold']
+        self.last_auto_equip = kw['auto_equip']
         self.calls.append('battle')
         yield (f"[出阵] ✓ 全部 1 圈跑完，部队{kw['team_no']}辛苦啦，收工！"
                if self.round_ok else '绝不出阵')
@@ -253,6 +254,7 @@ def test_sakura_passes_heavy_threshold_to_shared_departure_and_rejects_invalid()
     host = Batch(fatigue=(49, 100))
     list(host.sakura_stream(repair_threshold='heavy'))
     assert host.last_threshold == 'heavy'
+    assert host.last_auto_equip is False  # ordinary sakura never saves record one
     host = Batch()
     list(host.sakura_stream(repair_threshold='invalid'))
     assert not host.calls

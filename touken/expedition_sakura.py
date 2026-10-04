@@ -1,5 +1,6 @@
 """Exact-member expedition training with a recoverable team-record transaction."""
 import json
+import copy
 import time
 
 from . import sword_db, youzu_log
@@ -79,31 +80,54 @@ def candidates(body, snapshot):
     return sorted(found, key=lambda item: item['fatigue'])
 
 
-def fresh_body_stream(agent, team):
+def fresh_body_stream(agent, team, after=None):
+    """Use an on-page response first; enter formation directly when needed."""
+    from .maa_adapter import roi_4to4
+    agent.maa.screenshot(force=True)
+    in_place = bool(agent.maa.ocr('部队编成', roi_4to4(480, 0, 800, 60)))
+    if in_place:
+        agent.current_location = '编队'
+        body = latest_party(client_events(agent.maa), after if after is not None else time.time() - 1)
+        if body:
+            return body
     since = time.time() - 1
-    # Re-entering the page asks the client for a new /party/list response.
-    yield from agent.navigate_to_stream('本丸')
     yield from agent.navigate_to_stream('编队')
     if agent.current_location != '编队' or not (yield from agent._select_team_confirmed(team)):
         return None
     return latest_party(client_events(agent.maa), since)
 
 
+def record_body(agent, body, after):
+    """Saving a record returns preset directly; no page round trip needed."""
+    result = copy.deepcopy(body)
+    for event in client_events(agent.maa):
+        payload = successful_body(event)
+        if (payload and (youzu_log._event_epoch(event) or 0) >= after
+                and event.get('endpoint') in ('/party/set_preset', '/party/list')
+                and isinstance(payload.get('preset'), dict)):
+            result['preset'] = payload['preset']
+    return result
+
+
 def restore_stream(agent, pending):
     team, snapshot = pending['team_no'], pending['snapshot']
-    body = yield from fresh_body_stream(agent, team)
+    # Training already saved and checked the backup on this page. Recovery
+    # after interruption enters formation once, never detours via home.
+    backup = pending.get('record_body')
+    body = record_body(agent, backup, pending['started_at']) if backup else (yield from fresh_body_stream(agent, team, after=time.time() - 1))
     try:
-        already_restored = bool(body) and team_snapshot(body, team) == snapshot
+        already_restored = not backup and bool(body) and team_snapshot(body, team) == snapshot
     except ValueError:
         already_restored = False
     if not already_restored and (not body or not record_matches(body, snapshot)):
         yield '[远征补花] ✗ 原队伍记录无法核对，请恢复队伍后再续派'
         return False
+    restored_since = int(time.time())
     if not already_restored and not agent._load_team_record_confirmed(SHELL, 1):
         yield '[远征补花] ✗ 原队伍未恢复，暂不续派'
         return False
     if not already_restored:
-        body = yield from fresh_body_stream(agent, team)
+        body = yield from fresh_body_stream(agent, team, after=restored_since)
     try:
         restored = bool(body) and team_snapshot(body, team) == snapshot
     except ValueError:
@@ -113,6 +137,7 @@ def restore_stream(agent, pending):
         return False
     # Keep a recovery receipt, rather than deleting player state.
     pending['status'] = 'restored'
+    pending.pop('record_body', None)
     PENDING.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding='utf-8')
     yield '[远征补花] ✓ 原队伍和装备已核对恢复'
     return True
@@ -165,10 +190,11 @@ def train_stream(agent, team, repair_threshold='light'):
     if not targets:
         yield '[远征补花] 这队没有需要补花的刀，直接派遣'
         return True
+    saved_since = int(time.time())
     if not agent._save_team_record(SHELL, 1):
         yield '[远征补花] ✗ 原队伍未保存，未清队'
         return False
-    saved = yield from fresh_body_stream(agent, team)
+    saved = record_body(agent, body, saved_since)
     if not saved or not record_matches(saved, snapshot):
         yield '[远征补花] ✗ 部队记录没保存完整队员和装备，未清队'
         return False
@@ -178,6 +204,8 @@ def train_stream(agent, team, repair_threshold='light'):
     PENDING.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding='utf-8')
     agent._expedition_sakura_active = True
     try:
+        # In-memory only: do not persist the full client inventory.
+        pending['record_body'] = {'preset': saved['preset']}
         ready = yield from agent._prepare_sakura_team(team)
         if ready:
             for target in targets:
@@ -190,8 +218,11 @@ def train_stream(agent, team, repair_threshold='light'):
                 if result.get('status') not in ('changed', 'already_correct'):
                     ready = False
                     break
-                fatigue = yield from agent._check_fatigue(team, 1, in_place=True)
+                # This exact member has not fought during team preparation;
+                # selecting/equipping does not change the client's fatigue.
+                fatigue = target['fatigue']
                 if fatigue is None or not 0 <= fatigue <= 100:
+                    yield '[远征补花] ✗ 选入后未读到疲劳，先恢复队伍，本次不续派'
                     ready = False
                     break
                 if fatigue >= 100:
@@ -200,6 +231,7 @@ def train_stream(agent, team, repair_threshold='light'):
                     ready = False
                     break
                 for _ in range(40):
+                    round_started = int(time.time())
                     done = False
                     for message in agent.sortie_stream(
                             chapter=1, map_no=1, team_no=team, auto_march=True,
@@ -211,7 +243,11 @@ def train_stream(agent, team, repair_threshold='light'):
                     if not done:
                         ready = False
                         break
-                    fatigue = yield from agent._check_fatigue(team, 1)
+                    current = yield from fresh_body_stream(agent, team, after=round_started)
+                    captain = (((current or {}).get('party') or {}).get(str(team), {}).get('slot') or {}).get('1') or {}
+                    row = ((current or {}).get('sword') or {}).get(target['serial_id']) or {}
+                    fatigue = (youzu_log._int(row.get('fatigue'), None)
+                               if str(captain.get('serial_id')) == target['serial_id'] else None)
                     if fatigue is None or not 0 <= fatigue <= 100:
                         ready = False
                         break

@@ -1,9 +1,17 @@
 import copy
 import json
+import pytest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from touken import expedition_sakura as training
 from touken.flows.battle import BattleMixin
+
+
+@pytest.fixture(autouse=True)
+def no_client_device():
+    with patch.object(training, 'client_events', return_value=[]):
+        yield
 
 
 def finish(stream):
@@ -37,6 +45,7 @@ class Agent:
         self.round_done = round_done
         self.calls = []
         self._expedition_sakura_active = False
+        self.maa = SimpleNamespace()
     def _save_team_record(self, cfg, number):
         self.calls.append('save')
         self.data['preset'] = {'1': {'party': training.team_snapshot(self.data, 3)}}
@@ -55,6 +64,7 @@ class Agent:
     def sortie_stream(self, **kwargs):
         self.calls.append(('sortie', kwargs))
         if self.round_done:
+            self.data['sword']['101']['fatigue'] = '100'
             yield '[出阵] ✓ 全部 1 圈跑完，部队3辛苦啦，收工！'
         else:
             yield '[出阵] 重伤，绝不出阵'
@@ -71,7 +81,7 @@ def test_exact_members_training_keeps_backup_and_injury_setting(tmp_path):
     data = body()
     agent = Agent(data)
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
-            patch.object(training, 'fresh_body_stream', side_effect=lambda *a: stream_result(data)), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)), \
             patch.object(training.sword_db, 'find_game_sword', return_value=(3, {'name': '刀'}, 'normal')):
         success, _ = finish(training.train_stream(agent, 3, 'heavy'))
         assert success
@@ -96,7 +106,7 @@ def test_record_missing_attachment_never_clears_team(tmp_path):
         return True
     agent._save_team_record = save
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
-            patch.object(training, 'fresh_body_stream', side_effect=lambda *a: stream_result(data)), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)), \
             patch.object(training.sword_db, 'find_game_sword', return_value=(3, {'name': '刀'}, 'normal')):
         success, _ = finish(training.train_stream(agent, 3))
     assert not success
@@ -107,7 +117,7 @@ def test_failed_sortie_restores_but_refuses_dispatch(tmp_path):
     data = body()
     agent = Agent(data, round_done=False)
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
-            patch.object(training, 'fresh_body_stream', side_effect=lambda *a: stream_result(data)), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)), \
             patch.object(training.sword_db, 'find_game_sword', return_value=(3, {'name': '刀'}, 'normal')):
         success, _ = finish(training.train_stream(agent, 3))
         assert not success
@@ -124,7 +134,7 @@ def test_cancellation_leaves_recovery_record_and_protects_game_backup(tmp_path):
         return True
     agent._prepare_sakura_team = prepare
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
-            patch.object(training, 'fresh_body_stream', side_effect=lambda *a: stream_result(data)), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)), \
             patch.object(training.sword_db, 'find_game_sword', return_value=(3, {'name': '刀'}, 'normal')):
         stream = training.train_stream(agent, 3)
         assert next(stream) == 'cleared'
@@ -147,7 +157,7 @@ def test_wrong_restore_keeps_pending_and_wrong_record_is_never_loaded(tmp_path):
     data['preset']['1']['party']['1']['serial_id'] = '999'
     data['party']['3']['slot'].pop('2')
     with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
-            patch.object(training, 'fresh_body_stream', side_effect=lambda *a: stream_result(data)):
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)):
         assert not finish(training.restore_stream(agent, pending))[0]
         assert 'restore' not in agent.calls
         data['preset']['1']['party']['1']['serial_id'] = '101'
@@ -188,3 +198,26 @@ def test_pending_recovery_blocks_unrelated_departure_without_game_click(tmp_path
         result, messages = finish(host._safe_depart_stream({}, 3, '[出阵]'))
         assert result == (False, False)
         assert '绝不出阵' in messages[-1]
+
+
+def test_fresh_body_stays_on_formation_and_navigation_never_detours_home():
+    data = body()
+    host = SimpleNamespace(current_location='本丸')
+    class Maa:
+        def screenshot(self, force=False): pass
+        def ocr(self, *args): return True
+    host.maa = Maa()
+    with patch.object(training, 'latest_party', return_value=data):
+        assert finish(training.fresh_body_stream(host, 3))[0] is data
+        assert host.current_location == '编队'  # no navigation interface needed
+    calls = []
+    host.maa.ocr = lambda *args: False
+    def navigate(destination):
+        calls.append(destination)
+        host.current_location = destination
+        return stream_result(None)
+    host.navigate_to_stream = navigate
+    host._select_team_confirmed = lambda team: stream_result(True)
+    with patch.object(training, 'latest_party', return_value=data):
+        assert finish(training.fresh_body_stream(host, 3))[0] is data
+    assert calls == ['编队']
