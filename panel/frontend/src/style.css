@@ -1138,13 +1138,6 @@ body[data-theme='pixel'] .overview-layout {
   display: block;
   border-color: #7b512d;
 }
-body[data-theme='pixel'] .overview-layout > .maamaru-surface {
-  display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) 280px;
-  gap: 12px;
-  padding: 8px 12px 12px;
-  overflow: hidden;
-}
 body[data-theme='pixel'] .tasks-frame { display: block; }
 body[data-theme='pixel'] .tasks-frame > .maamaru-surface {
   display: grid;
@@ -1245,12 +1238,10 @@ body[data-theme='pixel'] .system-page .system-form.ai-form > label:first-of-type
 body[data-theme='pixel'] .system-page .system-form.ai-form > label:nth-of-type(4),
 body[data-theme='pixel'] .system-page .system-form.ai-form > p { grid-column: 1 / -1; }
 @media (max-width: 720px) {
-  body[data-theme='pixel'] .overview-layout > .maamaru-surface { grid-template-columns: 1fr; overflow: visible; }
   body[data-theme='pixel'] .tasks-frame > .maamaru-surface { grid-template-columns: 1fr; }
   body[data-theme='pixel'] .single-frame > .maamaru-surface { padding: 9px; }
 }
 @media (min-width: 721px) and (max-width: 1100px) {
-  body[data-theme='pixel'] .overview-layout > .maamaru-surface { grid-template-columns: 170px minmax(0, 1fr); overflow: visible; }
   body[data-theme='pixel'] .home-dashboard { grid-column: 1 / -1; }
 }
 body[data-theme='pixel'] .overview-task-card { padding: 12px 14px; }
