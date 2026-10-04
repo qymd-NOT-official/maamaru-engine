@@ -886,6 +886,8 @@ def _build_dispatch(agent, config_path, params):
     from .scheduler import load_config
     training = load_config().get('automation', {}).get('sakura_before_dispatch', False)
     injury = (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')
+    if scheduled and training:
+        yield '[远征] 这班先补花，恢复原队伍后出发；归来时间按实际出发计算'
     dispatch_messages = []
     for message in agent.expedition_stream(
             era=m["era"], map_slot=m["slot"], team_no=team_no,

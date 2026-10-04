@@ -683,3 +683,51 @@ def test_dispatch_applies_preset_before_departure(tmp_path):
     assert messages == ["collect", "preset applied", "[远征] ✅ 部队5已出发"]
     applying.assert_called_once_with(agent, preset["record"])
     assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"
+
+
+def test_timeline_dispatch_inherits_training_switch_and_injury(tmp_path):
+    from panel import server
+    from touken import expedition_sakura
+    for enabled in (False, True):
+        agent = Mock()
+        agent.maa.exists.return_value = True
+        agent.collect_expedition_stream.return_value = iter(['收菜成功'])
+        agent.expedition_stream.return_value = iter(['[远征补花] ✓ 原队伍和装备已核对恢复', '[远征] ✅ 部队4已出发'])
+        def recovered(_agent):
+            if False: yield
+            return True
+        with patch.object(server, 'STATUS_DIR', tmp_path), \
+             patch.object(server, '_read_expedition_records', return_value={}), \
+             patch.object(s, 'load_config', return_value={'automation': {'sakura_before_dispatch': enabled}}), \
+             patch.object(server, '_load_panel_settings', return_value={'params': {'sakura': {'repair_threshold': 'heavy'}}}), \
+             patch.object(expedition_sakura, 'recover_stream', side_effect=recovered):
+            messages = list(server._build_dispatch(agent, 'unused', {
+                'team_no': 4, 'map_code': 'C2', 'scheduled': True, 'slot_key': 'today:adhoc:4:960'}))
+        args = agent.expedition_stream.call_args.kwargs
+        assert args['sakura_before_dispatch'] is enabled
+        assert args['repair_threshold'] == 'heavy'
+        assert args['team_no'] == 4
+        assert ('这班先补花' in '\n'.join(messages)) is enabled
+        assert json.loads((tmp_path / 'dispatch_result.json').read_text(encoding='utf-8'))['outcome'] == 'done'
+
+
+def test_timeline_training_failure_is_terminal_not_departure(tmp_path):
+    from panel import server
+    from touken import expedition_sakura
+    agent = Mock()
+    agent.maa.exists.return_value = True
+    agent.collect_expedition_stream.return_value = iter([])
+    agent.expedition_stream.return_value = iter(['[远征补花] ✗ 补花未完成，本次暂不续派'])
+    def recovered(_agent):
+        if False: yield
+        return True
+    with patch.object(server, 'STATUS_DIR', tmp_path), \
+         patch.object(server, '_read_expedition_records', return_value={}), \
+         patch.object(s, 'load_config', return_value={'automation': {'sakura_before_dispatch': True}}), \
+         patch.object(server, '_load_panel_settings', return_value={}), \
+         patch.object(expedition_sakura, 'recover_stream', side_effect=recovered):
+        list(server._build_dispatch(agent, 'unused', {
+            'team_no': 4, 'map_code': 'C2', 'scheduled': True, 'slot_key': 'today:adhoc:4:960'}))
+    result = json.loads((tmp_path / 'dispatch_result.json').read_text(encoding='utf-8'))
+    assert result['outcome'] == 'failed'
+    assert '补花未完成' in result['detail']
