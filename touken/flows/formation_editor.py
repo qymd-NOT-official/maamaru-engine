@@ -1273,6 +1273,26 @@ class FormationEditorMixin:
         image = self.maa.screenshot(force=True)
         tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
         rows, unreadable = self._parse_selection_rows(tokens)
+        target = getattr(self, '_selection_identity_target', None)
+        if (target and image is not None and not any(
+                row.get('sword_catalog_id') == target['sword_catalog_id'] for row in rows)):
+            # 连续滚动没有固定行号。以疲劳数字的行中心定位姓名白条，
+            # 在同一运行帧上重读，避免把下一帧的名字接到上一帧的数值。
+            recovered = []
+            centers = sorted({pt.y for text, pt in tokens
+                              if _FATIGUE_X[0] <= pt.x < _FATIGUE_X[1]
+                              and _parse_fatigue_token(text) is not None
+                              and 141 <= pt.y <= 682})
+            for y in centers:
+                name_tokens = self.maa.ocr_all(roi_4to4(100, y - 17, 325, y + 18), image=image) or []
+                recovered.extend((text, pt) for text, pt in name_tokens
+                                 if _match_name(text) == target['sword_catalog_id'])
+            if recovered:
+                # 去掉同位置误读的姓名碎字，再交给原有解析器配对等级/疲劳。
+                tokens = [(text, pt) for text, pt in tokens if not (
+                    _NAME_X[0] <= pt.x < _NAME_X[1]
+                    and any(abs(pt.y - hit.y) <= _ROW_MERGE_DY for _, hit in recovered))]
+                rows, unreadable = self._parse_selection_rows(tokens + recovered)
         for row in rows:
             row["lock_status"] = recognize_selection_lock(image, row["y"])
             target = getattr(self, '_selection_identity_target', None)

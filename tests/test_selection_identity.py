@@ -178,3 +178,32 @@ def test_bottom_row_reads_identity_numbers_when_rois_are_fully_visible():
          patch.object(maa, 'ocr_all', return_value=[]) as ocr:
         FormationEditorMixin._read_list_page(host)
     assert ocr.call_count == 1  # 数值 ROI 真正越过名单底缘时才跳过。
+
+
+def test_missing_name_is_recovered_from_same_frame_white_strip():
+    import numpy as np
+    from test_formation_editor import _std_setup, _P
+    from touken.flows.formation_editor import FormationEditorMixin, parse_selection_rows
+    maa, host = _std_setup()
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+    catalog = 'touken_035_gotou_toushirou'
+    host._selection_identity_target = {'sword_catalog_id': catalog, 'survival_max': 43, 'recon': None}
+    full = [('乱码', _P(160, 536)), ('刀剑98级', _P(530, 473)),
+            ('疲劳91/100', _P(530, 536))]
+    def recognize(roi, image=None):
+        if roi.x == 60:
+            return full
+        if roi.x == 100:
+            assert image is frame
+            return [('后藤藤四郎', _P(161, 538))]
+        if roi.x == 470:
+            return [('乱舞9级', _P(530, 498))]
+        return [('43', _P(623, 530))]
+    with patch.object(maa, 'screenshot', return_value=frame), \
+         patch.object(maa, 'ocr_all', side_effect=recognize), \
+         patch.object(host, '_parse_selection_rows', side_effect=parse_selection_rows):
+        rows, _ = FormationEditorMixin._read_list_page(host)
+    target = next(row for row in rows if row['sword_catalog_id'] == catalog)
+    assert target['level'] == 98
+    assert target['tou_level'] == 9
+    assert target['survival_max'] == 43
