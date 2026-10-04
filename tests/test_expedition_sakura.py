@@ -39,6 +39,23 @@ def stream_result(value):
     return value
 
 
+def test_saved_record_can_omit_horse_and_charm_but_restore_snapshot_keeps_them():
+    data = body()
+    data['sword']['101'].update(horse_serial_id='502', item_id='1')
+    data['equip']['502'] = {'equip_id': '101'}
+    snapshot = training.team_snapshot(data, 3)
+    record = copy.deepcopy(snapshot)
+    record['1'].pop('horse_id')
+    record['1'].pop('item_id')
+    saved = {'preset': {'1': {'party': record}}}
+    assert training.record_matches(saved, snapshot)
+    restored = copy.deepcopy(data)
+    restored['sword']['101']['item_id'] = None
+    assert training.team_snapshot(restored, 3) != snapshot
+    record['1']['serial_id'] = '999'
+    assert not training.record_matches(saved, snapshot)
+
+
 class Agent(FormationEditorMixin):
     def __init__(self, data, result='changed', round_done=True):
         self.data = data

@@ -50,12 +50,15 @@ def team_snapshot(body, team):
 
 def record_matches(body, snapshot):
     record = ((body.get('preset') or {}).get('1') or {}).get('party') or {}
-    # Every non-empty attachment must be represented by the game's record.
+    # 游戏记录会保存马匹和御守，但保存回传不保证列出它们。
+    # 恢复后的 team_snapshot 仍核对实际装备，不能把回传缺字段当保存失败。
     for slot, expected in snapshot.items():
         actual = record.get(slot)
         if not isinstance(actual, dict):
             return False
         for key, value in expected.items():
+            if key in ('horse_id', 'item_id'):
+                continue
             if (str(actual[key]) if actual.get(key) else None) != value:
                 return False
     return True
