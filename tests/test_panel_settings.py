@@ -10,6 +10,20 @@ from panel import server
 
 
 class PanelSettingsTests(unittest.TestCase):
+    def test_scenery_persists_without_overwriting_other_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(server, "_SETTINGS_FILE", Path(tmp) / "settings.json"):
+                client = TestClient(server.app)
+                client.post("/api/saved-settings", json={"theme": "pixel", "params": {"daily": {"runs": 5}}})
+                for scenery in ("autumn", "random", "spring"):
+                    client.post("/api/saved-settings", json={"scenery": scenery})
+                    self.assertEqual(client.get("/api/saved-settings").json()["scenery"], scenery)
+                client.post("/api/saved-settings", json={"scenery": "../../private"})
+                saved = client.get("/api/saved-settings").json()
+                self.assertEqual(saved["scenery"], "spring")
+                self.assertEqual(saved["theme"], "pixel")
+                self.assertEqual(saved["params"], {"daily": {"runs": 5}})
+
     def test_backdrop_saved_lowercased_and_validated(self):
         with tempfile.TemporaryDirectory() as tmp:
             settings_file = Path(tmp) / "panel_settings.json"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { applyScenery } from './scenery'
 import { activityTitle } from './components/report/reportModel'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from './api'
@@ -357,6 +358,7 @@ async function load() {
     theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
     applyTheme()
     applyBackdrop(saved.backdrop)
+    applyScenery(saved.scenery)
     params.value = Object.fromEntries(Object.entries(scriptData.scripts).map(([key, info]) => [
       key,
       { ...defaults(info), ...migrateParams(key, saved.params?.[key] || {}) },

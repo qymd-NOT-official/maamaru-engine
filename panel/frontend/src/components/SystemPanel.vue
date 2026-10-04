@@ -5,6 +5,7 @@ import QQStatus from './QQStatus.vue'
 import PanelHeader from './PanelHeader.vue'
 import SideNavItem from './SideNavItem.vue'
 import PixelControl from './PixelControl.vue'
+import { applyScenery, sceneryOptions } from '../scenery'
 
 const emit = defineEmits<{ scroll: [event: Event] }>()
 const selected = ref<'broadcast' | 'appearance' | 'emulator'>('broadcast')
@@ -14,6 +15,7 @@ const ready = computed(() => !!(bot.value && emu.value))
 const telegramToken = ref('')
 const message = ref('')
 const backdrop = ref('#c4c6b5')
+const scenery = ref('spring')
 const backdropPresets = [
   { name: '庭园灰绿', value: '#c4c6b5' },
   { name: '暖樱粉', value: '#ddbec2' },
@@ -32,6 +34,7 @@ async function load() {
     bot.value.telegram.enabled = bot.value.platform === 'telegram' && bot.value.enabled
   }
   const saved = await api.settings()
+  scenery.value = saved.scenery ?? 'spring'
   if (saved.backdrop && /^#[0-9a-fA-F]{6}$/.test(saved.backdrop)) backdrop.value = saved.backdrop
 }
 async function save() {
@@ -39,6 +42,7 @@ async function save() {
   try {
     if (selected.value === 'appearance') {
       await api.saveBackdrop(backdrop.value)
+      await api.saveScenery(scenery.value)
     } else if (selected.value === 'emulator') {
       await api.saveEmulatorConfig({ adb_address: emu.value.adb_address })
     } else {
@@ -72,7 +76,7 @@ const qqBroadcastEnabled = computed({
     <PanelHeader variant="page" title="系统设置" subtitle="播报、外观与连接"><template #actions><button class="primary" @click="save">保存设置</button></template></PanelHeader>
     <div class="system-layout"><nav class="system-nav"><template v-if="ready"><SideNavItem :active="selected === 'broadcast'" @click="selected = 'broadcast'">播报</SideNavItem><SideNavItem :active="selected === 'appearance'" @click="selected = 'appearance'">外观</SideNavItem><SideNavItem :active="selected === 'emulator'" @click="selected = 'emulator'">模拟器</SideNavItem></template></nav>
       <div class="system-form" :class="`${selected}-form`">
-        <template v-if="selected === 'appearance'"><h3>庭院背景</h3><div class="swatch-row"><button v-for="preset in backdropPresets" :key="preset.value" type="button" class="swatch" :class="{ active: backdrop === preset.value }" :style="{ background: preset.value }" :title="preset.name" :aria-label="preset.name" @click="pickBackdrop(preset.value)"></button><label class="swatch-custom"><input v-model="backdrop" type="color" @input="pickBackdrop(backdrop)" />自定义</label></div><p>点色块立刻试穿，点「保存设置」让它记住。和纸、像素两个主题共用这块背景。</p></template>
+        <template v-if="selected === 'appearance'"><h3>景趣</h3><label>舞台景趣<PixelControl v-model="scenery" as="select" @update:model-value="value => applyScenery(String(value))"><option v-for="option in sceneryOptions" :key="option.value" :value="option.value">{{ option.label }}</option><option value="random">随机景趣</option></PixelControl></label><p>选择后立刻预览，点「保存设置」记住选择。随机景趣每次打开面板选一张，使用期间保持不变。</p><h3>庭院背景色</h3><div class="swatch-row"><button v-for="preset in backdropPresets" :key="preset.value" type="button" class="swatch" :class="{ active: backdrop === preset.value }" :style="{ background: preset.value }" :title="preset.name" :aria-label="preset.name" @click="pickBackdrop(preset.value)"></button><label class="swatch-custom"><input v-model="backdrop" type="color" @input="pickBackdrop(backdrop)" />自定义</label></div><p>点色块立刻试穿，点「保存设置」让它记住。和纸、像素两个主题共用这块背景。</p></template>
         <template v-else-if="selected === 'emulator'"><h3>模拟器</h3><label>ADB 地址<PixelControl v-model="emu.adb_address" :placeholder="emu.default_address" /></label><p>留空表示自动探测；手动填写后脚本会固定连接这个地址。MuMu 多开时端口是 16384 + 32 × 实例号（例如二号实例是 16416）。改动在下次运行脚本时生效。</p></template>
         <template v-else><h3>运行播报</h3>
           <label class="check-label"><input v-model="qqBroadcastEnabled" type="checkbox" />QQ 播报</label>

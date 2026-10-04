@@ -32,7 +32,7 @@ button { cursor: pointer; }
 .shell { display: flex; flex-direction: column; width: min(1100px, 100%); height: 100vh; min-height: 640px; margin: 0 auto; padding: 12px 0 0; }
 .honmaru-stage {
   position: relative; flex: 0 0 198px; height: 198px; margin: 0 20px;
-  overflow: hidden; background: #e8dfca url('/static/img/honmaru_garden_stage.png') center 72% / cover no-repeat;
+  overflow: hidden; background: #e8dfca var(--stage-scenery, url('/static/img/honmaru_garden_stage.png')) center 72% / cover no-repeat;
   border: 1px solid #bd8b47; border-bottom: 0; border-radius: 12px 12px 0 0; image-rendering: pixelated;
   transition: flex-basis .2s ease, height .2s ease, margin .2s ease, opacity .14s ease;
 }

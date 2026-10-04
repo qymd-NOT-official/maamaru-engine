@@ -3927,6 +3927,8 @@ async def api_save_settings(request: Request):
         existing["params"] = clean
     if body.get("theme") in ("washi", "pixel"):
         existing["theme"] = body["theme"]
+    if body.get("scenery") in ("spring", "autumn", "random"):
+        existing["scenery"] = body["scenery"]
     backdrop = body.get("backdrop")
     if isinstance(backdrop, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", backdrop):
         existing["backdrop"] = backdrop.lower()
