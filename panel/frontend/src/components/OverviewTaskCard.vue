@@ -41,9 +41,9 @@ const summary = computed(() => props.info.params.filter(visible).slice(0, 4))
     </div>
     <button class="overview-details" type="button" @click="emit('configure')">▸ 查看全部设置</button>
     <footer>
+      <button class="secondary" @click="emit('configure')">⚙ 调整配置</button>
       <button v-if="running" class="danger" @click="emit('stop')">紧急停止</button>
       <button v-else class="primary" :disabled="busy" @click="emit('run')">{{ busy ? '有任务运行中' : '开始任务' }}</button>
-      <button class="secondary" @click="emit('configure')">⚙ 调整配置</button>
     </footer>
   </article>
 </template>
