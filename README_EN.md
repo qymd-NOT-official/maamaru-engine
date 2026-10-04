@@ -98,17 +98,16 @@ Open the warehouse and click **Read Game Balances (读取游戏家底)**. Maamar
 
 Old-ledger import and goals are optional. Current balances support budgeting; run times and yields need task or manual activity records. Use the corresponding planning advice and schedules as those records accumulate.
 
-**Open Ledger Only** does not connect to the game. Enter or import balances manually in that mode.
+The standalone ledger entry and Android APK are paused. Launch Maamaru and open Warehouse to read game balances and manage records.
 
 ## Where to start
 
 | What you want to do | Which entry to open |
 |---|---|
 | Run dailies, sorties, events, or scheduled work | **Launch Maamaru** in the launcher |
-| Review records, enter transactions, budget, or import old records | **Open Ledger Only**, without connecting to the game |
-| Record resources, goals, and sword levels on a phone | **Android Offline Ledger**, with separate local data |
+| Review records, enter transactions, budget, or import old records | **Launch Maamaru → Warehouse** |
 
-The two desktop modes share one ledger. Excel/CSV imports and exports are supported, with import previews and backups before writing. The Android preview does not currently sync with the PC.
+Excel/CSV imports and exports are supported, with import previews and backups before writing. Existing local records are preserved.
 
 Supported tasks include dailies and expeditions, normal battle maps, Chapter 1 of Iko, Underground Treasure Chest, Edo Castle E4, Treasure Trove, Regiment Battle (including the seaside map), and the Pumpkin event. Detailed settings, prerequisites, and stop conditions are in the [user guide (Chinese)](docs/user-manual.md).
 
@@ -129,7 +128,6 @@ Download a package from [GitHub Releases](https://github.com/qymd-NOT-official/m
 
 - `maamaru-setup-v*.exe`: Windows installer;
 - `maamaru-launcher-v*.zip`: portable Windows package—extract it, then run `まあ丸启动器.exe`;
-- `maamaru-ledger-demo-v*.apk`: Android offline ledger, with no connection to the game or desktop data.
 
 > [!CAUTION]
 > This is an independent fan project and is not affiliated with the game's developer, publisher, or operators. The normal steward mode automates interactions with the game and may violate its terms of service, resulting in account penalties, unintended actions, or data loss. The standalone ledger does not connect to the game. Decide for yourself whether to use automation, and test every new task with a short supervised run—especially after a game update.

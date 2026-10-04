@@ -96,7 +96,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 <div id="runbar" class="runbar">
 <div class="run-track"><span class="run-fox"></span></div>
 <div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
-<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="ledgerStart" class="start ledger" onclick="startApp('ledger')" disabled>只打开账房</button><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
+<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
 </div>
 </main>
 <script>
@@ -135,14 +135,14 @@ function renderChecks(items){
 }
 async function refresh(){
  setState('','正在整理启动环境','稍等一下，狐之助正在确认程序、面板与模拟器。','…');setProgress(0);const start=document.querySelector('#start');start.disabled=true;start.textContent='正在检查…';document.querySelector('#checks').innerHTML='<div class="loading">狐之助正在巡查……</div>';
- const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'flex':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';const ledger=document.querySelector('#ledgerStart');ledger.disabled=false;
+ const data=await pywebview.api.check();if(data.update_result){alert(data.update_result.ok?data.update_result.message:(data.update_result.message+(data.update_result.rolled_back?'\n旧版程序已经恢复。':'')))}const cleanup=document.querySelector('#cleanupDataButton');cleanup.style.display=data.data_cleanup?'flex':'none';cleanup.dataset.token=data.data_cleanup?.token||'';cleanup.dataset.source=data.data_cleanup?.source||'';
  const issues=renderChecks(data.items);const warnings=issues.filter(x=>x.state==='warn').length;
  if(data.blocked){setState('blocked','还差一步','先处理上方红色项目，处理完成后再重新检查。','×');start.textContent='暂时无法启动'}
  else if(warnings){setState('ready','准备就绪',`${warnings} 项提醒不会阻止打开面板，需要时再处理。`,'✓');start.textContent='启动まあ丸';start.disabled=false}
  else{setState('ready','准备就绪','程序与运行环境均已就绪，可以安心开工。','✓');start.textContent='启动まあ丸';start.disabled=false}
 }
 function setLaunchStep(index){const steps=[...document.querySelectorAll('#launchProgress span')];document.querySelector('#launchProgress').classList.add('show');steps.forEach((step,i)=>step.className=i<index?'done':i===index?'active':'')}
-async function startApp(mode){const ledgerMode=mode==='ledger';const b=document.querySelector(ledgerMode?'#ledgerStart':'#start');b.disabled=true;b.textContent='正在启动…';setState('',ledgerMode?'正在打开账房':'正在打开本丸',ledgerMode?'不连接模拟器，只整理家底与规划。':'这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start(mode);clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent=ledgerMode?'重新打开账房':'重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready',ledgerMode?'账房已经打开':'本丸已经打开',ledgerMode?'不会连接游戏，今天只算账。':'启动器的工作完成了，接下来交给まあ丸。','✓')}}
+async function startApp(mode){const b=document.querySelector('#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start('automation');clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
 async function update(){
  setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();
@@ -200,6 +200,8 @@ class Api:
         }
 
     def start(self, mode="automation"):
+        if mode == "ledger":
+            return {"ok": False, "message": "独立账房入口已暂停，请启动まあ丸后打开仓库。"}
         try:
             ledger_mode = mode == "ledger"
             expected_mode = "ledger" if ledger_mode else "automation"

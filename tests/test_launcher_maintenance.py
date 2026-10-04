@@ -68,8 +68,9 @@ class LauncherMaintenanceTests(unittest.TestCase):
         self.assertTrue(callable(getattr(app.Api(), "choose_emulator", None)))
 
     def test_launcher_offers_separate_ledger_entry(self):
-        self.assertIn("只打开账房", app.HTML)
-        self.assertIn("startApp('ledger')", app.HTML)
+        self.assertNotIn("只打开账房", app.HTML)
+        self.assertNotIn("startApp('ledger')", app.HTML)
+        self.assertFalse(app.Api().start("ledger")["ok"])
         self.assertNotEqual(maamaru_app.LEDGER_PORT, maamaru_app.AUTOMATION_PORT)
 
     def test_panel_can_return_to_the_same_launcher_window(self):

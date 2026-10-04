@@ -10,45 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  apk:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ledger_app/frontend
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: ledger_app/frontend/package-lock.json
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-
-      - name: 构建 Android 离线试玩版
-        run: |
-          npm ci
-          npm run android:sync
-          chmod +x android/gradlew
-          cd android
-          ./gradlew assembleDebug
-
-      - name: 整理 APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk "maamaru-ledger-demo-${GITHUB_REF_NAME}.apk"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-android-apk
-          path: ledger_app/frontend/maamaru-ledger-demo-${{ github.ref_name }}.apk
-          if-no-files-found: error
-
   build:
-    needs: apk
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -215,12 +177,6 @@ jobs:
           ./scripts/smoke_test_installer.ps1 `
             -InstallerPath "dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe"
 
-      - name: 取回 Android 离线试玩版
-        uses: actions/download-artifact@v5
-        with:
-          name: release-android-apk
-          path: dist
-
       - name: 保留安装冒烟诊断
         if: failure()
         uses: actions/upload-artifact@v4
@@ -243,4 +199,3 @@ jobs:
           files: |
             dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip
             dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe
-            dist/maamaru-ledger-demo-${{ steps.version.outputs.tag }}.apk

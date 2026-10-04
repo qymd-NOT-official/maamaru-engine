@@ -1,6 +1,6 @@
 [project]
 name = "maamaru-engine"
-version = "1.0.1"
+version = "1.1.0"
 description = "《刀剑乱舞 ONLINE》国服本丸管家与纯净本丸账房"
 requires-python = ">=3.12"
 license = {text = "AGPL-3.0-or-later"}
