@@ -1278,8 +1278,11 @@ class FormationEditorMixin:
             target = getattr(self, '_selection_identity_target', None)
             if target and row.get('sword_catalog_id') == target['sword_catalog_id']:
                 y = row['y']
-                if not 170 < y < 650:
-                    continue  # 裁掉的上下边缘行没有完整数值证据。
+                # 姓名在底行仍可能完整可读；按实际数值 ROI 的上下缘
+                # 判断是否裁切，不用姓名中心的保守页缘阈值排除整行。
+                frame_height = image.shape[0] if image is not None else 720
+                if y - 48 < 124 or y + 13 > min(700, frame_height):
+                    continue
                 tokens = self.maa.ocr_all(roi_4to4(470, y - 48, 591, y - 27)) or []
                 text = ''.join(t for t, _ in tokens)
                 levels = re.findall(r'乱舞\s*(\d+)\s*级', text)

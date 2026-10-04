@@ -154,3 +154,27 @@ def test_client_search_only_moves_forward_until_target_and_stops_on_single_page(
             patch.object(host, '_scrollbar_bottom', return_value=None):
         assert finish(host._find_client_target_stream(target, ('name', 'level'), 60))[0] is None
         assert not maa.swipes
+
+
+def test_bottom_row_reads_identity_numbers_when_rois_are_fully_visible():
+    import numpy as np
+    from test_formation_editor import _std_setup, _P
+    from touken.flows.formation_editor import FormationEditorMixin
+    maa, host = _std_setup()
+    catalog = 'touken_103_urashima_kotetsu'
+    row = {'sword_catalog_id': catalog, 'name': '浦岛虎彻', 'level': 37, 'y': 666}
+    host._selection_identity_target = {'sword_catalog_id': catalog, 'survival_max': 57, 'recon': 91}
+    with patch.object(maa, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
+         patch.object(host, '_parse_selection_rows', return_value=([row], 0)), \
+         patch.object(maa, 'ocr_all', side_effect=[[], [('乱舞8级', _P(530, 628))],
+                                                 [('57', _P(620, 660))], [('91', _P(900, 660))]]):
+        rows, _ = FormationEditorMixin._read_list_page(host)
+    assert rows[0]['tou_level'] == 8
+    assert rows[0]['survival_max'] == 57
+    assert rows[0]['recon'] == 91
+    row['y'] = 698
+    with patch.object(maa, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
+         patch.object(host, '_parse_selection_rows', return_value=([row], 0)), \
+         patch.object(maa, 'ocr_all', return_value=[]) as ocr:
+        FormationEditorMixin._read_list_page(host)
+    assert ocr.call_count == 1  # 数值 ROI 真正越过名单底缘时才跳过。
