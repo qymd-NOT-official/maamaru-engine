@@ -350,6 +350,8 @@ def adhoc_due(cfg: dict, forced: dict, now: float, today: str) -> list:
         if last_runs.get(key):
             continue
         out.append({"key": key, "team_no": team_no, "map_code": map_code,
+                    "sakura_before_dispatch": bool(record.get("sakura_before_dispatch", False)),
+                    "repair_threshold": record.get("repair_threshold", "light"),
                     "late_min": int(late),
                     "planned_at": str(record["planned_at"]),
                     **{key: record[key] for key in ("formation_id", "formation_name", "formation_signature") if record.get(key)}})
@@ -451,6 +453,9 @@ def _new_slot(job: dict, cfg: dict, now: float) -> dict:
         "late_min": job.get("late_min", 0), "shift_key": job.get("shift_key"),
         "observed_at": now,
         **{key: job[key] for key in ("formation_id", "formation_name", "formation_signature") if job.get(key)},
+        **({"sakura_before_dispatch": job.get("sakura_before_dispatch", False),
+            "repair_threshold": job.get("repair_threshold", "light")}
+           if ":adhoc:" in job["key"] else {}),
     }
 
 
@@ -561,6 +566,12 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
         if job["key"] not in slots:
             slots[job["key"]] = _new_slot(job, cfg, now)
             changed = True
+        elif ":adhoc:" in job["key"] and job["key"] != inflight_key and slots[job["key"]].get('state') not in TERMINAL_STATES:
+            for field, default in (('sakura_before_dispatch', False), ('repair_threshold', 'light')):
+                value = job.get(field, default)
+                if slots[job["key"]].get(field) != value:
+                    slots[job["key"]][field] = value
+                    changed = True
 
     for key in list(slots.keys()):
         slot = slots[key]
@@ -801,6 +812,9 @@ def start_scheduler(config_path: str, emit_fn):
                     run_id = runner.start("dispatch", config_path, {
                         "team_no": str(slot["team_no"]), "map_code": slot["map_code"],
                         "scheduled": True, "slot_key": slot["key"],
+                        **({"sakura_before_dispatch": slot.get("sakura_before_dispatch", False),
+                            "repair_threshold": slot.get("repair_threshold", "light")}
+                           if ":adhoc:" in slot["key"] else {}),
                         **{key: slot[key] for key in ("formation_id", "formation_signature") if slot.get(key)}})
                     if run_id:
                         inflight = (slot["key"], records.get(

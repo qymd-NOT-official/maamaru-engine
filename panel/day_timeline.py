@@ -146,6 +146,8 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
         items.append({
             "key": key, "kind": "forced", "planned_at": planned_ts,
             **{field: record[field] for field in ("formation_id", "formation_name") if record.get(field)},
+            "sakura_before_dispatch": bool(record.get("sakura_before_dispatch", False)),
+            "repair_threshold": record.get("repair_threshold", "light"),
             "time_min": int((planned_ts - day_start) // 60),
             "duration_min": duration,
             "team_no": team_no,

@@ -1055,6 +1055,8 @@ export interface DayTimelineMarker {
 }
 
 export interface DayTimelineExpedition {
+  sakura_before_dispatch?: boolean
+  repair_threshold?: 'light' | 'medium' | 'heavy'
   formation_id?: string
   formation_name?: string
   key: string

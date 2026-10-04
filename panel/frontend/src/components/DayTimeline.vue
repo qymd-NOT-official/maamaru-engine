@@ -196,6 +196,8 @@ const expeditionPopup = ref<{team: number; left: number; suggestion?: DayExpedit
 const expeditionDialog = ref<HTMLDialogElement>()
 const expeditionTime = ref('')
 const expeditionFormation = ref('')
+const expeditionSakura = ref(false)
+const expeditionInjury = ref<'light' | 'medium' | 'heavy'>('light')
 const expeditionConfigError = ref('')
 const expeditionConfigBusy = ref(false)
 const expeditionSettings = ref<Awaited<ReturnType<typeof api.expeditionSettings>>>()
@@ -213,6 +215,8 @@ async function configureExpedition() {
   expeditionPopup.value = null
   expeditionTime.value = fmtMin(selected.suggestion?.start_min ?? selected.slot!.time_min).replace('次日 ', '')
   expeditionFormation.value = selected.suggestion?.formation_id || selected.slot?.formation_id || ''
+  expeditionSakura.value = selected.slot?.sakura_before_dispatch ?? false
+  expeditionInjury.value = selected.slot?.repair_threshold ?? 'light'
   expeditionSettings.value = undefined
   expeditionConfigError.value = ''
   expeditionDialog.value?.showModal()
@@ -232,6 +236,7 @@ async function saveExpeditionConfiguration() {
     if (expeditionFormation.value && !preset) throw new Error('原预设已不可用，请重新选择')
     await api.configureDayExpedition({team_no: selected.team, map_code: selected.suggestion?.map_code || selected.slot!.map_code,
       start_min: start, ...(selected.slot ? {source_key: selected.slot.key} : {source_start_min: movedExpeditionSources.value[selected.suggestion!.key] ?? selected.suggestion!.start_min}),
+      sakura_before_dispatch: expeditionSakura.value, repair_threshold: expeditionInjury.value,
       formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || ''})
     expeditionDialog.value?.close()
     await load()
@@ -788,7 +793,8 @@ async function finishDrag(event: PointerEvent) {
       const preset = (settings.formations[String(slot.team_no)] || []).find(p => p.formation_id === slot.formation_id)
       if (slot.formation_id && !preset) throw new Error('原预设已不可用，请先打开配置')
       await api.configureDayExpedition({team_no: slot.team_no, map_code: slot.map_code,
-        source_key: slot.key, start_min: current.minute, formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || ''})
+        source_key: slot.key, start_min: current.minute, formation_id: preset?.formation_id || '', formation_signature: preset?.formation_signature || '',
+        sakura_before_dispatch: slot.sakura_before_dispatch ?? false, repair_threshold: slot.repair_threshold ?? 'light'})
       await load(true)
       planMessage.value = `远征已改到 ${fmtMin(current.minute)} 出发`
     }
@@ -1363,6 +1369,10 @@ const caption = computed(() => {
       <option v-if="expeditionFormation && !expeditionPresetOptions.some(p => p.formation_id === expeditionFormation)" :value="expeditionFormation" disabled>原预设不可用，请重新选择</option>
       <option v-for="preset in expeditionPresetOptions" :key="preset.formation_id" :value="preset.formation_id">{{ preset.formation_name }}</option>
     </select></label>
+    <label class="tl-expedition-sakura"><input v-model="expeditionSakura" type="checkbox" :disabled="expeditionConfigBusy">出发前补花</label>
+    <label v-if="expeditionSakura">补花伤势停止条件<select v-model="expeditionInjury" :disabled="expeditionConfigBusy">
+      <option value="light">轻伤</option><option value="medium">中伤</option><option value="heavy">重伤</option>
+    </select></label>
     <p v-if="expeditionConfigError" role="alert">{{ expeditionConfigError }}</p>
     <footer><button type="button" :disabled="expeditionConfigBusy || !expeditionSettings" @click="saveExpeditionConfiguration">保存</button><button type="button" :disabled="expeditionConfigBusy" @click="expeditionDialog?.close()">取消</button></footer>
   </dialog>
@@ -1377,6 +1387,7 @@ const caption = computed(() => {
 .tl-expedition-dialog label { display: flex; flex-direction: column; gap: 8px; margin: 18px 0 8px; }
 .tl-expedition-dialog input, .tl-expedition-dialog select, .tl-expedition-dialog button { padding: 9px 12px; font: inherit; color: var(--ink); background: var(--paper-panel); border: 1px solid var(--paper-line); border-radius: 8px; }
 .tl-expedition-dialog footer { display: flex; gap: 12px; margin-top: 24px; }
+.tl-expedition-dialog .tl-expedition-sakura { flex-direction: row; align-items: center; }
 
 .tl-flow-steps { flex-basis: 100%; margin: 8px 0; padding-left: 22px; color: var(--ink-dim); font-size: 12px; }
 .tl-booked-steps { margin-top: 6px; }

@@ -380,3 +380,26 @@ class ExpeditionSlotEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_adhoc_training_settings_survive_storage_and_due_projection(tmp_path):
+    from panel import scheduler
+    today = time.strftime('%Y-%m-%d')
+    now = time.time()
+    key = ec.adhoc_key(today, 4, 600)
+    path = tmp_path / 'choices.json'
+    ec.set_forced_adhoc(key=key, team_no=4, map_code='B3', start_min=600,
+        duration_min=90, planned_at=time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(now)),
+        sakura_before_dispatch=True, repair_threshold='heavy', path=path)
+    _, forced = ec.load_choice_sets(path)
+    jobs = scheduler.adhoc_due({'automation': {'last_runs': {}}}, forced, now, today)
+    assert jobs[0]['sakura_before_dispatch'] is True
+    assert jobs[0]['repair_threshold'] == 'heavy'
+    slot = scheduler._new_slot(jobs[0], {'automation': {}}, now)
+    assert slot['sakura_before_dispatch'] is True
+    assert slot['repair_threshold'] == 'heavy'
+    forced[key].pop('sakura_before_dispatch')
+    forced[key].pop('repair_threshold')
+    old_job = scheduler.adhoc_due({'automation': {'last_runs': {}}}, forced, now, today)[0]
+    assert old_job['sakura_before_dispatch'] is False
+    assert old_job['repair_threshold'] == 'light'

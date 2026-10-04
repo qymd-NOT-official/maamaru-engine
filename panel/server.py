@@ -886,6 +886,13 @@ def _build_dispatch(agent, config_path, params):
     from .scheduler import load_config
     training = load_config().get('automation', {}).get('sakura_before_dispatch', False)
     injury = (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')
+    if scheduled and ':adhoc:' in slot_key:
+        training = params.get('sakura_before_dispatch', False)
+        injury = params.get('repair_threshold', 'light')
+        if type(training) is not bool or injury not in ('light', 'medium', 'heavy'):
+            _write_dispatch_result(slot_key, 'failed', '这班的补花设置无效，请重新配置')
+            yield '[远征] ✗ 这班的补花设置无效，暂不派遣'
+            return
     if scheduled and training:
         yield '[远征] 这班先补花，恢复原队伍后出发；归来时间按实际出发计算'
     dispatch_messages = []
@@ -2390,6 +2397,8 @@ async def api_set_day_expedition_slot(request: Request):
             key=key, team_no=int(slot["team_no"]), map_code=slot["map_code"],
             start_min=int(slot["time_min"]),
             duration_min=int(slot.get("duration_min") or 0),
+            sakura_before_dispatch=slot.get('sakura_before_dispatch', False),
+            repair_threshold=slot.get('repair_threshold', 'light'),
             planned_at=time.strftime("%Y-%m-%dT%H:%M:%S",
                                      time.localtime(float(slot["planned_at"]))),
             forced=will_run)
@@ -2429,6 +2438,9 @@ async def api_adopt_day_expedition_suggestion(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
         raise HTTPException(400, "请选一条远征建议")
+    if ('sakura_before_dispatch' in body and type(body['sakura_before_dispatch']) is not bool
+            or 'repair_threshold' in body and body['repair_threshold'] not in ('light', 'medium', 'heavy')):
+        raise HTTPException(400, '请选择有效的补花和伤势设置')
     try:
         team_no = int(body.get("team_no"))
         start_min = int(body.get("start_min"))
@@ -2499,6 +2511,8 @@ async def api_adopt_day_expedition_suggestion(request: Request):
         formation_id=suggestion.get("formation_id") or "",
         formation_name=suggestion.get("formation_name") or "",
         formation_signature=suggestion.get("formation_signature") or "",
+        sakura_before_dispatch=body.get('sakura_before_dispatch', suggestion.get('sakura_before_dispatch', False)),
+        repair_threshold=body.get('repair_threshold', suggestion.get('repair_threshold', 'light')),
         planned_at=time.strftime(
             "%Y-%m-%dT%H:%M:%S",
             time.localtime(timeline["day_start"] + start_min * 60)))

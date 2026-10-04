@@ -164,6 +164,7 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
                      start_min: int, duration_min: int, planned_at: str,
                      forced: bool = True, formation_id: str = "",
                      formation_name: str = "", formation_signature: str = "",
+                     sakura_before_dispatch: bool = False, repair_threshold: str = "light",
                      replace_key: str = "", path: Path = CHOICES_PATH) -> dict:
     """记下/取消一班自描述 forced 远征（建议引擎采纳的班）。
 
@@ -186,6 +187,8 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
                                "planned_at": planned_at,
                                "start_min": int(start_min),
                                "duration_min": int(duration_min)}
+            forced_map[key].update(sakura_before_dispatch=bool(sakura_before_dispatch),
+                                   repair_threshold=repair_threshold)
             if formation_id:
                 forced_map[key].update(formation_id=formation_id, formation_name=formation_name,
                                        formation_signature=formation_signature)

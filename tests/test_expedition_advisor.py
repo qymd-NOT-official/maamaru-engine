@@ -979,6 +979,18 @@ class AdoptEndpointTests(unittest.TestCase):
         self.assertIn("expeditions", response.json())
         self.assertIn("expedition_suggestions", response.json())
 
+    def test_adopt_saves_local_training_settings_and_rejects_invalid_values(self):
+        response = self._put({'team_no': 4, 'map_code': 'B1', 'start_min': 600,
+                             'sakura_before_dispatch': True, 'repair_threshold': 'heavy'})
+        self.assertEqual(response.status_code, 200)
+        _, forced = ec.load_choice_sets(self.path)
+        record = forced[ec.adhoc_key(self._today(), 4, 600)]
+        self.assertTrue(record['sakura_before_dispatch'])
+        self.assertEqual(record['repair_threshold'], 'heavy')
+        response = self._put({'team_no': 4, 'map_code': 'B1', 'start_min': 601,
+                             'sakura_before_dispatch': 'false'})
+        self.assertEqual(response.status_code, 400)
+
     def test_midnight_and_next_morning_adoption_have_actual_departure_date(self):
         for minute in (0, 1440, 1679):
             with self.subTest(minute=minute):

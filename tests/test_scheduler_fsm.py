@@ -685,7 +685,7 @@ def test_dispatch_applies_preset_before_departure(tmp_path):
     assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"
 
 
-def test_timeline_dispatch_inherits_training_switch_and_injury(tmp_path):
+def test_timeline_dispatch_uses_its_own_training_and_injury(tmp_path):
     from panel import server
     from touken import expedition_sakura
     for enabled in (False, True):
@@ -698,11 +698,12 @@ def test_timeline_dispatch_inherits_training_switch_and_injury(tmp_path):
             return True
         with patch.object(server, 'STATUS_DIR', tmp_path), \
              patch.object(server, '_read_expedition_records', return_value={}), \
-             patch.object(s, 'load_config', return_value={'automation': {'sakura_before_dispatch': enabled}}), \
+             patch.object(s, 'load_config', return_value={'automation': {'sakura_before_dispatch': not enabled}}), \
              patch.object(server, '_load_panel_settings', return_value={'params': {'sakura': {'repair_threshold': 'heavy'}}}), \
              patch.object(expedition_sakura, 'recover_stream', side_effect=recovered):
             messages = list(server._build_dispatch(agent, 'unused', {
-                'team_no': 4, 'map_code': 'C2', 'scheduled': True, 'slot_key': 'today:adhoc:4:960'}))
+                'team_no': 4, 'map_code': 'C2', 'scheduled': True, 'slot_key': 'today:adhoc:4:960',
+                'sakura_before_dispatch': enabled, 'repair_threshold': 'heavy'}))
         args = agent.expedition_stream.call_args.kwargs
         assert args['sakura_before_dispatch'] is enabled
         assert args['repair_threshold'] == 'heavy'
