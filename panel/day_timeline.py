@@ -591,6 +591,7 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
 def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                        store=None, script_labels: dict | None = None,
                        active: dict | None = None,
+                       player_tasks: list | None = None,
                        hanafuda_team_no: int | None = None,
                        raid_team_no: int | None = None,
                        expedition_choices: dict | None = None,
@@ -683,7 +684,8 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         expedition_help, planning=planning, situation_path=situation_path,
         now_min=now_min, committed_counts=committed_counts, occupied_windows=occupied_windows,
         team_busy_until=team_busy_until,
-        occupied_maps=occupied_maps, failed_combos=failed_combos)
+        occupied_maps=occupied_maps, failed_combos=failed_combos,
+        task_windows=player_tasks or [])
     hanafuda_plan = _hanafuda_active_plan(now, store)
     raid_plan = _raid_active_plan(now, store)
     suggestions = None
@@ -699,7 +701,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         if active and active.get("script"):
             hint = "有任务正在运行；收工并记下圈数后，再按远征班次安排联队战。"
         else:
-            occupied = _occupied_segments(expeditions, cfg, raid_team_no)
+            occupied = _occupied_segments(expeditions, cfg, raid_team_no) + list(player_tasks or [])
             # 活动收摊前留五分钟收尾，不把一圈安排到收摊之后。
             finish_min = math.floor(now_min + raid_plan["seconds_to_end"] / 60 - 5)
             if finish_min < DAY_MINUTES:
@@ -724,7 +726,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
         quota = (_daily_quota_seconds(hanafuda_plan, day_end - now)
                  if hanafuda_plan else None)
         if quota:
-            occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no)
+            occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no) + list(player_tasks or [])
             suggestions, shortfall_seconds = suggest_windows(now_min, occupied, quota)
         hint = _hanafuda_hint(hanafuda_plan)
     return {

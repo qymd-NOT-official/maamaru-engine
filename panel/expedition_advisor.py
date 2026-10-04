@@ -572,6 +572,7 @@ def build_expedition_suggestions(prefs: dict, *,
                                  team_busy_until=None,
                                  occupied_maps=(),
                                  occupied_windows=(),
+                                 task_windows=(),
                                  failed_combos=()) -> dict:
     """玩家驱动的建议：每个可丢队伍今天各派 N 班（rounds_per_team）。
 
@@ -674,7 +675,8 @@ def build_expedition_suggestions(prefs: dict, *,
         for team in teams:
             if remaining[team] <= r or team in blocked_teams:
                 continue
-            start = next_start[team]
+            from .task_reservations import next_dispatch
+            start = next_dispatch(next_start[team], task_windows)
             shift_no = counts.get(team, 0) + r + 1  # 今天第几班（含已排的）
             # 固定到「队伍 × 当天班次」，采纳首班后刷新不能把次班资源重置。
             priority_slot = 0 if focus in FOCUS_RESOURCES else (shift_no - 1) * len(teams) + teams.index(team)

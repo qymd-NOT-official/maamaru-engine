@@ -2279,7 +2279,8 @@ def _day_timeline_payload():
     active = None
     if runner.is_running and runner.current_script:
         active = {"script": runner.current_script,
-                  "started": runner.current_started}
+                  "started": runner.current_started,
+                  "label": (runner.current_workflow or {}).get("name")}
     hanafuda_team_no = None
     raid_team_no = None
     try:
@@ -2288,7 +2289,18 @@ def _day_timeline_payload():
         raid_team_no = config.get("raid", {}).get("team_no")
     except Exception:
         pass
+    from .task_reservations import task_windows
+    from .day_conductor import load_state
+    from .day_timeline import _day_window
+    from touken.telemetry import get_telemetry_store
+    planning_now = time.time()
+    def workflow_name(workflow_id):
+        return (_workflow.find_preset(workflow_id) or {}).get("name")
+    reservations = task_windows(planning_now, _day_window(planning_now)[0],
+                                load_plan(), load_state(), active,
+                                get_telemetry_store(), workflow_name)
     timeline = build_day_timeline(
+        now=planning_now, player_tasks=reservations,
         script_labels={k: v["label"] for k, v in _SCRIPTS.items()},
         active=active,
         hanafuda_team_no=hanafuda_team_no,

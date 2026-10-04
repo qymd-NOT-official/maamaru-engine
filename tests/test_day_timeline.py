@@ -533,7 +533,7 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
                          [{"start_min": 480, "duration_min": 120, "note": ""}])
 
     def _raid_build(self, now, plan, *, raid_team_no=None, forced=None,
-                    active=None):
+                    active=None, player_tasks=None):
         with patch.object(dtl, "_raid_active_plan", return_value=plan), \
              patch.object(dtl, "_hanafuda_active_plan", return_value=None):
             return dtl.build_day_timeline(
@@ -542,7 +542,14 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
                 expedition_forced=forced or {},
                 expedition_records={},
                 expedition_help={"rounds_per_team": 0, "available_teams": []},
-                active=active)
+                active=active, player_tasks=player_tasks)
+
+    def test_raid_suggestions_wait_for_booked_daily(self):
+        plan = {"runs_needed": 36, "seconds_per_loop": 420,
+                "seconds_to_end": 2 * 86400, "tama_remaining": 10000}
+        out = self._raid_build(_today_at(8, 0), plan,
+            player_tasks=[{"start_min": 480, "end_min": 510, "label": "一键日课"}])
+        self.assertEqual(out['suggestions'][0]['start_min'], 510)
 
     def test_raid_daily_rounds_split_around_same_team_expedition(self):
         forced = {"k": _forced_record(3, "B3", _today_at(10, 0))}

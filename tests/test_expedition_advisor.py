@@ -43,6 +43,14 @@ def test_completed_departures_survive_collection_and_restart(tmp_path):
     assert advice["suggestions"] == []
 
 
+def test_dispatch_suggestion_gives_player_daily_priority(tmp_path):
+    suggestions = ea.build_expedition_suggestions(_prefs(rounds=1, available_teams=(4,)),
+        planning=_planning(), maps={'C1': {'duration_min': 60, '砥石': 100}},
+        now_min=600, task_windows=[{'start_min': 602, 'end_min': 632, 'label': '一键日课'}],
+        situation_path=tmp_path / 'missing')['suggestions']
+    assert suggestions[0]['start_min'] == 632
+
+
 def test_two_shifts_reuse_same_map_after_return(tmp_path):
     prefs = {**_prefs(rounds=2, available_teams=(4,)), "resource_focus": "砥石"}
     maps = {"C1": {"duration_min": 60, "砥石": 100}}
