@@ -778,7 +778,7 @@ async function finishDrag(event: PointerEvent) {
       if (suggestion && (data.value.booking?.blocks || []).some(b => current.minute < (blockEndMin(b) ?? b.start_min + GENERIC_BLOCK_MIN) && current.minute + suggestion.duration_min > b.start_min)) throw new Error('这个时间会撞上已有任务，请换个位置')
       if (suggestion) suggestion.start_min = current.minute
       suggestionDragTimes.value[`gameplay:${current.index}`] = current.minute
-      planMessage.value = `建议已挪到 ${fmtMin(current.minute)}，点启用后才会安排`
+      planMessage.value = ''
     } else if (current.kind === 'expeditionSuggestion') {
       const suggestion = data.value.expedition_suggestions.find(s => s.key === current.key)
       if (suggestion) {
@@ -786,7 +786,7 @@ async function finishDrag(event: PointerEvent) {
         suggestion.start_min = current.minute
         suggestionDragTimes.value[`expedition:${suggestion.team_no}:${suggestion.map_code}:${suggestion.shift_no}`] = current.minute
       }
-      planMessage.value = `远征建议已挪到 ${fmtMin(current.minute)}，点启用后才会安排`
+      planMessage.value = ''
     } else {
       const slot = data.value.expeditions.find(s => s.key === current.key)!
       const settings = await api.expeditionSettings(slot.map_code)
@@ -1290,7 +1290,7 @@ const caption = computed(() => {
             <button v-if="!editing" type="button" :disabled="saving" @click="addTimedWorkflow">＋ 安排任务流</button>
           </div>
         </div>
-        <p v-if="data.expedition_advice_note" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
+        <p v-if="data.expedition_advice_note && !data.expedition_advice_note.includes('不用再点')" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
         <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
           <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
           <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>

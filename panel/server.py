@@ -2462,9 +2462,14 @@ async def api_adopt_day_expedition_suggestion(request: Request):
         if suggestion["team_no"] != team_no or suggestion["map_code"] != map_code:
             raise HTTPException(400, "请保留这班的部队和远征图")
     else:
-        suggestion = next((item for item in timeline.get("expedition_suggestions") or []
-                           if item.get("team_no") == team_no and item.get("map_code") == map_code
-                           and item.get("start_min") == body.get("source_start_min", start_min)), None)
+        candidates = [item for item in timeline.get("expedition_suggestions") or []
+                      if item.get("team_no") == team_no and item.get("map_code") == map_code]
+        # Time advances while the player reads the popup or another task runs.
+        # Match the actual team/map recommendation, not its moving clock value.
+        source_min = body.get("source_start_min", start_min)
+        if type(source_min) is not int:
+            raise HTTPException(400, '请选择有效的出发时间')
+        suggestion = min(candidates, key=lambda item: abs(item['start_min'] - source_min)) if candidates else None
     if not suggestion:
         raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
     if configured:
@@ -2500,6 +2505,8 @@ async def api_adopt_day_expedition_suggestion(request: Request):
                       "formation_signature": preset["formation_signature"] if preset else ""}
     elif (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
         raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
+    if not configured:
+        start_min = int(suggestion['start_min'])
     today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"] + start_min * 60))
     key = adhoc_key(today, team_no, start_min)
     _, forced = load_choice_sets()

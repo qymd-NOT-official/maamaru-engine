@@ -1028,11 +1028,25 @@ class AdoptEndpointTests(unittest.TestCase):
         self.assertEqual(again.status_code, 409)
         self.assertIn("已经点上", again.json()["detail"])
 
-    def test_stale_suggestion_rejected(self):
+    def test_moving_clock_does_not_invalidate_same_team_and_map(self):
         response = self._put({"team_no": 4, "map_code": "B1",
                               "start_min": 601})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(ec.load_choice_sets(self.path)[1].values())[0]['start_min'], 600)
+
+    def test_changed_map_suggestion_is_still_rejected(self):
+        response = self._put({'team_no': 4, 'map_code': 'B2', 'start_min': 600})
         self.assertEqual(response.status_code, 409)
         self.assertFalse(self.path.exists())
+
+    def test_dragged_suggestion_keeps_player_time_after_clock_moves(self):
+        self.suggestion['start_min'] = 605
+        with patch.object(server.time, 'time', return_value=self.day_start + 500 * 60), \
+             patch.object(ea, 'party_levels_from_situation', return_value=None):
+            response = self._put({'team_no': 4, 'map_code': 'B1',
+                                  'source_start_min': 600, 'start_min': 720})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(ec.load_choice_sets(self.path)[1].values())[0]['start_min'], 720)
 
     def test_configured_suggestion_saves_changed_time(self):
         with patch.object(server.time, "time", return_value=self.day_start + 500 * 60), \
