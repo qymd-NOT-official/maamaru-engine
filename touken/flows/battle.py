@@ -53,6 +53,8 @@ class BattleMixin:
         只读文件，绝不碰游戏画面，更不许在图内战斗中途响应。
         旗标超过 2 小时没人认领按作废处理（落旗的面板多半已经关了）。
         """
+        if getattr(self, '_expedition_sakura_active', False):
+            return False
         try:
             raw = json.loads((STATE_DIR / "expedition_takeover.json")
                              .read_text(encoding="utf-8"))
@@ -199,6 +201,9 @@ class BattleMixin:
 
     def _save_team_record(self, cfg: dict, record_no: int = 1) -> bool:
         """把当前出阵部队保存到固定记录；目前产品只使用记录一。"""
+        from ..expedition_sakura import pending_restore
+        if pending_restore() and not getattr(self, '_expedition_sakura_active', False):
+            return False
         record = self.config.get("team_select", {}).get("team_record", {})
         if not self._open_team_record():
             return False
@@ -216,6 +221,20 @@ class BattleMixin:
         if hasattr(self, "record_event"):
             self.record_event("team_record.saved", record_no=record_no)
         return True
+
+    def _load_team_record_confirmed(self, cfg: dict, record_no: int = 1) -> bool:
+        """Use a selected record only after confirming the page and modal."""
+        record = self.config.get('team_select', {}).get('team_record', {})
+        target = record.get('records', {}).get(str(record_no))
+        if not target or not self._open_team_record():
+            return False
+        self._click_point(target)
+        time.sleep(.3)
+        if not self._click_template_config(record.get('load_confirm', {})):
+            return False
+        time.sleep(.5)
+        return (self._confirm_team_record(record, 'load', record_no)
+                and self._finish_team_record(cfg, record))
 
     def _restore_equipment_from_warning(self, cfg: dict,
                                         record_no: int = 1) -> bool | None:
@@ -616,6 +635,10 @@ class BattleMixin:
         # 调用方已经通过 _wait_for_team_select 确认进入部队选择页，并在
         # 启动时检查过部队坐标。_pick_team 只负责按坐标点两次，本身无法
         # 观察游戏是否真的选中；不要把它的返回值冒充真机选队验证。
+        from ..expedition_sakura import pending_restore
+        if pending_restore() and not getattr(self, '_expedition_sakura_active', False):
+            yield f'{tag} ✗ 远征补花队伍尚未恢复，绝不出阵，请先执行远征管理'
+            return False, team_record_saved
         self._pick_team(team_no)
         if rotate_captain:
             try:

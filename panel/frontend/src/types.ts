@@ -1020,6 +1020,7 @@ export interface ExpeditionAutomation {
   start_time: string
   teams: number[]
   capitalist: boolean
+  sakura_before_dispatch?: boolean
   paused_until: string
   /** 一班最多允许晚多少分钟；资本家模式补跑窗口是它的 4 倍封顶 */
   max_delay_min: number

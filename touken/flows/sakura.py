@@ -90,6 +90,10 @@ class SakuraMixin:
             yield "[刷花] 伤势停止条件无效，未清队"
             return
         target, swap_threshold = 100, 50
+        from ..expedition_sakura import pending_restore
+        if pending_restore():
+            yield '[刷花] ✗ 远征补花队伍尚未恢复，请先执行远征管理恢复队伍'
+            return
         yield f"[刷花] 部队{team_no}，本次最多刷 {sword_count} 振，只选上锁、等级>1、疲劳≤49的刀"
         if not (yield from self._prepare_sakura_team(team_no)):
             return

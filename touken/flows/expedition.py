@@ -73,7 +73,8 @@ class ExpeditionMixin:
     """远征派遣。依赖宿主类的 navigate_to_stream、_click_point。"""
 
     def expedition_stream(self, era: int, map_name: str = None, team_no: int = 2,
-                          map_slot: int = None):
+                          map_slot: int = None, sakura_before_dispatch: bool = False,
+                          repair_threshold: str = 'light'):
         """
         流式派遣一支部队去远征
 
@@ -124,6 +125,22 @@ class ExpeditionMixin:
             yield "[远征] 既没给地图名字也没给卡位，不知道去哪，停"
             return
 
+        from ..expedition_sakura import pending_restore, recover_stream, train_stream
+        pending = pending_restore()
+        if pending:
+            if not (yield from recover_stream(self)):
+                return
+        if sakura_before_dispatch:
+            if repair_threshold not in ('light', 'medium', 'heavy'):
+                yield '[远征] ✗ 补花伤势条件无效，暂不派遣'
+                return
+            if not (yield from train_stream(self, team_no, repair_threshold)):
+                return
+        if pending or sakura_before_dispatch:
+            yield from self.navigate_to_stream('远征')
+            if self.current_location != '远征':
+                yield '[远征] ✗ 补花后未回到远征页，暂不派遣'
+                return
         selected = False
         for attempt in range(2):
             if attempt:

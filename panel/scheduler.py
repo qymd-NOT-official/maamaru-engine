@@ -111,6 +111,7 @@ def _defaults() -> dict:
             "start_time": "08:00",
             "teams": [2, 3, 4],
             "capitalist": False,
+            "sakura_before_dispatch": False,
             "paused_until": "",
             # 一班最多允许晚多少分钟（过期就明确跳过，不突然补跑）；
             # 资本家模式的补跑窗口硬封顶是它的 4 倍。

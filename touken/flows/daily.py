@@ -317,6 +317,9 @@ class DailyMixin:
             return
 
         yield from self.collect_expedition_stream(redispatch=None)
+        from ..expedition_sakura import recover_stream
+        if not (yield from recover_stream(self)):
+            return
         if not routes:
             yield "[远征] 没有启用常用安排，本次只收取归来奖励"
             return
@@ -352,7 +355,10 @@ class DailyMixin:
                    f"「{route.get('map_name') or ''}」")
             yield from self.expedition_stream(
                 era=int(route["era"]), map_slot=int(route["map_slot"]),
-                team_no=team)
+                team_no=team,
+                **({'sakura_before_dispatch': True,
+                    'repair_threshold': route.get('repair_threshold', 'light')}
+                   if route.get('sakura_before_dispatch') else {}))
 
     def _apply_daily_preset(self, plan, step_label):
         error = str(plan.get("formation_error") or "")

@@ -35,6 +35,8 @@ onMounted(load)
 <template>
   <section v-if="config" class="immediate-expedition">
     <div class="immediate-expedition-head"><div><h3>立刻远征</h3><p>运行“远征”后立即派出，不会到点自动接管游戏。队伍安排随本页配置一起保存。</p></div></div>
+    <label class="expedition-sakura-toggle"><input v-model="config.automation.sakura_before_dispatch" type="checkbox" /> 远征续派前补花</label>
+    <p class="field-help">优先刷这队上锁、等级大于1、疲劳≤49的刀，恢复队伍后再出发。伤势条件沿用刷花配置；一键日课也会照此执行。</p>
     <div v-for="row in config.common_plan" :key="row.team_no" class="setting-row expedition-row">
       <label><input v-model="row.enabled" type="checkbox" /> 部队{{ row.team_no }}</label>
       <PixelControl v-model="row.map_code" as="select"><option v-for="map in config.maps" :key="map.code" :value="map.code">{{ mapLabel(map) }}</option></PixelControl>
@@ -45,3 +47,8 @@ onMounted(load)
     </div>
   </section>
 </template>
+
+<style scoped>
+.expedition-sakura-toggle { display: flex; align-items: center; gap: .5rem; margin: 1rem 0 .5rem; }
+.expedition-sakura-toggle input { width: auto; margin: 0; }
+</style>

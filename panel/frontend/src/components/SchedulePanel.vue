@@ -84,6 +84,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
     <PanelHeader :variant="embedded ? 'embedded' : 'section'" title="自动排班" subtitle="到点派遣集中管理"><template #actions><button class="primary" @click="save">保存排班设置</button></template></PanelHeader>
     <div class="schedule-body">
       <PaperCard variant="settings" class="auto-schedule-card"><div class="auto-card-head"><div><h3>自动排班</h3><p>到点后，自动接管已经打开的游戏并派出远征。面板、模拟器和游戏需要保持开启。</p></div><label class="enable-row"><input v-model="config.automation.enabled" type="checkbox" /> 启用自动排班</label></div>
+        <label class="capitalist-row"><input v-model="config.automation.sakura_before_dispatch" type="checkbox" /> 远征续派前补花 <small>常用安排与自动排班都会补花；伤势条件沿用刷花配置</small></label>
         <div class="auto-steps" :class="{ disabled: !config.automation.enabled }">
           <section class="auto-step"><span class="step-number">1</span><div><h4>什么时候开始？</h4><label class="stacked-field">每天从这个时间开始<PixelControl v-model="config.automation.start_time" type="time" /></label><label class="stacked-field">每班最多晚多久（分钟）<PixelControl v-model="config.automation.max_delay_min" type="number" numeric min="1" max="1440" /></label><p class="field-help">到点没派成的班会重试到超过这个延迟为止，之后明确跳过、绝不突然补跑；资本家模式的补跑窗口按它的 4 倍封顶。</p></div></section>
           <section class="auto-step"><span class="step-number">2</span><div><h4>怎么安排？</h4><label class="stacked-field">排班方式<PixelControl v-model="config.automation.mode" as="select"><option value="preset">按资源目标自动安排</option><option value="custom">自己指定时间和地图</option></PixelControl></label>

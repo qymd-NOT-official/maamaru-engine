@@ -517,6 +517,9 @@ def _daily_plan_inputs(params):
         }
         if row.get("formation_id"):
             route["formation_id"] = str(row["formation_id"])
+        if schedule.get('automation', {}).get('sakura_before_dispatch'):
+            route['sakura_before_dispatch'] = True
+            route['repair_threshold'] = (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')
         expedition_plan.append(route)
     return steps, after, sortie_plan, practice_plan, expedition_plan
 
@@ -852,6 +855,11 @@ def _build_dispatch(agent, config_path, params):
             _write_dispatch_result(slot_key, "refused", detail)
         yield f"[远征] {detail}"
         return
+    from touken.expedition_sakura import recover_stream
+    if not (yield from recover_stream(agent)):
+        if scheduled:
+            _write_dispatch_result(slot_key, 'failed', '上次补花队伍尚未恢复')
+        return
     if params.get("formation_id"):
         from touken.runtime_paths import STATE_DIR
         from .expedition_advisor import (expedition_formation_options, party_levels_from_situation,
@@ -875,9 +883,13 @@ def _build_dispatch(agent, config_path, params):
                 _write_dispatch_result(slot_key, "failed", "预设没有套好，本次不派出")
             yield "[远征] ✗ 预设没有套好，本次不派出"
             return
+    from .scheduler import load_config
+    training = load_config().get('automation', {}).get('sakura_before_dispatch', False)
+    injury = (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')
     dispatch_messages = []
     for message in agent.expedition_stream(
-            era=m["era"], map_slot=m["slot"], team_no=team_no):
+            era=m["era"], map_slot=m["slot"], team_no=team_no,
+            sakura_before_dispatch=training, repair_threshold=injury):
         dispatch_messages.append(str(message))
         yield message
     if scheduled:
@@ -922,6 +934,9 @@ def _build_expedition_manager(agent, config_path, params):
         yield "[远征管理] 自动排班负责的队伍只收归来奖励，续派交给排班"
     yield "[远征管理] 先回本丸刷新归来状态并领取结算"
     yield from agent.collect_expedition_stream(redispatch=None)
+    from touken.expedition_sakura import recover_stream
+    if not (yield from recover_stream(agent)):
+        return
 
     records = _read_expedition_records()
     waitable = []
@@ -975,7 +990,9 @@ def _build_expedition_manager(agent, config_path, params):
                 continue
         yield f"[远征管理] 派部队{team}去 {m['code']}「{m['name']}」"
         yield from agent.expedition_stream(
-            era=m["era"], map_slot=m["slot"], team_no=int(team))
+            era=m["era"], map_slot=m["slot"], team_no=int(team),
+            sakura_before_dispatch=load_config().get('automation', {}).get('sakura_before_dispatch', False),
+            repair_threshold=(_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light'))
 
     yield "[远征管理] 常用安排处理完毕"
 
@@ -2626,6 +2643,7 @@ async def api_save_schedule(request: Request):
         "start_time": str(auto_in.get("start_time", "08:00"))[:5],
         "teams": [int(x) for x in auto_in.get("teams", [2, 3, 4])][:3],
         "capitalist": bool(auto_in.get("capitalist", False)),
+        "sakura_before_dispatch": bool(auto_in.get("sakura_before_dispatch", auto.get("sakura_before_dispatch", False))),
         "paused_until": str(auto_in.get("paused_until", auto.get("paused_until", ""))),
         "max_delay_min": min(1440, max(1, max_delay)),
     })
