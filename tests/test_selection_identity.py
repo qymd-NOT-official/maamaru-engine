@@ -149,6 +149,7 @@ def test_client_search_only_moves_forward_until_target_and_stops_on_single_page(
         assert selected is row and page == 1
         assert len(maa.swipes) == 1
         assert maa.swipes[0][3] < maa.swipes[0][1]
+        assert maa.swipes[0] == (640, 500, 640, 330, 800)
     maa.swipes.clear()
     with patch.object(host, '_read_list_page', return_value=(decoy, 0)), \
             patch.object(host, '_scrollbar_bottom', return_value=None):

@@ -1330,7 +1330,9 @@ class FormationEditorMixin:
             if not rows or fingerprint in seen or bottom is None or bottom >= _SCROLLBAR_BOTTOM_Y:
                 break
             seen.add(fingerprint)
-            self.maa.swipe(*_SWIPE_NEXT)
+            # 已校准的短滑手势保留完整行重叠；长滑会从首屏跨到末屏，
+            # 漏掉中间的目标。客户端找人只向前移动，不回扫。
+            self.maa.swipe(*_SWIPE_RANKED_NEXT)
             time.sleep(1.2)
         return None, index
 
