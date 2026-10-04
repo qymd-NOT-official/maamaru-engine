@@ -1223,7 +1223,8 @@ const caption = computed(() => {
 
 .tl-tick { white-space: nowrap; }
 .tl-marker i { left: auto; right: 3px; }
-.tl-lane, .tl-mini-axis { overflow: hidden; }
+.tl-lane { overflow: visible; }
+.tl-mini-axis { overflow: hidden; }
 .tl-lane:has(.tl-popover) { overflow: visible; z-index: 50; }
 .tl-popover { box-sizing: border-box; width: min(240px, 100%); min-width: 0; }
 .tl-mini-ticks { position: relative; height: 14px; display: block; }
