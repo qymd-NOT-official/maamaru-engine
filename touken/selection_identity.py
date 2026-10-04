@@ -75,7 +75,7 @@ def selected_serial(events, team, slot, after):
         body = successful_body(event)
         if not body or (youzu_log._event_epoch(event) or 0) < after:
             continue
-        if event.get('endpoint') not in ('/party/setsword', '/party/list'):
+        if event.get('endpoint') not in ('/party/setsword', '/party/list', '/party/dissolution'):
             continue
         parties = body if event.get('endpoint') == '/party/setsword' else body.get('party')
         party = parties.get(str(team)) if isinstance(parties, dict) else None
@@ -83,6 +83,8 @@ def selected_serial(events, team, slot, after):
                   if isinstance(party, dict) else None)
         if isinstance(member, dict):
             return youzu_log._int(member.get('serial_id'), None)
+        if isinstance(party, dict):
+            return None
     return None
 
 

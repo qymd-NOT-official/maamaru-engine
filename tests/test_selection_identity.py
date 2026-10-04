@@ -70,6 +70,25 @@ def test_ranbu_disambiguates_but_identical_copies_remain_ambiguous():
     assert decide_match([rows], target, fields)['status'] == 'ambiguous'
 
 
+def test_existing_client_member_skips_replacement_without_new_set_response():
+    from test_formation_editor import _std_setup, _target, _run, HASEBE
+    import time
+    maa, host = _std_setup()
+    now = time.time()
+    existing = event({'party': {'3': {'slot': {'3': {'serial_id': '456'}}}}}, epoch=now-20)
+    evidence = {'sword_catalog_id': HASEBE, 'form': 'normal', 'level': 35, 'tou_level': 9}
+    with patch('touken.selection_identity.client_events', return_value=[existing]), \
+         patch('touken.selection_identity.youzu_log._event_epoch', side_effect=lambda e: e['epoch_test']), \
+         patch('touken.selection_identity.identity_target', return_value=evidence), \
+         patch.object(host, '_apply_list_filter', side_effect=AssertionError('already selected')):
+        result = _run(host, team_no=3, target=_target(observation_id='youzu:456'))
+    assert result['result'] == 'already_correct'
+    cleared = event({'party': {'3': {'slot': {'3': {'serial_id': None}}}}}, '/party/dissolution', now-10)
+    with patch('touken.selection_identity.youzu_log._event_epoch', side_effect=lambda e: e['epoch_test']):
+        assert selected_serial([existing, cleared], 3, 3, now-300) is None
+        assert selected_serial([existing], 3, 3, now-1) is None
+
+
 def test_number_verification_failure_prevents_changed_result():
     from test_formation_editor import _std_setup, _target, _row, _run, _DECOY_PAGE, HASEBE
     maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])

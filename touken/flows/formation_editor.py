@@ -891,7 +891,6 @@ class FormationEditorMixin:
 
         tgt, err = normalize_target(target)
         self._selection_identity_target = None
-        identity_since = time.time() - 1
         observation = str((tgt or {}).get("observation_id") or "")
         client_serial = int(observation[6:]) if re.fullmatch(r"youzu:\d+", observation) else None
         ranked = bool(tgt and tgt.get("selection_policy") == "locked_highest_level")
@@ -945,7 +944,9 @@ class FormationEditorMixin:
                                  ('name', 'level', 'tou_level', 'survival_max', 'recon')
                                  if field == 'name' or tgt.get(field) is not None)
             self._selection_identity_target = tgt
-            if selected_serial(events, team_no, slot_no, identity_since) == client_serial:
+            # 进入编队时的完整回传已能确认现有成员；同一振再次点决定
+            # 不会产生 setsword，不能要求它晚于本槽换人流程的开始时间。
+            if selected_serial(events, team_no, slot_no, time.time() - 300) == client_serial:
                 yield f"[编队] {slot_no}号位客户端编号已是目标，无需换人"
                 return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
                                     "本次客户端部队编号与目标一致", entry_shell=shell)
