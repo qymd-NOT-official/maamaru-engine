@@ -1,4 +1,6 @@
 * text=auto eol=lf
+# cmd.exe 对 LF-only 的批处理会解析错乱（括号块、chcp 失效），必须保留 CRLF
+*.cmd text eol=crlf
 *.onnx binary
 interface.json linguist-language=JSON-with-Comments
 tasks/*.json linguist-language=JSON-with-Comments

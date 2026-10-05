@@ -524,8 +524,8 @@ def _launcher_html() -> str:
     return (HTML
             .replace("__VERSION__", CURRENT_VERSION)
             .replace("__ICON_URI__", _asset_data_uri("maamaru-launcher-header.png"))
-            .replace("__GARDEN_URI__", _asset_data_uri("honmaru_garden_after_rain.png", "panel/static/img"))
-            .replace("__GARDEN_FOX_URI__", _asset_data_uri("fox_frames/v3/idle.png", "panel/static/img"))
+            .replace("__GARDEN_URI__", _asset_data_uri("honmaru_garden_after_rain.png"))
+            .replace("__GARDEN_FOX_URI__", _asset_data_uri("fox_idle.png"))
             .replace("__FOX1_URI__", _asset_data_uri("fox_run_1_alpha.png"))
             .replace("__FOX2_URI__", _asset_data_uri("fox_run_2_alpha.png")))
 
@@ -544,6 +544,8 @@ def _launcher_icon_path() -> Path:
 
 
 def _asset_data_uri(name: str, directory: str = "launcher/assets") -> str:
+    # WebView2 NavigateToString 对 HTML 总大小有限制（约 2MB），
+    # 内联大图会直接导致窗口初始化失败；大图须先缩到启动器专用小图。
     path = _project_root() / directory / name
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 

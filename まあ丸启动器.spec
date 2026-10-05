@@ -15,6 +15,8 @@ datas = [
     ('launcher/assets/maamaru-launcher.png', 'launcher/assets'),
     ('launcher/assets/maamaru-launcher-header.png', 'launcher/assets'),
     ('launcher/assets/honmaru_rain_garden.png', 'launcher/assets'),
+    ('launcher/assets/honmaru_garden_after_rain.png', 'launcher/assets'),
+    ('launcher/assets/fox_idle.png', 'launcher/assets'),
     ('launcher/assets/fox_run_1_alpha.png', 'launcher/assets'),
     ('launcher/assets/fox_run_2_alpha.png', 'launcher/assets'),
     ('touken/data', 'touken/data'),
