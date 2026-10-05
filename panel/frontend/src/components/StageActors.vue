@@ -158,7 +158,7 @@ onBeforeUnmount(() => { disposed = true; clearTimers(); bounces.forEach(animatio
 
 <template>
   <div class="stage-actors" :class="`phase-${phase}`">
-    <button type="button" class="stage-kogi" :aria-label="isHasebe ? '和压切长谷部打招呼' : '和小狐丸打招呼'" :style="isHasebe ? { backgroundImage: `url('/static/img/hasebe_frames/v1/idle.png')`, backgroundSize: 'auto 120%' } : undefined" @click="poke('kogi', $event)"></button>
+    <button type="button" class="stage-kogi" :aria-label="isHasebe ? '和压切长谷部打招呼' : '和小狐丸打招呼'" :style="isHasebe ? { backgroundImage: `url('/static/img/hasebe_frames/v1/idle.png')` } : undefined" @click="poke('kogi', $event)"></button>
     <button type="button" class="stage-fox" aria-label="和小狐狸打招呼" @click="poke('fox', $event)"></button>
     <div v-if="kogiLine" class="stage-bubble bubble-kogi" role="status">{{ kogiLine }}</div>
     <div v-if="foxLine" class="stage-bubble bubble-fox" role="status">{{ foxLine }}</div>
