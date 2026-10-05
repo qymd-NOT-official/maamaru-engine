@@ -52,7 +52,7 @@ button { cursor: pointer; }
    互动状态机见 components/StageActors.vue，这里只负责各相位的外观。 */
 .stage-actors { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
 .stage-fox { transition: transform .2s steps(2, end); }
-.stage-kogi { position: absolute; z-index: 1; left: 14%; bottom: 4px; width: 92px; height: 116px; background: url('/static/img/kogitsune_frames/v3/idle.png') center bottom / contain no-repeat; filter: drop-shadow(1px 0 #fff) drop-shadow(-1px 0 #fff) drop-shadow(0 1px #fff) drop-shadow(0 -1px #fff) drop-shadow(1px 2px rgba(52,35,28,.3)); image-rendering: pixelated; animation: vue-kogi-idle 3.6s steps(2,end) infinite; transition: left 1.35s steps(12, end); }
+.stage-kogi { position: absolute; z-index: 1; left: 14%; bottom: 4px; width: 92px; height: 116px; background: url('/static/img/kogitsune_frames/v3/idle.png') center bottom / auto 120% no-repeat; filter: drop-shadow(1px 0 #fff) drop-shadow(-1px 0 #fff) drop-shadow(0 1px #fff) drop-shadow(0 -1px #fff) drop-shadow(1px 2px rgba(52,35,28,.3)); image-rendering: pixelated; animation: vue-kogi-idle 3.6s steps(2,end) infinite; transition: left 1.35s steps(12, end); }
 @keyframes vue-kogi-idle { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
 .stage-actors button { pointer-events: auto; cursor: pointer; padding: 0; border: 0; border-radius: 0; background-color: transparent; transform-origin: center bottom; }
 .stage-actors button:focus-visible { outline: 2px dashed var(--fox-gold-deep); outline-offset: 3px; }
