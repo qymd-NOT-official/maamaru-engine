@@ -15,7 +15,10 @@ class PanelSettingsTests(unittest.TestCase):
             with patch.object(server, "_SETTINGS_FILE", Path(tmp) / "settings.json"):
                 client = TestClient(server.app)
                 client.post("/api/saved-settings", json={"theme": "pixel", "params": {"daily": {"runs": 5}}})
-                for scenery in ("autumn", "random", "spring"):
+                for scenery in (
+                    "autumn", "moonview", "winter", "after_rain", "seaside_day",
+                    "seaside_sunset", "wisteria", "osaka_hall", "random", "spring",
+                ):
                     client.post("/api/saved-settings", json={"scenery": scenery})
                     self.assertEqual(client.get("/api/saved-settings").json()["scenery"], scenery)
                 client.post("/api/saved-settings", json={"scenery": "../../private"})
