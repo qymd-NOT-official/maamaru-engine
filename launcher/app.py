@@ -40,7 +40,8 @@ header{height:84px;padding:11px max(28px,calc((100% - 1120px)/2));background:lin
 main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .board{display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px}
 .garden{position:relative;border:1px solid #dac9ab;border-left:5px solid var(--gold);border-radius:15px;overflow:hidden;background:#39434f;box-shadow:0 7px 20px #705a3314;min-height:0}
-.garden img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;object-position:33% 72%}
+.garden-scene{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;object-position:40% center;image-rendering:pixelated}
+.garden-fox{position:absolute;bottom:12px;left:calc(50% - 48px);width:96px;height:96px;object-fit:contain;image-rendering:pixelated;filter:drop-shadow(0 4px 2px #302b2930)}
 .panel{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .checks{padding:14px 16px;border-right:1px dashed #e2d7c5;min-width:0}
 .checks h3,.tools h3{margin:0 0 9px;font-size:16px}
@@ -64,9 +65,9 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .check-row .mark .launcher-icon{width:12px;height:12px;stroke-width:2}.status .mark .launcher-icon{width:17px;height:17px;stroke-width:2}
 .check-row.info .mark{color:#856523;background:#eee2c6}
 .runbar{margin-top:12px;padding:10px 18px 14px;background:var(--card);border:1px solid var(--line);border-radius:14px}
-.run-track{position:relative;height:40px;border-bottom:2px dashed var(--gold);margin-bottom:8px}
+.run-track{display:none;position:relative;height:40px;border-bottom:2px dashed var(--gold);margin-bottom:8px}
 .run-fox{position:absolute;bottom:0;display:none;width:48px;height:48px;background:url("__FOX1_URI__") no-repeat center/contain;image-rendering:pixelated;animation:fox-run 18s linear infinite,fox-frames 1.2s steps(1,end) infinite,fox-bob .6s ease-in-out infinite}
-.runbar.busy .run-fox{display:block}
+.runbar.busy .run-track,.runbar.busy .run-fox{display:block}
 @keyframes fox-frames{0%,49.9%{background-image:url("__FOX1_URI__")}50%,100%{background-image:url("__FOX2_URI__")}}
 @keyframes fox-run{0%{left:0;transform:scaleX(1)}48%{left:calc(100% - 48px);transform:scaleX(1)}50%{left:calc(100% - 48px);transform:scaleX(-1)}98%{left:0;transform:scaleX(-1)}100%{left:0;transform:scaleX(1)}}
 @keyframes fox-bob{0%,100%{margin-bottom:0}50%{margin-bottom:2px}}
@@ -75,19 +76,20 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 .status .mark{display:grid;width:26px;height:26px;flex:0 0 26px;place-items:center;color:white;background:var(--gold);border-radius:50%;font-size:14px;font-weight:800}
 .status.blocked .mark{background:var(--red)}.status.ready .mark{background:var(--green)}
 .status b{font-size:14px}.status span{color:var(--muted);font-size:12px}
-.progress-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:14px;align-items:center}
+.progress-row{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:24px;align-items:end}
+.launch-details{min-width:0}.status{flex-wrap:wrap}.status #stateCopy{flex-basis:100%;margin-left:36px}
 .bar{height:12px;border:1px solid #ddcfb9;border-radius:999px;background:#eee2cc;overflow:hidden}
 .bar-fill{height:100%;width:0;background:linear-gradient(#e6aa0b,#ce8c00);transition:width .4s ease}
 .launch-progress{display:none;margin-top:8px;grid-template-columns:repeat(3,1fr);gap:5px}.launch-progress.show{display:grid}.launch-progress span{padding-top:6px;color:#a49483;border-top:3px solid #ddcfb9;font-size:11px;text-align:center}.launch-progress span.active{color:var(--gold-deep);border-color:var(--gold);font-weight:700}.launch-progress span.done{color:var(--green);border-color:var(--green)}
 .start{width:100%;height:44px;border:0;border-radius:11px;color:white;background:linear-gradient(#e6aa0b,#ce8c00);box-shadow:0 4px 0 #855900,0 8px 14px #a56e1630;font-size:16px;font-weight:800}.start:hover{filter:brightness(1.04)}.start:active{transform:translateY(2px);box-shadow:0 2px 0 #855900}.start:disabled{cursor:not-allowed;filter:grayscale(.65);opacity:.66}
-.start-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.start.ledger{color:#65532d;background:linear-gradient(#f8f1df,#ead9b3);box-shadow:0 4px 0 #b59b67,0 8px 14px #7d672430}
+.start-actions{display:flex;justify-content:flex-end;padding-bottom:4px}.start.ledger{color:#65532d;background:linear-gradient(#f8f1df,#ead9b3);box-shadow:0 4px 0 #b59b67,0 8px 14px #7d672430}
 .note{margin:auto 2px 0;padding-top:8px;color:#918579;font-size:11px}
-@media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.board{grid-template-columns:1fr}.garden{height:150px}.panel{grid-template-columns:1fr}.checks{border-right:0;border-bottom:1px dashed #e2d7c5}.progress-row{grid-template-columns:1fr}}
+@media(max-width:940px){header{padding-inline:24px}main{width:calc(100% - 30px)}.board{grid-template-columns:1fr}.garden{height:150px}.garden-scene{object-position:center bottom}.panel{grid-template-columns:1fr}.checks{border-right:0;border-bottom:1px dashed #e2d7c5}.progress-row{grid-template-columns:1fr}.start-actions .start{width:190px}}
 </style></head><body>
 <header><div class="brand"><img src="__ICON_URI__" alt=""><div class="brand-copy"><h1>まあ丸</h1><p>本丸近侍启动器 · 狐之助已经替你看过一遍</p></div><span class="version">v__VERSION__</span></div></header>
 <main>
 <div class="board">
-<div class="garden"><img src="__GARDEN_URI__" alt="雨中的本丸庭院，狐之助坐在缘侧"></div>
+<div class="garden"><img class="garden-scene" src="__GARDEN_URI__" alt="雨后放晴的像素庭院"><img class="garden-fox" src="__GARDEN_FOX_URI__" alt="在缘侧等候的狐之助"></div>
 <section class="panel">
 <div class="checks"><h3>检查</h3><div id="checks"><div class="loading">狐之助正在巡查……</div></div><span id="checksCount" class="checks-count"></span></div>
 <div class="tools"><h3>功能</h3><button data-icon="refresh" onclick="refresh()">重新检查</button><button data-icon="repair" onclick="repair()">修复环境</button><button data-icon="folder" onclick="openData()">数据目录</button><button data-icon="move" id="migrateDataButton" onclick="migrateData(this)">迁移数据</button><button data-icon="sweep" id="cleanupDataButton" style="display:none" onclick="cleanupOldData(this)">清理旧副本</button><button data-icon="monitor" onclick="chooseEmulator(this)">选择模拟器</button><button data-icon="report" id="feedbackButton" onclick="exportFeedback(this)">反馈错误</button><button data-icon="external" id="issueButton" style="display:none" onclick="openIssue()">去 Issue</button><button data-icon="update" onclick="update()">检查更新</button><p class="note">QQ 协议端是可选功能，请在面板“系统 → QQ”中配置。</p></div>
@@ -95,8 +97,8 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 </div>
 <div id="runbar" class="runbar">
 <div class="run-track"><span class="run-fox"></span></div>
-<div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
-<div class="progress-row"><div><div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
+<div class="progress-row"><div class="launch-details"><div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
+<div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
 </div>
 </main>
 <script>
@@ -522,7 +524,8 @@ def _launcher_html() -> str:
     return (HTML
             .replace("__VERSION__", CURRENT_VERSION)
             .replace("__ICON_URI__", _asset_data_uri("maamaru-launcher-header.png"))
-            .replace("__GARDEN_URI__", _asset_data_uri("honmaru_rain_garden.png"))
+            .replace("__GARDEN_URI__", _asset_data_uri("honmaru_garden_after_rain.png", "panel/static/img"))
+            .replace("__GARDEN_FOX_URI__", _asset_data_uri("fox_frames/v3/idle.png", "panel/static/img"))
             .replace("__FOX1_URI__", _asset_data_uri("fox_run_1_alpha.png"))
             .replace("__FOX2_URI__", _asset_data_uri("fox_run_2_alpha.png")))
 
@@ -540,8 +543,8 @@ def _launcher_icon_path() -> Path:
     return _project_root() / "launcher" / "assets" / "maamaru-launcher.ico"
 
 
-def _asset_data_uri(name: str) -> str:
-    path = _launcher_icon_path().with_name(name)
+def _asset_data_uri(name: str, directory: str = "launcher/assets") -> str:
+    path = _project_root() / directory / name
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
