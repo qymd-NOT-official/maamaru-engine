@@ -21,9 +21,14 @@ class PanelSettingsTests(unittest.TestCase):
                 ):
                     client.post("/api/saved-settings", json={"scenery": scenery})
                     self.assertEqual(client.get("/api/saved-settings").json()["scenery"], scenery)
+                for companion in ("kogitsune", "hasebe"):
+                    client.post("/api/saved-settings", json={"companion": companion})
+                    self.assertEqual(client.get("/api/saved-settings").json()["companion"], companion)
+                client.post("/api/saved-settings", json={"companion": "../../private"})
                 client.post("/api/saved-settings", json={"scenery": "../../private"})
                 saved = client.get("/api/saved-settings").json()
                 self.assertEqual(saved["scenery"], "spring")
+                self.assertEqual(saved["companion"], "hasebe")
                 self.assertEqual(saved["theme"], "pixel")
                 self.assertEqual(saved["params"], {"daily": {"runs": 5}})
 

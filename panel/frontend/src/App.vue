@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { applyCompanion } from './companion'
 import { applyScenery } from './scenery'
 import { activityTitle } from './components/report/reportModel'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -359,6 +360,7 @@ async function load() {
     applyTheme()
     applyBackdrop(saved.backdrop)
     applyScenery(saved.scenery)
+    applyCompanion(saved.companion)
     params.value = Object.fromEntries(Object.entries(scriptData.scripts).map(([key, info]) => [
       key,
       { ...defaults(info), ...migrateParams(key, saved.params?.[key] || {}) },

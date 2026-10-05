@@ -59,7 +59,10 @@ export const api = {
   setDayConductor: (enabled: boolean, workflowId?: string) => request<{ conductor: DayTimeline['conductor'] }>('/api/day-conductor', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, workflow_id: workflowId }),
   }),
-  settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string; scenery?: string }>('/api/saved-settings'),
+  settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string; scenery?: string; companion?: string }>('/api/saved-settings'),
+  saveCompanion: (companion: string) => request<{ ok: boolean }>('/api/saved-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companion }),
+  }),
   saveScenery: (scenery: string) => request<{ ok: boolean }>('/api/saved-settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenery }),
   }),

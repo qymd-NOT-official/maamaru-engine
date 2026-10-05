@@ -3932,6 +3932,8 @@ async def api_save_settings(request: Request):
         "seaside_day", "seaside_sunset", "wisteria", "osaka_hall", "random",
     ):
         existing["scenery"] = body["scenery"]
+    if body.get("companion") in ("kogitsune", "hasebe"):
+        existing["companion"] = body["companion"]
     backdrop = body.get("backdrop")
     if isinstance(backdrop, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", backdrop):
         existing["backdrop"] = backdrop.lower()

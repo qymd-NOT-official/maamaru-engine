@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// 近侍舞台的演员层：狐之助 + 小狐丸（透明像素立绘）。
+// 近侍舞台：小狐狸 + 玩家选中的刀剑男士（透明像素立绘）。
 // 待命期间两位会随机串门打招呼；任务跑完时追加一次收工寒暄。
-// 互动只改 CSS class，动画本体全部在 style.css，主题换皮不影响状态机。
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// 串门复用 CSS 动画；点击果冻用 Web Animations，主题换皮不影响状态机。
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { companion } from '../companion'
+
+const isHasebe = computed(() => companion.value === 'hasebe')
 const props = defineProps<{ active: boolean }>()
 
 type Phase = 'idle' | 'approach' | 'chat' | 'leave'
@@ -36,7 +39,7 @@ function poke(who: 'fox' | 'kogi', event: MouseEvent) {
   }
   clearTimers()
   foxLine.value = who === 'fox' ? pick(clickLines.fox) : ''
-  kogiLine.value = who === 'kogi' ? pick(clickLines.kogi) : ''
+  kogiLine.value = who === 'kogi' ? pick(isHasebe.value ? ['主，有什么吩咐？', '我在这里，随时听候差遣。', '休息片刻也无妨，我会陪着您。'] : clickLines.kogi) : ''
   later(() => {
     phase.value = 'idle'
     foxLine.value = ''
@@ -71,6 +74,14 @@ const finishChats: ChatLine[][] = [
   ],
 ]
 
+const hasebeIdleChats: ChatLine[][] = [
+  [{ who: 'fox', text: '长谷部大人，喝杯茶吧！' }, { who: 'kogi', text: '多谢。也给主留一杯。' }],
+  [{ who: 'kogi', text: '狐狸，今日也辛苦了。' }, { who: 'fox', text: '嘿嘿，一起陪着主人吧！' }],
+]
+const hasebeFinishChats: ChatLine[][] = [
+  [{ who: 'fox', text: '这趟忙完啦！' }, { who: 'kogi', text: '辛苦了，请主歇息片刻。' }],
+]
+
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 let timers: number[] = []
 let disposed = false
@@ -88,7 +99,7 @@ function pick<T>(list: T[]): T {
 
 function scheduleNext() {
   if (props.active || reducedMotion.matches) return
-  later(() => startInteraction(pick(idleChats)), 45000 + Math.random() * 45000)
+  later(() => startInteraction(pick(isHasebe.value ? hasebeIdleChats : idleChats)), 45000 + Math.random() * 45000)
 }
 
 function startInteraction(lines: ChatLine[]) {
@@ -128,10 +139,17 @@ watch(() => props.active, (now, before) => {
     cancelInteraction()
   } else if (before) {
     // 刚收工：尽快安排一次庆祝寒暄
-    later(() => startInteraction(pick(finishChats)), 2500)
+    later(() => startInteraction(pick(isHasebe.value ? hasebeFinishChats : finishChats)), 2500)
   } else {
     scheduleNext()
   }
+})
+
+watch(companion, () => {
+  cancelInteraction()
+  bounces.forEach(animation => animation.cancel())
+  bounces.clear()
+  scheduleNext()
 })
 
 onMounted(() => { if (!props.active) scheduleNext() })
@@ -140,7 +158,7 @@ onBeforeUnmount(() => { disposed = true; clearTimers(); bounces.forEach(animatio
 
 <template>
   <div class="stage-actors" :class="`phase-${phase}`">
-    <button type="button" class="stage-kogi" aria-label="和小狐丸打招呼" @click="poke('kogi', $event)"></button>
+    <button type="button" class="stage-kogi" :aria-label="isHasebe ? '和压切长谷部打招呼' : '和小狐丸打招呼'" :style="isHasebe ? { backgroundImage: `url('/static/img/hasebe_frames/v1/idle.png')`, backgroundSize: 'auto 120%' } : undefined" @click="poke('kogi', $event)"></button>
     <button type="button" class="stage-fox" aria-label="和小狐狸打招呼" @click="poke('fox', $event)"></button>
     <div v-if="kogiLine" class="stage-bubble bubble-kogi" role="status">{{ kogiLine }}</div>
     <div v-if="foxLine" class="stage-bubble bubble-fox" role="status">{{ foxLine }}</div>
