@@ -192,7 +192,8 @@ button { cursor: pointer; }
 .selected-chips::-webkit-scrollbar-thumb { background: #d39b08; border-radius: 999px; }
 .overview-task-card { padding: 10px 14px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: var(--r-md); box-shadow: var(--shadow-card); }
 .overview-task-card header { display: flex; justify-content: space-between; gap: 14px; }
-.overview-task-card h2 { margin: 0 0 3px; font-size: 16px; }
+.overview-task-card h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 3px; font-size: 16px; }
+.overview-task-card h2 img { width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; image-rendering: pixelated; }
 .overview-task-card p { margin: 0; color: var(--ink-soft); font-size: 12px; }
 .overview-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .overview-summary span { display: grid; gap: 1px; min-width: 78px; padding: 4px 8px; background: #f1e7d6; border: 1px solid #d7c9b5; }
