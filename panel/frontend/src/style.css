@@ -167,29 +167,14 @@ button { cursor: pointer; }
 .home-dashboard .resources-card { grid-column: auto; }
 .home-dashboard .resource-grid { grid-template-columns: 1fr 1fr; }
 
-/* Keep dense desktop columns from losing a full native scrollbar width. */
-.home-functions, .home-dashboard, .log-list, .content, .single-layout,
-.schedule-panel, .lists-panel, .system-panel, .messages, .candidate-grid, .selected-chips {
+/* All scrollable surfaces share the stage panel's slim gold scrollbar. */
+* {
   scrollbar-width: thin;
   scrollbar-color: #d39b08 transparent;
 }
-.home-functions::-webkit-scrollbar, .home-dashboard::-webkit-scrollbar,
-.log-list::-webkit-scrollbar, .content::-webkit-scrollbar, .single-layout::-webkit-scrollbar,
-.schedule-panel::-webkit-scrollbar, .lists-panel::-webkit-scrollbar,
-.system-panel::-webkit-scrollbar, .messages::-webkit-scrollbar,
-.candidate-grid::-webkit-scrollbar, .selected-chips::-webkit-scrollbar { width: 6px; height: 6px; }
-.home-functions::-webkit-scrollbar-track, .home-dashboard::-webkit-scrollbar-track,
-.log-list::-webkit-scrollbar-track, .content::-webkit-scrollbar-track,
-.single-layout::-webkit-scrollbar-track, .schedule-panel::-webkit-scrollbar-track,
-.lists-panel::-webkit-scrollbar-track, .system-panel::-webkit-scrollbar-track,
-.messages::-webkit-scrollbar-track, .candidate-grid::-webkit-scrollbar-track,
-.selected-chips::-webkit-scrollbar-track { background: transparent; }
-.home-functions::-webkit-scrollbar-thumb, .home-dashboard::-webkit-scrollbar-thumb,
-.log-list::-webkit-scrollbar-thumb, .content::-webkit-scrollbar-thumb,
-.single-layout::-webkit-scrollbar-thumb, .schedule-panel::-webkit-scrollbar-thumb,
-.lists-panel::-webkit-scrollbar-thumb, .system-panel::-webkit-scrollbar-thumb,
-.messages::-webkit-scrollbar-thumb, .candidate-grid::-webkit-scrollbar-thumb,
-.selected-chips::-webkit-scrollbar-thumb { background: #d39b08; border-radius: 999px; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #d39b08; border-radius: 999px; }
 .overview-task-card { padding: 10px 14px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: var(--r-md); box-shadow: var(--shadow-card); }
 .overview-task-card header { display: flex; justify-content: space-between; gap: 14px; }
 .overview-task-card h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 3px; font-size: 16px; }
@@ -1415,9 +1400,6 @@ body[data-theme='pixel'] .home-dashboard .dashboard-grid {
   padding: 0 11px 18px 3px;
   scrollbar-gutter: stable;
 }
-body[data-theme='pixel'] .home-dashboard .dashboard-grid::-webkit-scrollbar { width: 8px; }
-body[data-theme='pixel'] .home-dashboard .dashboard-grid::-webkit-scrollbar-track { background: #f6eddb; }
-body[data-theme='pixel'] .home-dashboard .dashboard-grid::-webkit-scrollbar-thumb { background: #d4a017; border-radius: 5px; }
 body[data-theme='pixel'] .home-dashboard .dashboard-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
 body[data-theme='pixel'] .home-dashboard .dashboard-title h2 { white-space: nowrap; }
 body[data-theme='pixel'] .home-dashboard .dashboard-title p { display: block; white-space: nowrap; }
