@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "description": "刀剑乱舞日服（网页版）客户端-服务器端点对照卡：路径 -> 含义/数据类别。供 netlog 导入适配层分类使用。",
+    "source": "2026-10-07 实抓核对（Chrome net-export，build 347）",
+    "notes": [
+      "除 battle/battle 外响应均为明文 JSON；battle/battle 响应为 {\"data\": hex} 密文，encrypted 标记 true",
+      "每个响应携带新的链式令牌 t，重放/主动请求不属于本工具范围（只读导入）",
+      "资源键映射：charcoal=木炭 steel=玉钢 coolant=冷却材 file=砥石 bill=小判；item 内的依赖札/手伝い札等待核对",
+      "sword_id 即刀帐番号，直接复用 sword_db（touken/data/swords.json）查名"
+    ]
+  },
+  "endpoints": {
+    "/login/start": {"kind": "account", "note": "登录初始化：账号等级/经验/货币/道具/近侍/本丸"},
+    "/home/startup": {"kind": "home", "note": "进本丸的启动握手"},
+    "/home/index": {"kind": "home", "note": "本丸快照：resource/party/situation/event 等"},
+    "/party/list": {"kind": "swords", "note": "全刀帐+编队+preset，刀剑全字段（等级/经验/乱舞/内番加成/疲劳）"},
+    "/party/getpartyinfo": {"kind": "party", "note": "编队详情"},
+    "/party/setsword": {"kind": "party", "note": "编队换人"},
+    "/organization/index": {"kind": "swords", "note": "图鉴/组织界面，含刀帐与装备汇总"},
+    "/composition/index": {"kind": "compose", "note": "合成界面"},
+    "/composition/union": {"kind": "compose", "note": "习合（乱舞）"},
+    "/composition/compose": {"kind": "compose", "note": "合成执行"},
+    "/forge": {"kind": "forge", "note": "锻刀开炉/锻刀界面"},
+    "/forge/complete": {"kind": "forge", "note": "锻刀领取：sword_id/is_new_sword/assist_item"},
+    "/produce": {"kind": "produce", "note": "刀装制作"},
+    "/repair": {"kind": "repair", "note": "手入"},
+    "/conquest": {"kind": "expedition", "note": "远征"},
+    "/duty/index": {"kind": "duty", "note": "内番界面（含全刀帐）"},
+    "/duty/start": {"kind": "duty", "note": "内番开始：配对刀剑/finished_at"},
+    "/sally": {"kind": "sortie", "note": "出阵界面"},
+    "/sally/startup": {"kind": "sortie", "note": "出阵开始"},
+    "/sally/sally": {"kind": "sortie", "note": "出阵确认：episode_id/field_id/party_no"},
+    "/sally/forward": {"kind": "sortie", "note": "战场走位：square_id/dice/scout"},
+    "/sally/eventsally": {"kind": "sortie_event", "note": "活动图出阵"},
+    "/sally/eventforward": {"kind": "sortie_event", "note": "活动图走位"},
+    "/sally/eventkobanpoint": {"kind": "sortie_event", "note": "活动小判点数"},
+    "/sally/resetsallystatus": {"kind": "sortie", "note": "出阵状态重置"},
+    "/battle/battle": {"kind": "battle", "encrypted": true, "note": "战斗结算，密文"},
+    "/equip/setequip": {"kind": "equip", "note": "刀装/马匹装备"},
+    "/supply/addexp": {"kind": "supply", "note": "经验道具（根兵糖）"},
+    "/mission/index": {"kind": "mission", "note": "任务列表"},
+    "/mission/rewards": {"kind": "mission", "note": "任务领奖"},
+    "/startdash/index": {"kind": "startdash", "note": "新手冲刺"},
+    "/startdash/rewards": {"kind": "startdash", "note": "新手冲刺领奖"},
+    "/startdash/reward": {"kind": "startdash", "note": "新手冲刺单领"},
+    "/guide/record": {"kind": "guide", "note": "引导记录"},
+    "/guide/update": {"kind": "guide", "note": "引导更新"},
+    "/chargecenter/reflect": {"kind": "billing", "note": "甲州金/充值反映"},
+    "/artifact/getpartyusagescore": {"kind": "artifact", "note": "神器使用分"}
+  },
+  "resource_keys": {
+    "charcoal": "木炭",
+    "steel": "玉钢",
+    "coolant": "冷却材",
+    "file": "砥石",
+    "bill": "小判"
+  }
+}
