@@ -12,8 +12,10 @@ from .youzu_log import _event_epoch
 
 SCHEMA = 1
 FIELDS = {
-    "sword_id", "serial_id", "level", "ranbu_level", "hp", "hp_max", "fatigue",
+    "sword_id", "serial_id", "level", "exp", "ranbu_level", "ranbu_exp",
+    "hp", "hp_max", "fatigue",
     "protect", "created_at", "atk", "def", "mobile", "back", "hide", "scout", "loyalties",
+    "hp_up", "atk_up", "def_up", "mobile_up", "back_up", "scout_up", "hide_up",
     "horse_serial_id", "equip_serial_id1", "equip_serial_id2", "equip_serial_id3",
     "artifact_serial_id1", "artifact_serial_id2",
 }
@@ -215,6 +217,11 @@ def candidate_pool(store):
             "sword_catalog_id": catalog, "same_team_exclusion_key": catalog,
             "name_zh": info.get("name_zh") or info.get("name") or f"刀帐{sid}",
             "level": _integer(row.get("level")), "tou_level": _integer(row.get("ranbu_level")),
+            "exp": _integer(row.get("exp")), "ranbu_exp": _integer(row.get("ranbu_exp")),
+            "hp_up": _integer(row.get("hp_up")), "atk_up": _integer(row.get("atk_up")),
+            "def_up": _integer(row.get("def_up")), "mobile_up": _integer(row.get("mobile_up")),
+            "back_up": _integer(row.get("back_up")), "scout_up": _integer(row.get("scout_up")),
+            "hide_up": _integer(row.get("hide_up")),
             "survival": _integer(row.get("hp")), "survival_max": _integer(row.get("hp_max")),
             "fatigue": _integer(row.get("fatigue")), "fatigue_max": None,
             "locked": bool(_integer(row["protect"])) if _integer(row.get("protect")) in (0, 1) else None,

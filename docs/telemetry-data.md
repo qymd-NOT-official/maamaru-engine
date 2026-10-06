@@ -20,6 +20,12 @@
 - `GET /api/data/resource-ledger?days=7` 或 `?from=<ts>&to=<ts>`：资源总账（见下文），
   from/to（Unix 秒）优先于 days，days 默认 7。聚合全部在服务端完成，
   前端不要拉原始 events 自己算。
+- `GET /api/data/forge-history?days=30`：锻刀串链（forge.started ⋈
+  forge.collected），见下文「锻刀串链」。
+- `GET /api/data/event-points`：最新活动日历列表；`?event_id=X`：该活动
+  期内的点数时间线，见下文「活动点数历史」。
+- `GET /api/data/sword-journal/{serial_id}`：单振刀入手履历时间线，见下文
+  「入手履历」。
 
 所有响应都带 `schema_version`。前端遇到不认识的更高版本时，应保留未知字段，
 不要因新增字段报错。
@@ -327,6 +333,271 @@ updated_at epoch）：
   时含人工补值）。
 - `sword_type` 按 sword_catalog_id 从名册目录（`touken/sword_db.py`）
   反查；`human` 无标注时为 null。
+- `exp` / `ranbu_exp` / `hp_up` / `atk_up` / `def_up` / `mobile_up` /
+  `back_up` / `scout_up` / `hide_up`（可选，training 快照通道扩容后才有）：
+  原始刀池行原样透传（latest-wins 自动生效）；旧档案行没有这些字段，
+  恒为 null，不编 0。前端契约 `SwordArchiveEntry` 里标 `?: number | null`。
+
+## 练度档案（training）
+
+`touken/training_view.py` · 只读 API `GET /api/data/training/overview` 与
+`GET /api/data/training/history/{serial_id}`。数据源只有 TelemetryStore
+事件表的 `training.captured`（收账管线落库的练度快照，payload.swords
+每振带 serial_id/sword_id/level/exp/ranbu_level/ranbu_exp）。刀名不入
+库，展示层拿 sword_id 走 sword_db + `youzu_log._sword_name` 解析。
+没有快照 / 该编号无记录时 404，不返回假空壳。
+
+**乱舞换算数据卡** `touken/data/ranbu_rules.json`（消费入口
+`touken/ranbu_rules.py`）：按稀有度（1~5）给乱舞 Lv2→Lv10 每级所需
+**累计**习合值（抄日服 wiki 2025-09 版并已抓取核对；每喂 1 振同名刀 =
+100 习合值为国服官网公告口径）。诚实标注都在 `_meta`：
+`exp_per_sword_calibrated=false`（公告推断未实测，由此得出的
+need_swords_est 一律是估算）、`cn_max_level=null`（国服当前开放上限
+未实测锤死，换算只覆盖 wiki 表有的 Lv10，超出一律返回 null 不瞎猜）。
+髭切/膝丸是 wiki 特例：swords.json 记稀有 2，乱舞按稀有 4 计
+（`exceptions` 按目录 id 覆盖）。
+
+**响应契约**：
+
+`GET /api/data/training/overview`（最新一条快照，swords 按 serial_id
+升序）：
+
+```json
+{"ts": 1787219985.79, "captured_at": "2026-09-20 20:00:00", "sword_count": 199,
+ "swords": [{"serial_id": 1, "sword_id": 3, "name": "三日月宗近",
+             "level": 99, "exp": 12345678,
+             "ranbu_level": 5, "ranbu_exp": 2300,
+             "ranbu_next": {"need_exp": 200, "need_swords_est": 2},
+             "captured_at": "2026-09-20 20:00:00"}]}
+```
+
+- `ranbu_next`：到下一级乱舞还差的累计习合值（`need_exp`，快照滞后致
+  已超阈值时钳到 0）与估算还需同名刀振数（`need_swords_est` =
+  ceil(need_exp/100)，100/振未实测，展示别当实测值）。乱舞满级
+  （换算表 Lv10 封顶）、稀有度查不到/表外、等级读不出 → 整个
+  `ranbu_next` 为 null。
+
+`GET /api/data/training/history/{serial_id}`（该振全部快照，时间升序）：
+
+```json
+{"serial_id": 1,
+ "timeline": [{"captured_at": "2026-09-01 20:00:00", "ts": 1787220000.0,
+               "level": 98, "exp": 12000000,
+               "ranbu_level": 4, "ranbu_exp": 2200}],
+ "first_max_level_observed_at": "2026-09-20 20:00:00"}
+```
+
+- `first_max_level_observed_at` 是快照链上**第一次观测到** level=99 的
+  `captured_at`——不是「首次达成」（两次快照之间的实际达成时刻无从考
+  证）；从没观测到 99 → null。
+
+## 掉落统计（drop-stats）
+
+`touken/drop_stats.py` · 只读 API `GET /api/data/drop-stats?days=N`
+（days 缺省 30，`0`=全部，窗口按事件 `ts` 过滤）。按地图/玩法聚合窗口内
+的周回分母与掉落分子，掉率不预算死，前端拿 `drop_total`/`battles` 自己除。
+
+分母合并两个来源、同一来源内部不重复计：
+
+- 手动 `battle.completed`：客户端收据逐场记账，一条 = 1 场。
+- 面板逐圈记录：`sortie.loop_started` × 结束事件按 run 配对（与
+  `run_summary.loop_records` 同口径），`drop_observation=="not_observed"`
+  的圈既不是「掉了」也不是「没掉」，整圈剔除（sortie.py 的诚实口径）。
+  圈的战斗数优先用 `battle_count`（结算页沿计数）；读不出时 completed
+  圈记 1（王点战必有结算页，游戏机制），中断/结局未知的圈记 0（不编）。
+- 联队战（`raid.round_completed`）按 `battle_taps`（一戳一场）进「联队战」
+  组；大阪城（`osaka.floor_completed`）一层按 1 场进「大阪城」组（层内
+  不止一场的情形未实测，不细分）。
+
+分子只认 `sword.obtained` 里 `source` ∈ `sortie.drop` / `battle.drop` /
+`raid.drop` / `osaka.drop` 的掉落收据（锻刀/收件箱/远征等来源不算掉
+落）；圈记录里的 `drops_recognized` 只是数量，不当分子用，明细以
+`sword.obtained` 为准。
+
+`boss_reached` 的 null 语义（没实测校准的判定不编）：
+
+- 地图组 = 面板圈 `outcome=="completed"` 的圈数（completed 隐含到王点）。
+- 纯手动来源的地图组 → `null`：手动侧 `square_id` 哪格是王点**未校准**，
+  不许猜；联队战/大阪城无王点概念 → `null`。
+- `not_observed` 圈只是掉落观察不成立，不代表没到王点：该状态的 completed
+  圈仍计入 `boss_reached`，只是不进 `battles` 分母。
+
+已知口径不对称（如实呈现，不做启发式剔除）：
+
+- 联队战/大阪城的分子来自客户端日志收据（手动打 + 面板代打都算），分母
+  只来自面板跑的回合/层——纯手动的联队战/大阪城只进分子不进分母。
+- 面板代打后又同步客户端日志时，同一场战斗会同时以「面板圈」和
+  `battle.completed` 收据各进一次分母；大阪城代打的场次经日志回同步会
+  落到地图键（客户端日志分不清大阪城图和普图）而非「大阪城」组。
+
+缺 `chapter`/`map_no` 进不了任何分组的事件（老收据丢路线、认人降级等）
+不静默丢弃，统一记进 `unattributed`，保证账能对上。
+
+响应样例：
+
+```json
+{"schema_version": 15, "generated_at": 1787220000.0,
+ "window": {"days": 30, "from_ts": 1784628000.0, "to_ts": 1787220000.0},
+ "groups": [{"key": "8-2", "kind": "map", "battles": 214, "boss_reached": 60,
+             "drops": [{"name": "太郎太刀", "count": 2, "first_get_count": 0}],
+             "drop_total": 3},
+            {"key": "联队战", "kind": "raid", "battles": 480, "boss_reached": null,
+             "drops": [], "drop_total": 0},
+            {"key": "大阪城", "kind": "osaka", "battles": 57, "boss_reached": null,
+             "drops": [{"name": "博多藤四郎", "count": 1, "first_get_count": 1}],
+             "drop_total": 1}],
+ "unattributed": {"battles": 3, "drop_total": 1}}
+```
+
+## 内番养成视图（training/internal-affairs）
+
+`touken/training_view.py`（`build_internal_affairs`）· 只读 API
+`GET /api/data/training/internal-affairs`。名册取最新一条
+`training.captured`（已离开刀池的刀不出现），逐振列出内番已喂数值与平台
+期结论，swords 按 `serial_id` 升序。没有快照 404。
+
+```json
+{"ts": 1787219985.79, "captured_at": "2026-09-20 20:00:00", "sword_count": 199,
+ "plateau_k": 3,
+ "swords": [{"serial_id": 1, "sword_id": 3, "name": "三日月宗近",
+             "hp_up": 12, "scout_up": 8,
+             "hp_plateau": true, "scout_plateau": false,
+             "captured_at": "2026-09-20 20:00:00"}]}
+```
+
+- 只出 `hp_up`（生存）与 `scout_up`（侦察）——这两个是内番专属；打击/
+  统率/机动/冲力/隐蔽炼结也能喂，不出，免得「内番涨的」和「炼结喂的」
+  混在一起说不清楚。
+- `hp_plateau`/`scout_plateau` 是**平台期启发式**：该振自己的快照链
+  （含它的帧，按时间序）上最近连续 `plateau_k`（=3）条不增长 → `true`；
+  链上有效读数不足 3 条 → `null`（判定不出，不猜）。快照帧里该字段读
+  不出时不进比较链，不当 0 凑数。
+- **内番上限表未校准**：`plateau=true` 表示「连续多次收账没再涨」，可能
+  是喂满也可能是没喂，绝不等于「到官方上限」；前端展示必须带这个口径，
+  别写死「已喂满」。
+
+## 锻刀串链（forge-history）
+
+`touken/forge_history.py` · 只读 API `GET /api/data/forge-history?days=N`
+（days 缺省 30，`0`=全部）。把 `forge.started` ⋈ `forge.collected` 按
+**炉位 + 时间序**配成一炉炉的履历，forges 按 `started_at` 升序（新的在
+后），`orphan_collected` 同样升序。
+
+配对口径（不硬撮合）：
+
+- 同一炉位内按 `(ts, id)` 走：一条 started 之后、同炉位下一条 started
+  之前的 collected 归这炉（一炉收多把时逐条 collected 都归它）。
+- started 没等到 collected → 照常出一炉，`collected_at`/`swords` 给
+  `null`（炉子还烧着或领取没记上，不编结果）。
+- collected 前面没有同炉位的 started（开炉在采集起点之前、或 started
+  落在窗口外）→ 进 `orphan_collected` 老实列出。
+- 炉位号两种写法都收：youzu_log 收据写 `slot_no`（带配方），面板锻刀
+  流写 `slot`（不带配方）；连炉位号都没有的事件不谈归属，不编。
+- `days` 窗口按事件自身 `ts` 过滤 started/collected，只保证窗口内的
+  事件互相配对；跨窗口边界的炉会被切成「炉在窗外、领取在窗内 →
+  orphan_collected」。
+
+字段口径（没实测校准的判定不编）：
+
+- `recipe`：`charcoal`/`steel`/`coolant`/`file`，缺一律 `null`（面板
+  锻刀流落的 started 没有配方，不拿默认配方填）。
+- `secretary`：开炉时刻之前最近一条 `secretary.observed`（登录时刻的
+  观测），带 sword_id/名字/观测时刻；一条都没有 → `null`。**局内换人
+  无法分辨**：观测只在登录时产生，登录后在游戏里换的近侍看不出来，
+  只能按最近一次登录观测给。
+- `cost_est`：只估四种资源的配方消耗——领取把数 `count>1`（十连一把
+  收）按配方×count，普通×1；配方全缺 → `null`，读不出的字段保持
+  `null` 不补 0。**委托符/加速符消耗不走这里**（在 `resource.change`
+  里另记），别把它当总成本。
+- `swords`：收据的 `swords` 列表（name/sword_id/serial_id/
+  is_first_get_sword）；面板锻刀流的内联单刀收成单元素列表
+  （`serial_id`/`is_first_get_sword` 没有 → `null`）。
+
+响应样例：
+
+```json
+{"schema_version": 15, "generated_at": 1787220000.0,
+ "window": {"days": 30, "from_ts": 1784628000.0, "to_ts": 1787220000.0},
+ "forges": [{"slot_no": 1, "started_at": 1784600000.0,
+             "recipe": {"charcoal": 350, "steel": 350, "coolant": 350, "file": 350},
+             "secretary": {"sword_id": 3, "name": "三日月宗近", "observed_at": 1784599000.0},
+             "collected_at": 1784650000.0,
+             "swords": [{"name": "今剑", "sword_id": 11, "serial_id": 2077,
+                         "is_first_get_sword": false}],
+             "cost_est": {"charcoal": 350, "steel": 350, "coolant": 350, "file": 350}}],
+ "orphan_collected": [{"slot_no": 2, "collected_at": 1784700000.0, "count": 1,
+                       "swords": [{"name": "小狐丸", "sword_id": 5, "serial_id": 2081,
+                                   "is_first_get_sword": null}]}]}
+```
+
+## 活动点数历史（event-points）
+
+`touken/event_points.py` · 只读 API `GET /api/data/event-points`。
+不带 `event_id` 返回最新一条 `activity.calendar` 的 `events` 原样列表
+（`event_id`/`type`/`start_at`/`end_at`），从没同步过日历返回空清单；
+**本地没有 event_id → 活动名的映射**，原样给 id，名字留给前端/活动时
+间轴（panel 已有活动知识）。
+
+带 `?event_id=X` 返回该活动期内的点数时间线：取 `inventory.captured`
+的 `resources` 里「`活动点数·{event_id}`」读数，切片窗
+`[start_at, end_at + 1 天]`——**活动结束后 1 天内的读数仍算收尾读数**
+（收账往往落在刚结束的窗口），`start_at` 之前没有宽限。`start_at`/
+`end_at` 按游戏服务器时间（+08:00）解析，`"2026-10-01 00:00:00"` 与
+ISO 两种写法都认；两个都解析不出来返回 400（切片窗都不成立，硬切是不
+诚实）。日历里没有这个 event_id → 404。
+
+点数读数只收非负整数，读不出/怪值的帧跳过（不补 0 不插值），timeline
+按 `ts` 升序，前端画断点。
+
+响应样例：
+
+```json
+{"schema_version": 15, "generated_at": 1787220000.0, "event_id": "10031",
+ "type": 1, "start_at": "2026-10-01 00:00:00", "end_at": "2026-10-08 23:59:59",
+ "window": {"from_ts": 1789220000.0, "to_ts": 1790186399.0, "grace_seconds": 86400},
+ "timeline": [{"ts": 1789300000.0, "captured_at": "2026-10-02 08:00:00", "points": 1200},
+              {"ts": 1789400000.0, "captured_at": "2026-10-03 08:00:00", "points": 3600}]}
+```
+
+## 入手履历（sword-journal）
+
+`touken/sword_journal.py` · 只读 API
+`GET /api/data/sword-journal/{serial_id}`。单振刀的已确认事实时间线，
+按 `ts` 升序（`ts` 解析不出的排最后），`kind` ∈
+`obtained`/`departed`/`returned`/`max_level_observed`；**缺哪段就没有
+哪段，不编**，一条都凑不出 404。
+
+- `obtained`：两个来源合并展示——刀帐档案（youzu_sword_archive）的
+  `created_at`（游戏给的首次获得日）放 `archive_created_at`；`sword.
+  obtained` 收据带来源（`source`）/地图（`chapter`/`map_no`）/是否初
+  入手（`is_first_get_sword`）/`acquired_at` 原文。只有档案 → 出一条
+  obtained（收据字段全 `null`）；只有收据 → `archive_created_at` 为
+  `null`。`acquired_at` 解析失败时排序 `ts` 退化为事件观测时刻，原文
+  保留；档案 `created_at` 解析不出时 `ts` 给 `null`。
+- `departed`/`returned`：客户端收据事实，`ts` 一律取事件 ts（观测时
+  刻）；`returned` 的 `finished_at` 是游戏给的完成时间原文，字段形态
+  未逐项实测，原样带出不解析。送修请求字段名未实测（白名单采集），
+  `departed` 可能很少或没有。
+- `max_level_observed`：复用练度快照链口径（`training_view`）——链上
+  首次观测到 `level=99` 的快照时刻，`detail.captured_at` 是快照游戏
+  时间；**是「首次观测到」不是「首次达成」**。乱舞/等级里程碑不在这
+  里推，快照链 history API 已有。
+
+响应样例：
+
+```json
+{"schema_version": 15, "generated_at": 1787220000.0, "serial_id": 2077,
+ "timeline": [{"ts": 1782000000.0, "kind": "obtained",
+               "detail": {"name": "今剑", "sword_id": 11, "source": "forge",
+                          "chapter": null, "map_no": null,
+                          "is_first_get_sword": true, "acquired_at": 1782000000.0,
+                          "archive_created_at": "2026-06-21 12:34:56"}},
+              {"ts": 1784000000.0, "kind": "departed", "detail": {}},
+              {"ts": 1786000000.0, "kind": "returned",
+               "detail": {"finished_at": "2026-09-30 05:00:00"}},
+              {"ts": 1787000000.0, "kind": "max_level_observed",
+               "detail": {"captured_at": "2026-10-09 08:00:00", "level": 99}}]}
+```
 
 ## 手动活动（manual-sessions）
 

@@ -238,3 +238,51 @@ def test_old_consumption_does_not_remove_sword_seen_in_newer_full_inventory():
     assert set(updated['swords']) == {'1', '2'}
     assert updated['swords']['1']['ranbu_level'] == 2
 
+
+# ---------------------------------------------------------------- training 字段扩容
+
+
+def test_training_fields_are_archived_and_passed_through(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    row = sword(1)
+    row.update({"exp": 123456, "ranbu_exp": 2300, "hp_up": 1, "atk_up": 2,
+                "def_up": 3, "mobile_up": 4, "back_up": 5, "scout_up": 6,
+                "hide_up": 7, "session": "never-store-this"})
+    sync_archive([full(row)], store)
+    archived = read_archive(store)["swords"]["1"]
+    assert archived["exp"] == 123456 and archived["ranbu_exp"] == 2300
+    assert archived["hide_up"] == 7
+    assert "session" not in archived
+    entry = candidate_pool(store)["entries"][0]
+    for key in ("exp", "ranbu_exp", "hp_up", "atk_up", "def_up",
+                "mobile_up", "back_up", "scout_up", "hide_up"):
+        assert entry[key] == archived[key]
+    merged = build_sword_archive(store)["entries"][0]
+    for key in ("exp", "ranbu_exp", "hp_up", "atk_up", "def_up",
+                "mobile_up", "back_up", "scout_up", "hide_up"):
+        assert merged[key] == archived[key]
+
+
+def test_newer_partial_update_wins_on_training_fields(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    sync_archive([full(sword(1))], store)
+    newer = event("/sally", {"sword_all": {"1": {**sword(1), "exp": 999999,
+                                                 "ranbu_exp": 100}}}, 1)
+    sync_archive([newer], store)
+    entry = candidate_pool(store)["entries"][0]
+    assert entry["exp"] == 999999 and entry["ranbu_exp"] == 100
+
+
+def test_legacy_rows_without_training_fields_pass_null_not_zero(tmp_path):
+    # 旧档案行（白名单扩容前落盘）没有这些字段：透传 null，不编 0。
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    sync_archive([full(sword(1))], store)
+    archived = read_archive(store)["swords"]["1"]
+    assert "exp" not in archived and "hp_up" not in archived
+    entry = candidate_pool(store)["entries"][0]
+    merged = build_sword_archive(store)["entries"][0]
+    for target in (entry, merged):
+        for key in ("exp", "ranbu_exp", "hp_up", "atk_up", "def_up",
+                    "mobile_up", "back_up", "scout_up", "hide_up"):
+            assert target[key] is None
+

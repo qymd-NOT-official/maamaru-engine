@@ -876,6 +876,18 @@ export interface SwordArchiveEntry {
   sword_type: string | null
   level: number | null
   tou_level: number | null
+  /** 累积经验（training 快照通道扩容后才有；旧档案行没有这些字段，后端给 null 不编 0） */
+  exp?: number | null
+  /** 乱舞累积习合值；同上，缺了给 null */
+  ranbu_exp?: number | null
+  /** 内番已喂数值（生存/打击/统率/机动/冲力/侦察/隐蔽，原始刀池行字段）；旧行 null */
+  hp_up?: number | null
+  atk_up?: number | null
+  def_up?: number | null
+  mobile_up?: number | null
+  back_up?: number | null
+  scout_up?: number | null
+  hide_up?: number | null
   /** 历史字段名，实为「显现日期」（获得日期），展示必须叫显现日期 */
   kiwame_date: string | null
   form_status: SwordFormStatus
@@ -941,6 +953,236 @@ export interface SwordArchiveAnnotation {
   id: number
   sword_catalog_id: string
   [key: string]: unknown
+}
+
+// ---- 练度档案（/api/data/training/overview · /api/data/training/history/{serial_id}）----
+
+/** 乱舞下一级差额；满级/超国服未知上限/稀有度查不出时为 null */
+export interface RanbuNext {
+  /** 到下一级还差的累计习合值 */
+  need_exp: number
+  /** 估算还需同名刀振数：need_exp / 100 向上取整（100 习合值/振是国服公告口径，未实测，别当实测值展示） */
+  need_swords_est: number
+}
+
+export interface TrainingOverviewSword {
+  serial_id: number
+  sword_id: number | null
+  /** 刀名：sword_db + youzu_log._sword_name 解析（极化带「·极」）；查不到退「刀帐{id}」 */
+  name: string | null
+  level: number | null
+  exp: number | null
+  ranbu_level: number | null
+  ranbu_exp: number | null
+  ranbu_next: RanbuNext | null
+  captured_at: string
+}
+
+export interface TrainingOverviewResponse {
+  ts: number
+  captured_at: string
+  sword_count: number
+  swords: TrainingOverviewSword[]
+}
+
+export interface TrainingHistoryPoint {
+  captured_at: string
+  ts: number
+  level: number | null
+  exp: number | null
+  ranbu_level: number | null
+  ranbu_exp: number | null
+}
+
+export interface TrainingHistoryResponse {
+  serial_id: number
+  timeline: TrainingHistoryPoint[]
+  /** 链上第一次观测到 level=99 的 captured_at；从没观测到为 null。注意是「首次观测到」不是「首次达成」 */
+  first_max_level_observed_at: string | null
+}
+
+// ---- 掉落统计（/api/data/drop-stats?days=N，days 缺省 30，0=全部）----
+
+export type DropStatsGroupKind = 'map' | 'raid' | 'osaka'
+
+export interface DropStatsDrop {
+  /** 刀名认不出为 null；count 是掉落收据条数，first_get_count 是其中首次入手的 */
+  name: string | null
+  count: number
+  first_get_count: number
+}
+
+export interface DropStatsGroup {
+  /** 地图组 = 「章-图」（如 "8-2"）；raid = 固定 "联队战"；osaka = 固定 "大阪城" */
+  key: string
+  kind: DropStatsGroupKind
+  /** 分母（总战斗数）：手动 battle.completed 逐场 + 面板圈（battle_count，读不出的 completed 圈记 1）+ 联队战 battle_taps + 大阪城每层记 1；not_observed 圈已剔除 */
+  battles: number
+  /** 王点到达数：地图组 = 面板圈 outcome=completed 数；纯手动来源的组（含联队战/大阪城）为 null——手动侧 square_id 哪格是王点未校准，绝不猜 */
+  boss_reached: number | null
+  drops: DropStatsDrop[]
+  drop_total: number
+}
+
+export interface DropStatsResponse {
+  schema_version: number
+  generated_at: number
+  window: { days: number; from_ts: number | null; to_ts: number }
+  groups: DropStatsGroup[]
+  /** 进不了任何分组的诚实记账：缺 chapter/map_no 的 battle.completed 与 sortie.drop/battle.drop 收据落这里，账能对上 */
+  unattributed: { battles: number; drop_total: number }
+}
+
+// ---- 内番养成视图（/api/data/training/internal-affairs）----
+
+export interface InternalAffairsSword {
+  serial_id: number
+  sword_id: number | null
+  name: string | null
+  /** 内番已喂数值：生存（hp_up）/侦察（scout_up），只有这两个是内番专属；其他 *_up 炼结也能喂，不出 */
+  hp_up: number | null
+  scout_up: number | null
+  /** 疑似喂满：自己快照链上最近连续 plateau_k 条不增长。平台期启发式——内番上限表未校准，true 是「连续多次收账没再涨」，可能喂满也可能没喂；快照不足 plateau_k 条为 null（判定不出） */
+  hp_plateau: boolean | null
+  scout_plateau: boolean | null
+  captured_at: string
+}
+
+export interface InternalAffairsResponse {
+  ts: number
+  captured_at: string
+  sword_count: number
+  /** plateau 判定窗口 K：连续 K 条快照不增长才算疑似喂满 */
+  plateau_k: number
+  swords: InternalAffairsSword[]
+}
+
+// ---- 锻刀串链（/api/data/forge-history?days=N，days 缺省 30，0=全部）----
+
+export interface ForgeHistoryRecipe {
+  /** 配方字段；面板锻刀流落的 started 没有配方，全 null */
+  charcoal: number | null
+  steel: number | null
+  coolant: number | null
+  file: number | null
+}
+
+export interface ForgeHistorySecretary {
+  sword_id: number | null
+  name: string | null
+  /** 近侍观测时刻（登录时刻）：局内换人无法分辨，这是开炉前最近一次登录观测 */
+  observed_at: number
+}
+
+export interface ForgeHistorySword {
+  name: string | null
+  sword_id: number | null
+  serial_id: number | null
+  /** 面板锻刀流认出的单刀没有初入手标记 → null */
+  is_first_get_sword: boolean | null
+}
+
+export interface ForgeHistoryForge {
+  slot_no: number
+  started_at: number
+  recipe: ForgeHistoryRecipe
+  /** 开炉时刻之前最近一条 secretary.observed；一条都没有 → null */
+  secretary: ForgeHistorySecretary | null
+  /** 领取时刻；炉还没收 → null */
+  collected_at: number | null
+  /** 领取结果；没收到 → null */
+  swords: ForgeHistorySword[] | null
+  /** 配方消耗估计：count>1 按配方×count，普通×1；配方全缺 → null。不含委托符/加速符（在 resource.change） */
+  cost_est: ForgeHistoryRecipe | null
+}
+
+export interface ForgeHistoryOrphanCollected {
+  slot_no: number
+  collected_at: number
+  count: number
+  swords: ForgeHistorySword[] | null
+}
+
+export interface ForgeHistoryResponse {
+  schema_version: number
+  generated_at: number
+  window: { days: number; from_ts: number | null; to_ts: number }
+  /** 有 started 的炉（含没收到领取的），started_at 升序 */
+  forges: ForgeHistoryForge[]
+  /** 配不上的领取（开炉在采集起点之前/窗外）：老实列出，不硬撮合 */
+  orphan_collected: ForgeHistoryOrphanCollected[]
+}
+
+// ---- 活动点数历史（/api/data/event-points，不给 event_id 返回活动列表）----
+
+export interface EventPointsActivity {
+  event_id: string
+  type: number
+  /** 游戏服务器时间原文（国服 +08:00），原样给出 */
+  start_at: string
+  end_at: string
+}
+
+export interface EventPointsListResponse {
+  schema_version: number
+  generated_at: number
+  /** 这条日历是哪天观测到的（登录同步）；从没同步过 → null */
+  observed_at: number | null
+  /** 最新一条 activity.calendar 的 events；event_id→活动名本地没有，原样给 id，名字由前端活动知识解析 */
+  events: EventPointsActivity[]
+}
+
+export interface EventPointsPoint {
+  ts: number
+  /** 截图/同步时刻的游戏时间原文；payload 没带 → null */
+  captured_at: string | null
+  points: number
+}
+
+export interface EventPointsTimelineResponse {
+  schema_version: number
+  generated_at: number
+  event_id: string
+  type: number | null
+  start_at: string
+  end_at: string
+  /** 切片窗：[start_at, end_at+grace]；活动结束后 1 天内的读数仍算收尾读数，start 前没有宽限 */
+  window: { from_ts: number; to_ts: number; grace_seconds: number }
+  /** 升序；读数读不出的帧跳过（不补 0），前端画断点 */
+  timeline: EventPointsPoint[]
+}
+
+// ---- 入手履历（/api/data/sword-journal/{serial_id}）----
+
+export type SwordJournalKind = 'obtained' | 'departed' | 'returned' | 'max_level_observed'
+
+export interface SwordJournalObtainedDetail {
+  name: string | null
+  sword_id: number | null
+  /** 收据来源（forge/sortie.drop/inbox.claim…）；收据缺 → null */
+  source: string | null
+  chapter: number | null
+  map_no: number | null
+  is_first_get_sword: boolean | null
+  /** 收据原文（数字或时间串）；acquired_at 解析失败时 ts 退化为事件观测时刻 */
+  acquired_at: number | string | null
+  /** 刀帐档案的首次获得日（游戏原文）；档案缺这一段 → null */
+  archive_created_at: string | null
+}
+
+export interface SwordJournalEntry {
+  /** 事实时刻；档案 created_at 解析不出的入手条目为 null（排最后） */
+  ts: number | null
+  kind: SwordJournalKind
+  detail: SwordJournalObtainedDetail | { finished_at?: string } | { captured_at: string; level: number } | Record<string, never>
+}
+
+export interface SwordJournalResponse {
+  schema_version: number
+  generated_at: number
+  serial_id: number
+  /** ts 升序；缺哪段就没有哪段，不编。max_level_observed 是「快照链首次观测到 99」不是「首次达成」 */
+  timeline: SwordJournalEntry[]
 }
 
 // ---- 模板工坊 /api/template-lab（开发专用，打包版不启用）----

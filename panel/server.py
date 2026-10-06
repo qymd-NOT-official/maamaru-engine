@@ -3252,6 +3252,111 @@ async def api_revoke_sword_annotation(annotation_id: int):
     return {"ok": True}
 
 
+@app.get("/api/data/training/overview")
+async def api_training_overview():
+    """练度总览：最新 training.captured 快照逐振列出 level/exp/乱舞，
+    附到下一级乱舞还差的习合值与估算振数（need_swords_est 按公告口径
+    100 习合值/振估算，未实测）。没有快照 404。契约见
+    docs/telemetry-data.md「练度档案（training）」。"""
+    from touken.telemetry import get_telemetry_store
+    from touken.training_view import build_training_overview
+    result = build_training_overview(get_telemetry_store())
+    if result is None:
+        raise HTTPException(404, "还没有练度快照，先让收账跑一轮。")
+    return result
+
+
+@app.get("/api/data/training/history/{serial_id}")
+async def api_training_history(serial_id: int):
+    """单振刀的练度快照链时间线（training.captured，时间升序），附
+    first_max_level_observed_at（链上首次观测到 level=99，不是首次达成）。
+    该编号没有快照记录 404。"""
+    from touken.telemetry import get_telemetry_store
+    from touken.training_view import build_training_history
+    result = build_training_history(get_telemetry_store(), serial_id)
+    if result is None:
+        raise HTTPException(404, f"编号 {serial_id} 还没有练度快照记录。")
+    return result
+
+
+# ── 数据视图区块 · 掉落统计 + 内番养成 ─────────────────────────────────
+# 本区块集中放只读数据视图的新路由；聚合逻辑本体在 touken/drop_stats.py
+# 与 touken/training_view.py，契约写在 docs/telemetry-data.md 对应章节。
+# 后面工人加新数据路由（锻刀串链/履历包等）请紧挨本区块往下续，别散落。
+# ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/data/drop-stats")
+async def api_drop_stats(days: int = 30):
+    """掉落统计：手动 battle.completed + 面板逐圈记录（剔除 not_observed
+    圈）合并当分母，sword.obtained 掉落收据当分子，按地图/玩法分组。
+    掉率不预算死，前端拿 drops/drop_total 和 battles 自己除；分母口径与
+    boss_reached 的 null 语义（手动侧王点未校准一律 null）见
+    docs/telemetry-data.md「掉落统计」。days 缺省 30，0=全部。"""
+    from touken.drop_stats import build_drop_stats
+    from touken.telemetry import get_telemetry_store
+    return build_drop_stats(get_telemetry_store(), days=days)
+
+
+@app.get("/api/data/training/internal-affairs")
+async def api_training_internal_affairs():
+    """内番养成视图：最新练度快照在册的每振刀，列内番已喂的生存/侦察
+    数值与平台期启发式结论（plateau_k=3，连续 K 条快照不增长；上限表
+    未校准，true 只是「连续多次收账没再涨」，可能喂满也可能没喂）。
+    没有快照 404。契约见 docs/telemetry-data.md「内番养成视图」。"""
+    from touken.telemetry import get_telemetry_store
+    from touken.training_view import build_internal_affairs
+    result = build_internal_affairs(get_telemetry_store())
+    if result is None:
+        raise HTTPException(404, "还没有练度快照，先让收账跑一轮。")
+    return result
+
+
+@app.get("/api/data/forge-history")
+async def api_forge_history(days: int = 30):
+    """锻刀串链：forge.started ⋈ forge.collected 按炉位+时间序配对，
+    附开炉前最近一条近侍观测与配方消耗估计。days 缺省 30，0=全部；
+    窗口口径、近侍局限（登录时刻观测，局内换人无法分辨）、cost_est 不含
+    委托符/加速符等，见 docs/telemetry-data.md「锻刀串链」。"""
+    from touken.forge_history import build_forge_history
+    from touken.telemetry import get_telemetry_store
+    return build_forge_history(get_telemetry_store(), days=days)
+
+
+@app.get("/api/data/event-points")
+async def api_event_points(event_id: str = ""):
+    """活动点数历史：不带 event_id 返回最新活动日历的 events 原样列表
+    （event_id→活动名本地没有，原样给 id）；带 event_id 返回该活动期内
+    「活动点数·{event_id}」读数时间线（结束后 1 天内算收尾读数）。
+    契约见 docs/telemetry-data.md「活动点数历史」。"""
+    from touken.event_points import (build_event_points_list,
+                                     build_event_points_timeline)
+    from touken.telemetry import get_telemetry_store
+    store = get_telemetry_store()
+    event_id = str(event_id or "").strip()
+    if not event_id:
+        return build_event_points_list(store)
+    try:
+        result = build_event_points_timeline(store, event_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if result is None:
+        raise HTTPException(404, f"活动日历里没有活动 {event_id}。")
+    return result
+
+
+@app.get("/api/data/sword-journal/{serial_id}")
+async def api_sword_journal(serial_id: int):
+    """单振刀入手履历：入手（刀帐档案 created_at + sword.obtained 收据）、
+    修行进出、首次观测满级，按 ts 升序；缺哪段就没有哪段，不编。
+    契约见 docs/telemetry-data.md「入手履历」。"""
+    from touken.sword_journal import build_sword_journal
+    from touken.telemetry import get_telemetry_store
+    result = build_sword_journal(get_telemetry_store(), serial_id)
+    if result is None:
+        raise HTTPException(404, f"编号 {serial_id} 还没有履历记录。")
+    return result
+
+
 @app.get("/api/data/runs")
 async def api_data_runs(limit: int = 20, script: str = "",
                         before_started_at: float | None = None,
