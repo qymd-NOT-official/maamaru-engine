@@ -590,3 +590,94 @@ def test_builtin_scheduled_raid_respects_saved_ticket_setting():
     spec = dc.workflow_spec(dc.BUILTIN_ID, settings)
     assert spec["nodes"][0]["params"]["auto_refill"] is False
     assert settings["auto_refill"] is False
+
+
+class RaidRecoveryTests(unittest.TestCase):
+    setUp = DayConductorTests.setUp
+    arm = DayConductorTests.arm
+
+    def interrupted(self):
+        state = self.arm()
+        state["enabled"] = False
+        state["blocks"][0].update(status="interrupted", run_id="old-run",
+                                  reason="执行状态不明，后续已停用")
+        dc._save(state, self.state_path)
+        return state
+
+    def test_legacy_progress_counts_confirmed_rounds_and_uncertain_one(self):
+        block = self.interrupted()["blocks"][0]
+        messages = ["[RAID] ===== 第 1/8 圈 =====", "[RAID] 第 1 圈结束",
+                    "[RAID] ===== 第 2/8 圈 ====="]
+        with patch("panel.log_store.get_store") as store:
+            store.return_value.raid_progress_messages.return_value = messages
+            self.assertEqual(dc.raid_recovery(block),
+                             {"completed": 1, "remaining": 7, "uncertain_round": True})
+            store.return_value.raid_progress_messages.return_value += ["[脚本] 已手动停止"]
+            self.assertIsNone(dc.raid_recovery(block))
+
+    def test_resume_preserves_original_target_and_backup_after_restart(self):
+        old = self.interrupted()
+        with patch.object(dc, "raid_recovery", return_value={"completed": 2, "remaining": 6, "uncertain_round": True}), patch.object(dc.time, "time", return_value=DAY + 610 * 60):
+            dc.resume_raid("old-run", True, self.runner, lambda: timeline(), lambda: {},
+                           "config.json", lambda *args: None, self.state_path, self.plan_path)
+        restored = dc.load_state(self.state_path)
+        block = restored["blocks"][0]
+        self.assertEqual(block["runs"], 8)
+        self.assertEqual(block["completed_base"], 3)
+        self.assertEqual(self.runner.calls[0][2]["scheduled_raid_runs"], 5)
+        self.assertFalse(restored["enabled"])
+        self.assertEqual(json.loads(self.state_path.with_suffix('.json.bak').read_text(encoding='utf-8')), old)
+        with patch("panel.log_store.get_store") as store:
+            store.return_value.raid_progress_messages.return_value = ["[RAID] 第 1 圈结束", "[RAID] ===== 第 2/5 圈 ====="]
+            self.assertEqual(dc.raid_recovery({**block, "status": "interrupted", "reason": "执行状态不明，后续已停用"})["completed"], 4)
+
+    def test_changed_settings_and_expired_day_do_not_launch(self):
+        self.interrupted()
+        with patch.object(dc, "raid_recovery", return_value={"completed": 2, "remaining": 6, "uncertain_round": False}):
+            with patch.object(dc.time, "time", return_value=DAY + 29 * 3600):
+                with self.assertRaisesRegex(ValueError, "已结束"):
+                    dc.resume_raid("old-run", False, self.runner, lambda: timeline(), lambda: {}, "config.json", lambda *a: None, self.state_path, self.plan_path)
+            with patch.object(dc.time, "time", return_value=DAY + 610 * 60):
+                with self.assertRaisesRegex(ValueError, "设置已变化"):
+                    dc.resume_raid("old-run", False, self.runner, lambda: timeline(), lambda: {"auto_refill": True}, "config.json", lambda *a: None, self.state_path, self.plan_path)
+        self.assertEqual(self.runner.calls, [])
+
+
+    def test_progress_query_is_not_truncated_by_battle_logs(self):
+        from panel.log_store import LogStore
+        store = LogStore(Path(self.folder.name) / "logs.db")
+        conn = store._get_conn()
+        self.addCleanup(conn.close)
+        conn.executemany("INSERT INTO logs(ts,run_id,script,message) VALUES(?,?,?,?)",
+                         [(1, "old-run", "workflow", "battle") for _ in range(6000)])
+        store.append("old-run", "workflow", "[RAID] 第 7 圈结束")
+        store.append("old-run", "workflow", "[RAID] ===== 第 8/26 圈 =====")
+        block = self.interrupted()["blocks"][0]
+        with patch("panel.log_store.get_store", return_value=store):
+            self.assertEqual(dc.raid_recovery(block)["completed"], 7)
+
+    def test_resume_endpoint_rejects_ledger_and_malformed_confirmation(self):
+        client = TestClient(server.app)
+        with patch.object(server, "get_runner", return_value=self.runner):
+            with patch.object(server, "_ledger_mode", return_value=True):
+                self.assertEqual(client.post("/api/day-conductor/resume-raid", json={}).status_code, 403)
+            with patch.object(server, "_ledger_mode", return_value=False):
+                self.assertEqual(client.post("/api/day-conductor/resume-raid", json={"run_id": "old-run", "finished_round": "yes"}).status_code, 400)
+                with patch.object(dc, "resume_raid", side_effect=ValueError("还有任务正在执行")):
+                    self.assertEqual(client.post("/api/day-conductor/resume-raid", json={"run_id": "old-run", "finished_round": False}).status_code, 409)
+
+
+    def test_busy_runner_does_not_change_saved_state(self):
+        old = self.interrupted()
+        self.runner.is_running = True
+        with self.assertRaisesRegex(ValueError, "还有任务"):
+            dc.resume_raid("old-run", False, self.runner, lambda: timeline(), lambda: {}, "config.json", lambda *a: None, self.state_path, self.plan_path)
+        self.assertEqual(dc.load_state(self.state_path), old)
+        self.assertEqual(self.runner.calls, [])
+
+    def test_last_uncertain_round_confirmed_finished_does_not_spawn(self):
+        self.interrupted()
+        with patch.object(dc, "raid_recovery", return_value={"completed": 7, "remaining": 1, "uncertain_round": True}), patch.object(dc.time, "time", return_value=DAY + 610 * 60):
+            dc.resume_raid("old-run", True, self.runner, lambda: timeline(), lambda: {}, "config.json", lambda *a: None, self.state_path, self.plan_path)
+        self.assertEqual(dc.load_state(self.state_path)["blocks"][0]["status"], "ended")
+        self.assertEqual(self.runner.calls, [])

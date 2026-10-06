@@ -115,6 +115,21 @@ async function loadWorkflowPresets() {
   }
 }
 
+async function resumeRaid(block: DayConductorBlock, finishedRound: boolean) {
+  if (conductorBusy.value || !block.run_id) return
+  conductorBusy.value = true
+  conductorMessage.value = ''
+  try {
+    await api.resumeDayRaid(block.run_id, finishedRound)
+    await load()
+    conductorMessage.value = '剩下的联队战继续开工了。'
+  } catch (error) {
+    conductorMessage.value = error instanceof Error ? error.message : '暂时没能继续'
+  } finally {
+    conductorBusy.value = false
+  }
+}
+
 async function stopConductor() {
   if (conductorBusy.value) return
   conductorBusy.value = true
@@ -1352,6 +1367,16 @@ const caption = computed(() => {
         </dialog>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
+        <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" class="tl-expedition-help-note">
+          <strong>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</strong>
+          <p>先在游戏里回到本丸，再继续。</p>
+          <div v-if="block.recovery!.uncertain_round">
+            <p>中断的那一圈后来打完了吗？</p>
+            <div class="tl-booking-actions"><button type="button" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, true)">打完了，继续剩余 {{ Math.max(0, block.recovery!.remaining - 1) }} 圈</button>
+            <button type="button" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, false)">没打完，继续剩余 {{ block.recovery!.remaining }} 圈</button></div>
+          </div>
+          <button v-else type="button" class="tl-booking-link" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, false)">继续剩余 {{ block.recovery!.remaining }} 圈</button>
+        </div>
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
     </template>

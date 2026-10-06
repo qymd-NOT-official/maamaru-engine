@@ -74,6 +74,9 @@ export const api = {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blocks, raid_workflow_id: raidWorkflowId }),
   }),
+  resumeDayRaid: (runId: string, finishedRound: boolean) => request<{ ok: boolean }>('/api/day-conductor/resume-raid', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId, finished_round: finishedRound }),
+  }),
   setDayConductor: (enabled: boolean, workflowId?: string) => request<{ conductor: DayTimeline['conductor'] }>('/api/day-conductor', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, workflow_id: workflowId }),
   }),

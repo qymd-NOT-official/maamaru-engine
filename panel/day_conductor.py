@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 import threading
 import time
@@ -297,6 +298,75 @@ def disarm(path: Path = STATE_PATH) -> dict | None:
         return state
 
 
+def raid_recovery(block: dict) -> dict | None:
+    """Only confirmed round-boundary logs count; an unfinished round stays uncertain."""
+    if block.get("kind") != "raid" or block.get("status") != "interrupted":
+        return None
+    if block.get("reason") != "执行状态不明，后续已停用":
+        return None
+    from .workflow_waits import load as load_waits
+    if block.get("run_id") in load_waits():
+        return None
+    from .log_store import get_store
+    logs = get_store().raid_progress_messages(block.get("run_id"))
+    completed = 0
+    started = 0
+    for message in logs:
+        if "已手动停止" in message or "看门狗已处决" in message:
+            return None
+        match = re.fullmatch(r"\[RAID\] 第 (\d+) 圈结束", message)
+        if match:
+            completed = max(completed, int(match[1]))
+        match = re.fullmatch(r"\[RAID\] ===== 第 (\d+)/(\d+) 圈 =====", message)
+        if match:
+            started = max(started, int(match[1]))
+    base = int(block.get("completed_base", 0))
+    done = min(block["runs"], base + completed)
+    return {"completed": done, "remaining": block["runs"] - done,
+            "uncertain_round": started > completed}
+
+
+def resume_raid(run_id: str, finished_round: bool, runner, timeline_fn,
+                raid_settings_fn, config_path: str, emit_fn,
+                path: Path = STATE_PATH, plan_path: Path | None = None) -> None:
+    with _LOCK:
+        state = load_state(path)
+        plan = load_plan(plan_path) if plan_path else load_plan()
+        now = time.time()
+        if runner.is_running:
+            raise ValueError("还有任务正在执行，等它收工再继续")
+        if not state or not plan or _plan_signature(plan) != state.get("plan_signature"):
+            raise ValueError("今天的安排已经变化，请重新安排")
+        if state.get("workflow_id") != BUILTIN_ID:
+            raise ValueError("这份自定义任务流暂不支持中断续跑")
+        block = next((b for b in state["blocks"] if b.get("run_id") == run_id), None)
+        recovery = raid_recovery(block) if block else None
+        if not recovery:
+            raise ValueError("这段联队战没有可续跑的记录")
+        if not state["day_start"] <= now < state["day_start"] + day_timeline.DAY_MINUTES * 60:
+            raise ValueError("今天的安排已结束，请重新安排")
+        spec = workflow_spec(BUILTIN_ID, raid_settings_fn())
+        if block.get("workflow_signature") not in spec["compatible_signatures"]:
+            raise ValueError("联队战设置已变化，请重新安排")
+        completed = recovery["completed"] + int(finished_round and recovery["uncertain_round"])
+        remaining = max(0, block["runs"] - completed)
+        if not remaining:
+            block.update(status="ended", finished_at=now, completed_base=completed)
+            _save(state, path)
+            return
+        candidate = {**block, "runs": remaining,
+                     "start_min": int((now - state["day_start"]) // 60)}
+        if not _start_block(candidate, state, runner, timeline_fn, raid_settings_fn,
+                            plan, config_path, now, emit_fn):
+            raise ValueError(candidate.get("reason") or "暂时不能继续，请稍后重试")
+        block.update(status="running", run_id=candidate["run_id"], started_at=now,
+                     completed_base=completed)
+        block.pop("reason", None)
+        block.pop("finished_at", None)
+        # Resume this block only; do not silently re-enable other stopped work.
+        _save(state, path)
+
+
 def projection(plan: dict | None, timeline: dict, raid_settings: dict,
                path: Path = STATE_PATH) -> dict:
     state = load_state(path)
@@ -308,6 +378,12 @@ def projection(plan: dict | None, timeline: dict, raid_settings: dict,
     for key in ("enabled", "workflow_id", "workflow_name", "blocks"):
         if state.get(key) is not None:
             result[key] = state[key]
+    if state.get("workflow_id") == BUILTIN_ID:
+        result["blocks"] = [dict(block) for block in result["blocks"]]
+        for block in result["blocks"]:
+            recovery = raid_recovery(block)
+            if recovery:
+                block["recovery"] = recovery
     if not state.get("enabled"):
         return result
     if not plan or _plan_signature(plan) != state.get("plan_signature"):

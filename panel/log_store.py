@@ -68,6 +68,15 @@ class LogStore:
         )
         conn.commit()
 
+    def raid_progress_messages(self, run_id: str) -> list[str]:
+        """Persisted round boundaries, including legacy runs before recovery existed."""
+        return [row[0] for row in self._get_conn().execute(
+            "SELECT message FROM logs WHERE run_id = ? AND "
+            "(message LIKE '[RAID] 第 % 圈结束' OR "
+            "message LIKE '[RAID] ===== 第 %' OR "
+            "message LIKE '%已手动停止%' OR message LIKE '%看门狗已处决%') "
+            "ORDER BY id", (run_id,)).fetchall()]
+
     def get_recent(self, limit: int = 100, after_id: int = 0,
                    run_id: str | None = None) -> list[dict]:
         """获取最近日志，支持增量拉取（after_id）和按 run 回看（run_id）。"""

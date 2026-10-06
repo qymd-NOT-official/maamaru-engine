@@ -1516,6 +1516,7 @@ export type ConductorBlockStatus =
 
 /** 大总管块：计划块 + 展示名 + 运行状态 */
 export interface DayConductorBlock extends DayScheduleBlock {
+  recovery?: { completed: number; remaining: number; uncertain_round: boolean }
   waiting_until?: number
   label: string
   status: ConductorBlockStatus

@@ -2366,6 +2366,25 @@ def _day_timeline_payload():
     return timeline
 
 
+@app.post("/api/day-conductor/resume-raid")
+async def api_resume_day_raid(request: Request):
+    from .day_conductor import resume_raid
+    if _ledger_mode():
+        raise HTTPException(403, "纯净账房模式不能自动开工")
+    body = await request.json()
+    if (not isinstance(body, dict) or not isinstance(body.get("run_id"), str)
+            or type(body.get("finished_round")) is not bool):
+        raise HTTPException(400, "请确认中断那圈是否已经打完")
+    try:
+        resume_raid(body["run_id"], body["finished_round"], get_runner(),
+                    _day_timeline_payload,
+                    lambda: (_load_panel_settings().get("params", {}).get("raid", {}) or {}),
+                    str(_CONFIG_PATH), lambda script, msg: get_store().append("conductor", script, msg))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"ok": True}
+
+
 @app.put("/api/day-conductor")
 async def api_day_conductor(request: Request):
     from .day_conductor import arm, disarm, projection
