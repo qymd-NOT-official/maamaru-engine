@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { LedgerAttribution } from '../../types'
-import { activityTitle, activityStep, categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, swordReceiptEntries } from './reportModel'
+import { activityTitle, activityStep, categoryOf, gameLedgerRecords, recordOrigin, honmaruReceipts, shiftShanghaiDate, swordReceiptEntries } from './reportModel'
+
+it('日报翻页按上海时区日历日走，差一秒不串天', () => {
+  expect(shiftShanghaiDate('2026-10-06', -1)).toBe('2026-10-05')
+  expect(shiftShanghaiDate('2026-10-04', 1)).toBe('2026-10-05')
+  expect(shiftShanghaiDate('2026-10-01', -1)).toBe('2026-09-30')
+  expect(shiftShanghaiDate('2026-12-31', 1)).toBe('2027-01-01')
+})
 
 it('运行状态翻译内部名称并保留玩家命名', () => {
   expect(activityTitle({ label: 'workflow' })).toBe('自定义工作流')

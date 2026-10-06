@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
 import type { DailyReport, DailyReportGoal } from '../../types'
-import { dayLabel, eventTime, resourceLabel, resourceNames, runStatusLabel, scriptNames, shanghaiDate, signed } from './reportModel'
+import { dayLabel, eventTime, resourceLabel, resourceNames, runStatusLabel, scriptNames, shanghaiDate, shiftShanghaiDate, signed } from './reportModel'
 
 const emit = defineEmits<{ 'open-planning': [] }>()
 
@@ -17,13 +17,9 @@ const effectiveDate = computed(() => date.value || today)
 const dateLabel = computed(() => dayLabel(effectiveDate.value))
 const canGoNext = computed(() => effectiveDate.value >= today)
 
-function shiftDate(current: string, deltaDays: number): string {
-  const base = new Date(`${current}T00:00:00+08:00`).getTime()
-  return shanghaiDate((base + deltaDays * 86400) / 1000)
-}
 function step(deltaDays: number) {
   if (deltaDays > 0 && canGoNext.value) return
-  date.value = shiftDate(effectiveDate.value, deltaDays)
+  date.value = shiftShanghaiDate(effectiveDate.value, deltaDays)
 }
 function backToToday() {
   date.value = ''
@@ -160,7 +156,7 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
         </p>
         <ul v-if="entryRows.length" class="daily-report-list">
           <li v-for="(entry, index) in entryRows" :key="`${entry.ts}:${index}`">
-            <span class="daily-report-entry-note">{{ entry.note || '来源未确认的一笔' }}</span>
+            <span class="daily-report-entry-note">{{ entry.label || '来源未确认的一笔' }}</span>
             <b :class="{ gain: entry.delta > 0, loss: entry.delta < 0 }">{{ resourceLabel(entry.resource) }} {{ signed(entry.delta) }}</b>
             <time>{{ eventTime(entry.ts) }}</time>
           </li>

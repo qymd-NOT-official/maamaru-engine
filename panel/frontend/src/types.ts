@@ -427,6 +427,7 @@ export interface DailyReportResourceEntry {
   ts: number
   resource: string
   delta: number
+  label: string
   note: string
   source: string
   attribution: string

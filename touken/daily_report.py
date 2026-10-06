@@ -94,6 +94,37 @@ def _last_event_before(store, event_type: str, before_ts: float) -> dict | None:
 
 # ── 今日收支 ──
 
+# note 为空的 resource.change（工作流自己记的账）按 source 给人话标签；
+# 不在表里的来源不硬猜，留空让前端显示「来源未确认」。
+_ENTRY_SOURCE_LABELS = {
+    "forge.started": "锻刀",
+    "forge.tenren": "十连锻刀",
+    "dismantle.completed": "刀解",
+    "task_rewards.reward_popup": "任务奖励",
+    "repair.confirm_screen": "手入",
+}
+
+
+def _entry_label(payload: dict, resource: str, delta) -> str:
+    """收支条目的展示标签：优先 note（剥掉尾巴上重复的「资源 +N」），
+    没有 note 按 source 翻译，都不认识就留空（= 来源未确认）。"""
+    note = str(payload.get("note") or "").strip()
+    if note:
+        # note 的尾巴是写入时的原文（youzu_log: 「远征完成·三队·B2 木炭 +1200」）；
+        # 资源名用 payload 原值（可能带「·极」）；金额按整数百般匹配，非整浮点不硬凑
+        original = str(payload.get("resource") or resource)
+        amounts = {delta}
+        if isinstance(delta, float) and delta.is_integer():
+            amounts.add(int(delta))
+        candidates = [f" {original} {amount:+d}" for amount in amounts
+                      if isinstance(amount, int)
+                      or (isinstance(amount, float) and amount.is_integer())]
+        for suffix in candidates:
+            if note.endswith(suffix):
+                return note[: -len(suffix)].strip()
+        return note
+    return _ENTRY_SOURCE_LABELS.get(str(payload.get("source") or ""), "")
+
 
 def _build_resources(store, start_ts: float, end_ts: float) -> dict | None:
     changes = _day_events(store, ("resource.change",), start_ts, end_ts)
@@ -113,6 +144,7 @@ def _build_resources(store, start_ts: float, end_ts: float) -> dict | None:
         net[resource] = net.get(resource, 0) + delta
         entries.append({
             "ts": event["ts"], "resource": resource, "delta": delta,
+            "label": _entry_label(payload, resource, delta),
             "note": str(payload.get("note") or "").strip(),
             "source": str(payload.get("source") or ""),
             "attribution": str(payload.get("attribution") or ""),

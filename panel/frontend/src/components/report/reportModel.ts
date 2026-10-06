@@ -119,6 +119,11 @@ export function dayRange(date: string): [number, number] {
   return [start, start + 86400]
 }
 
+// 日历日翻页：先换成秒再加减整天（直接往毫秒上加 86400 会只挪 86.4 秒）
+export function shiftShanghaiDate(date: string, deltaDays: number): string {
+  return shanghaiDate(dayRange(date)[0] + deltaDays * 86400)
+}
+
 export function dayLabel(date: string): string {
   return String(date || '').slice(5).replace('-', '/')
 }

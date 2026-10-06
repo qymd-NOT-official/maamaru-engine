@@ -133,6 +133,35 @@ def test_resources_entry_cap_keeps_largest(store):
     assert section["entries"][0]["delta"] == 25  # 按金额绝对值取大头
 
 
+def test_entry_label_strips_amount_suffix_from_note(store):
+    _change(store, sh(f"{D} 10:00:00"), "木炭", 500,
+            "远征完成·三队·B2 木炭 +500")
+    _change(store, sh(f"{D} 11:00:00"), "加速符·极", -1,
+            "手入加速 加速符·极 -1")
+    entries = daily_report.build_daily_report(store, D)["resources"]["entries"]
+    labels = {entry["resource"]: entry["label"] for entry in entries}
+    assert labels["木炭"] == "远征完成·三队·B2"
+    assert labels["加速符"] == "手入加速"  # 尾巴按原文「加速符·极」剥
+
+
+def test_entry_label_falls_back_to_source_when_note_empty(store):
+    _change(store, sh(f"{D} 10:00:00"), "木炭", 1200, "",
+            source="task_rewards.reward_popup")
+    _change(store, sh(f"{D} 11:00:00"), "玉钢", -700, "",
+            source="forge.started")
+    entries = daily_report.build_daily_report(store, D)["resources"]["entries"]
+    labels = {entry["resource"]: entry["label"] for entry in entries}
+    assert labels["木炭"] == "任务奖励"
+    assert labels["玉钢"] == "锻刀"
+
+
+def test_entry_label_blank_for_unmapped_source(store):
+    _change(store, sh(f"{D} 10:00:00"), "木炭", 100, "",
+            source="youzu_log.unknown")
+    entry, = daily_report.build_daily_report(store, D)["resources"]["entries"]
+    assert entry["label"] == ""  # 前端据此显示「来源未确认」
+
+
 def test_cross_day_boundary_shanghai_timezone(store):
     # 23:59:59 属于 D；00:00:00 属于 D+1——差一秒都不能串
     _change(store, sh(f"{D} 23:59:59"), "木炭", 111, "深夜 木炭 +111")
