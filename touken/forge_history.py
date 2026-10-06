@@ -3,11 +3,14 @@
 
 诚实口径（没实测校准的判定一律不编，拿不准的给 null 并在这里写明）：
 
-- 配对只看「同一炉位的时间序」：一条 started 之后、同炉位下一条 started
-  之前的 collected 归这炉。started 没有等到 collected → 照常出一炉，
-  collected_at/swords 给 null（炉子还烧着或领取没记上，不编结果）；
-  collected 前面没有同炉位的 started（开炉在采集起点之前、跨窗口边界）
-  → 进 orphan_collected 老实列出，不硬撮合。
+- 配对只看「同一炉位的时间序」：一条 started 配它之后同炉位的**第一条**
+  collected——一个炉位烧一炉只能领一次（领取即空槽，机制事实），
+  所以同炉位在下一条 started 之前再出现的 collected，其开炉必定没
+  被采到（采集起点之前的旧数据、日志缺段），进 orphan_collected
+  老实列出，不挂在这炉头上充数（2026-10-06 事故：旧数据里没有
+  youzu_log 开炉事件，一条 09-26 的面板 started 吞了后面 31 振刀）。
+  started 没有等到 collected → 照常出一炉，collected_at/swords 给
+  null（炉子还烧着或领取没记上，不编结果）。
 - 炉位号两种写法都收：youzu_log 收据写 slot_no（带配方），面板锻刀流
   写 slot（不带配方）；配方字段缺失一律 null，cost_est 整个给 null，
   绝不拿默认配方填。
@@ -153,8 +156,9 @@ def build_forge_history(store, days: int = 30, now: float | None = None) -> dict
                 "name": (_sword_name(sword_id, sword_db) if sword_id else None),
                 "observed_at": observed["ts"]}
 
-    # 每炉位把 started/collected 混一起按 (ts, id) 走：当前 started 收
-    # 直到同炉位下一条 started 为止的全部 collected。
+    # 每炉位把 started/collected 混一起按 (ts, id) 走：一条 started 只配
+    # 它之后第一条 collected（领完即关炉），之后的 collected 是开炉没
+    # 被采到的旧炉结果，进 orphan_collected。
     streams: dict[int, list[dict]] = {}
     for event in events:
         if event["event_type"] == _SECRETARY:
@@ -195,6 +199,8 @@ def build_forge_history(store, days: int = 30, now: float | None = None) -> dict
             open_forge["_swords"].extend(swords)
             open_forge["_count"] += _count_from_collected(payload, swords)
             open_forge["_collected_at"] = event["ts"]
+            forges.append(open_forge)  # 一炉一领，配完即关
+            open_forge = None
         if open_forge is not None:
             forges.append(open_forge)
 

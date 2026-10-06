@@ -194,6 +194,26 @@ def test_cross_slot_pairing_does_not_mix(store):
     assert body["orphan_collected"][0]["slot_no"] == 2
 
 
+def test_one_started_pairs_only_first_collected(store):
+    # 2026-10-06 串炉事故回归：旧数据缺开炉事件，一条 started 不能吞掉
+    # 之后全部领取（一炉一领，领取即空槽）；第二条起进 orphan_collected
+    _started(store, NOW - 30 * 86400, slot=1, **RECIPE)
+    _collected(store, NOW - 20 * 86400, slot=1,
+               swords=[_sword("第一炉", 11, 1)], count=1)
+    _collected(store, NOW - 10 * 86400, slot=1,
+               swords=[_sword(f"串炉刀{i}", 5, 10 + i) for i in range(10)],
+               count=10)
+    _collected(store, NOW - 5 * 86400, slot=1,
+               swords=[_sword(f"串炉刀x{i}", 3, 20 + i) for i in range(20)],
+               count=20)
+    from touken.forge_history import build_forge_history
+    body = build_forge_history(store, days=0, now=NOW)
+    forge, = body["forges"]
+    assert forge["swords"] == [_sword("第一炉", 11, 1)]
+    assert forge["cost_est"] == RECIPE  # ×1，没被串炉放大
+    assert [row["count"] for row in body["orphan_collected"]] == [10, 20]
+
+
 def test_api_shape_and_default_window(client, store):
     _started(store, time.time() - 3600, slot=1, **RECIPE)
     resp = client.get("/api/data/forge-history")

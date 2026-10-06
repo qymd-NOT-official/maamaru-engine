@@ -485,12 +485,17 @@ need_swords_est 一律是估算）、`cn_max_level=null`（国服当前开放上
 
 配对口径（不硬撮合）：
 
-- 同一炉位内按 `(ts, id)` 走：一条 started 之后、同炉位下一条 started
-  之前的 collected 归这炉（一炉收多把时逐条 collected 都归它）。
+- 同一炉位内按 `(ts, id)` 走：一条 started 只配它之后同炉位的**第一条**
+  collected——一炉一领、领取即空槽（机制事实）；下一条 started 之前
+  再出现的 collected，其开炉必定没被采到（旧数据缺开炉事件、日志缺段），
+  进 `orphan_collected` 老实列出，不挂在这炉头上（2026-10-06 串炉事故：
+  一条旧面板 started 吞了后续 31 振领取）。一炉收多把（十连）本来就是
+  一条 count>1 的 collected，不受影响。
 - started 没等到 collected → 照常出一炉，`collected_at`/`swords` 给
   `null`（炉子还烧着或领取没记上，不编结果）。
 - collected 前面没有同炉位的 started（开炉在采集起点之前、或 started
-  落在窗口外）→ 进 `orphan_collected` 老实列出。
+  落在窗口外、或同一 started 已配过上一条）→ 进 `orphan_collected`
+  老实列出。
 - 炉位号两种写法都收：youzu_log 收据写 `slot_no`（带配方），面板锻刀
   流写 `slot`（不带配方）；连炉位号都没有的事件不谈归属，不编。
 - `days` 窗口按事件自身 `ts` 过滤 started/collected，只保证窗口内的
