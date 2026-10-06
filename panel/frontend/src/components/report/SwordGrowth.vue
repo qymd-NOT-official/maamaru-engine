@@ -39,22 +39,18 @@ async function load(event: Event) {
     <p v-if="busy">正在翻记录……</p>
     <p v-if="error" role="alert">{{ error }} 收起后再打开即可重试。</p>
     <template v-if="!busy">
+      <h4 v-if="journal?.timeline.length">入手履历</h4>
+      <ol v-if="journal?.timeline.length"><li v-for="(item, index) in journal.timeline" :key="index"><time>{{ date(item.ts) }}</time><span>{{ labels[item.kind] }}<small v-if="journalDetail(item)"> · {{ journalDetail(item) }}</small></span></li></ol>
       <div class="growth-facts">
         <p v-if="training">截至 {{ training.captured_at }} · 累计经验 <b>{{ fmt(training.exp) }}</b> · 乱舞习合值 <b>{{ fmt(training.ranbu_exp) }}</b></p>
-        <p v-if="training?.ranbu_next">下一级还差 {{ fmt(training.ranbu_next.need_exp) }} 习合值，约需 <b>{{ training.ranbu_next.need_swords_est }} 振同名刀（估算）</b>。换算尚未实测。</p>
-        <p v-else>下一等级所需同名刀数量暂无可靠换算。</p>
+        <p v-if="training?.ranbu_next">下一级还差 {{ fmt(training.ranbu_next.need_exp) }} 习合值，约需 <b>{{ training.ranbu_next.need_swords_est }} 振同名刀（估算）</b>。</p>
         <p v-if="affairs">内番已养成：生存 {{ affairs.hp_up == null ? '未记录' : `+${fmt(affairs.hp_up)}` }} · 侦察 {{ affairs.scout_up == null ? '未记录' : `+${fmt(affairs.scout_up)}` }}<br><small v-if="affairs.hp_plateau || affairs.scout_plateau">{{ affairs.hp_plateau ? '生存' : '' }}{{ affairs.hp_plateau && affairs.scout_plateau ? '、' : '' }}{{ affairs.scout_plateau ? '侦察' : '' }}连续多次记录未增长，是否喂满尚未确认。</small></p>
-        <p v-else>暂无内番养成记录。</p>
       </div>
-      <h4>成长记录</h4>
-      <p v-if="!history?.timeline.length">暂无成长快照；采集后会逐次积累。</p>
-      <ol v-else>
+      <h4 v-if="history?.timeline.length">成长记录</h4>
+      <ol v-if="history?.timeline.length">
         <li v-for="point in [...history.timeline].reverse()" :key="point.ts"><time>{{ point.captured_at }}</time><span>Lv.{{ point.level ?? '—' }} · 经验 {{ fmt(point.exp) }} · 乱舞 Lv.{{ point.ranbu_level ?? '—' }} · 习合值 {{ fmt(point.ranbu_exp) }}</span></li>
       </ol>
-      <h4>入手履历</h4>
-      <p v-if="!journal?.timeline.length">暂无可确认的履历。未采集到的经历不会补写。</p>
-      <ol v-else><li v-for="(item, index) in journal.timeline" :key="index"><time>{{ date(item.ts) }}</time><span>{{ labels[item.kind] }}<small v-if="journalDetail(item)"> · {{ journalDetail(item) }}</small></span></li></ol>
-      <small>记录时间反映观察到的变化，首次记录到满级不代表实际达成时刻。</small>
+      <p v-if="loaded && !training && !affairs && !history?.timeline.length && !journal?.timeline.length">暂无记录。</p>
     </template>
   </details>
 </template>

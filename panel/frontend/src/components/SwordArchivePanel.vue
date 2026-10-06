@@ -260,7 +260,7 @@ onMounted(load)
 
 <template>
   <section class="archive-panel">
-    <PaperCard variant="task" tag="section">
+    <PaperCard variant="task" tag="section" class="archive-heading">
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
           <SwordReadActions :running="running" :current="current" :stopping="stopping" :starting="starting"
@@ -286,36 +286,36 @@ onMounted(load)
 
       <PaperCard v-if="archiveView !== 'attention'" variant="task" tag="section" class="archive-book">
         <h3 class="archive-sub">{{ viewTitle }} · {{ visibleEntries.length }} 振</h3>
-        <p v-if="visibleEntries.some(entry => !entry.serial_id)" class="archive-growth-note">旧盘点缺少成长数据时显示「—」；采集到可关联的游戏记录后，可展开该振的成长与履历。</p>
         <div class="archive-toolbar">
           <PixelControl v-model="query" type="search" placeholder="输入刀名找一找" aria-label="搜索刀名" />
           <em>{{ visibleEntries.length }} 振</em>
         </div>
-        <SegmentedControl v-model="swordType" :items="typeItems" label="按刀种筛选" variant="wide" />
+        <SegmentedControl v-model="swordType" :items="typeItems" label="按刀种筛选" class="archive-type-switch" />
         <ul v-if="displayEntries.length" class="archive-list">
           <template v-for="(entry, index) in displayEntries" :key="entry.observation_id">
             <li v-if="archiveView === 'all' && index === watchedCount && watchedCount > 0" class="archive-watch-divider" aria-hidden="true"><span>整本刀帐</span></li>
             <li class="archive-entry" :class="{ editing: expandedEntryId === entry.observation_id }">
               <div class="archive-entry-name">
                 <b>{{ archiveName(entry) }}</b>
+                <i v-if="entry.human?.favorite" class="archive-mark favorite">常用</i>
+                <i v-if="entry.human?.watch" class="archive-mark watch">特别关心</i>
+                <i v-if="entry.human?.keeper" class="archive-mark keeper">要练</i>
+
                 <small v-if="ordinals.get(entry.observation_id)">第 {{ ordinals.get(entry.observation_id) }} 振</small>
-                <i class="archive-source" :class="sourceById.get(entry.observation_id)?.kind">{{ sourceById.get(entry.observation_id)?.text }}</i>
-                <small v-if="sourceById.get(entry.observation_id)?.origin" class="archive-source-origin">{{ sourceById.get(entry.observation_id)?.origin }}</small>
                 <i v-if="entry.human?.stale" class="archive-stale">待复核</i>
               </div>
               <button type="button" class="archive-edit-toggle" :aria-expanded="expandedEntryId === entry.observation_id" @click="toggleEntryEditor(entry)">{{ expandedEntryId === entry.observation_id ? '收好' : '整理' }}</button>
               <div class="archive-entry-facts">
                 <i class="archive-form" :class="entry.form_status" :title="(entry.form_evidence || []).join('；')">{{ archiveFormLabel(entry) }}</i>
-                <span>Lv.{{ entry.level ?? '—' }}<i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="机器没读出来，这个等级是你填的">你填的</i></span>
-                <span>累计经验 {{ entry.exp == null ? '—' : entry.exp.toLocaleString() }}</span>
-                <span>乱舞 Lv.{{ entry.tou_level ?? '—' }} · 习合值 {{ entry.ranbu_exp == null ? '—' : entry.ranbu_exp.toLocaleString() }}</span>
-                <span>显现 {{ entry.kiwame_date || '—' }}</span>
-                <i v-if="entry.human?.favorite" class="archive-mark favorite">常用</i>
-                <i v-if="entry.human?.watch" class="archive-mark watch">特别关心</i>
-                <i v-if="entry.human?.keeper" class="archive-mark keeper">要练</i>
-                <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
+                <span class="archive-number"><small>等级</small><b>Lv.{{ entry.level ?? '—' }}</b><i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="你填写的等级">你填的</i></span>
+                <span class="archive-number"><small>累计经验</small><b>{{ entry.exp == null ? '—' : entry.exp.toLocaleString() }}</b></span>
+                <span class="archive-number"><small>乱舞</small><b>Lv.{{ entry.tou_level ?? '—' }}</b><small v-if="entry.ranbu_exp != null">{{ entry.ranbu_exp.toLocaleString() }} 习合值</small></span>
+                <span class="archive-birthday"><small>显现</small>{{ entry.kiwame_date || '—' }}</span>
               </div>
               <div v-if="expandedEntryId === entry.observation_id" class="archive-entry-actions">
+                <i class="archive-source" :class="sourceById.get(entry.observation_id)?.kind">{{ sourceById.get(entry.observation_id)?.text }}</i>
+                <small v-if="sourceById.get(entry.observation_id)?.origin" class="archive-source-origin">{{ sourceById.get(entry.observation_id)?.origin }}</small>
+                <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
                 <span v-if="entry.acquisition" :title="entry.acquisition.origin_message">获得：{{ entry.acquisition.label }}{{ entry.acquisition.location ? ` · ${entry.acquisition.location}` : '' }}{{ entry.acquisition.mailbox_id ? ' · 收件箱领取' : '' }}</span>
                 <span v-if="entry.data_source === 'youzu_log'">生存 {{ entry.survival ?? '—' }}/{{ entry.survival_max ?? '—' }} · 疲劳 {{ entry.fatigue ?? '—' }} · {{ entry.locked == null ? '保护状态未知' : entry.locked ? '已保护' : '未保护' }}</span>
                 <span class="archive-form-confirm" role="group" aria-label="改判形态">
@@ -502,5 +502,36 @@ onMounted(load)
 }
 @media (prefers-reduced-motion: reduce) {
   .archive-pill, .archive-revoke, .archive-actions button { transition: none; }
+}
+
+/* 刀帐按账页排版：筛选轻一些，数值沿固定列阅读。 */
+.archive-heading :deep(.embedded-head) { padding: 0 0 10px; margin-bottom: 0; }
+.archive-heading :deep(h2) { font-size: 21px; }
+.archive-summary { display: flex; flex-wrap: wrap; gap: 8px 24px; padding-top: 10px; }
+.archive-summary > div { display: flex; align-items: baseline; gap: 7px; padding: 0; border: 0; }
+.archive-summary b { font-size: 15px; }
+.archive-heading { padding: 18px 20px; }
+.archive-type-switch { display: flex; flex-wrap: wrap; gap: 6px; border: 0; background: transparent; }
+.archive-type-switch :deep(button) { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--paper-line); border-radius: 4px; background: transparent; font-size: 12px; }
+.archive-type-switch :deep(button.active) { background: var(--fox-gold-pale); border-color: var(--fox-gold); }
+.archive-type-switch :deep(button em) { font-size: 10px; }
+.archive-list { gap: 0; }
+.archive-entry { padding: 14px 4px; border: 0; border-bottom: 1px solid var(--paper-line); border-radius: 0; background: transparent; gap: 9px 16px; }
+.archive-entry-name b { font-size: 16px; }
+.archive-entry-facts { display: grid; grid-template-columns: 48px 100px minmax(100px, 1fr) minmax(110px, 1fr) 140px; gap: 14px; align-items: center; }
+.archive-number { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.archive-number > small:first-child { width: 100%; font-size: 10px; }
+.archive-number b { color: var(--ink); font-size: 15px; font-weight: 600; }
+.archive-birthday { display: grid; gap: 5px; font-size: 12px; }
+.archive-birthday small { font-size: 10px; }
+.archive-entry-actions { justify-content: flex-start; }
+@media (max-width: 900px) {
+  .archive-summary > div:nth-child(3), .archive-summary > div:nth-child(4) { border: 0; }
+  .archive-entry { grid-template-columns: minmax(0, 1fr) auto; }
+  .archive-edit-toggle { padding: 3px 8px; }
+  .archive-entry-facts { grid-template-columns: 40px repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .archive-number b { font-size: 13px; overflow-wrap: anywhere; }
+  .archive-birthday { grid-column: 2 / -1; display: flex; gap: 8px; }
+  .archive-entry-name b { font-size: 15px; }
 }
 </style>
