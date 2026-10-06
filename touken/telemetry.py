@@ -26,7 +26,8 @@ DEFAULT_RETENTION_DAYS = 90
 
 # ── 资源总账（resource_ledger）契约常量 ──
 # v2：缺口按波及资源降置信度（v1 是窗口内任何缺口把所有资源打成 low）
-LEDGER_SCHEMA_VERSION = 2
+# v3：新增 balance_series（余额观察序列，供账房余额折线图取点）
+LEDGER_SCHEMA_VERSION = 3
 # 资源全集，顺序固定：顶栏四资源 + 真小判 + 甲州金 + 右栏两符
 LEDGER_RESOURCES = ("木炭", "玉钢", "冷却材", "砥石", "小判", "甲州金", "委托符", "加速符")
 
@@ -1540,6 +1541,25 @@ class TelemetryStore:
                 merged.append(entry)
             observations[name] = merged
 
+        # ── 余额观察序列：余额折线图的取点来源，与 opening/closing 同一条链 ──
+        # 同一时刻多笔读数（大阪城 before/after 这类同 ts 的成对读数）留最新一笔，
+        # 保证一个时刻只对应图上的一个点；缺的资源不补零，前端画成断点
+        balance_by_ts: dict[float, dict] = {}
+        for name in LEDGER_RESOURCES:
+            for obs in observations.get(name, []):
+                ts = obs["ts"]
+                if ts < from_ts or ts > to_ts:
+                    continue
+                point = balance_by_ts.get(ts)
+                if point is None:
+                    point = {"ts": ts,
+                             "date": datetime.fromtimestamp(
+                                 ts, _LEDGER_TZ).date().isoformat(),
+                             "values": {}}
+                    balance_by_ts[ts] = point
+                point["values"][name] = obs["value"]
+        balance_series = sorted(balance_by_ts.values(), key=lambda p: p["ts"])
+
         # ── 同 run 前后盘点残差：收杂物箱等没有逐笔记账的流程，
         # 用 run 自带的 before/after 快照净差认账（扣除该 run 已逐笔确认的部分），
         # 否则收邮箱这类收益全落进「不知道谁干的」。confidence 用 inferred：
@@ -1748,6 +1768,7 @@ class TelemetryStore:
                        "days": round((to_ts - from_ts) / 86400, 2)},
             "per_resource": per_resource,
             "daily_series": daily_series,
+            "balance_series": balance_series,
             "gaps": gaps,
             "attributions": attributions,
             "unresolved_changes": unresolved_changes,

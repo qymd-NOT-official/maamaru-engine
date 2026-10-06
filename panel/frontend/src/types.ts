@@ -194,6 +194,13 @@ export interface LedgerDay {
   gap_ids?: string[]
 }
 
+// 余额折线图的取点：某时刻各资源的余额读数（缺的资源不补零）
+export interface BalancePoint {
+  ts: number
+  date: string
+  values: Record<string, number>
+}
+
 export interface LedgerResource {
   resource: string
   opening: number | null
@@ -211,6 +218,7 @@ export interface ResourceLedger {
   window: { from: number; to: number; timezone: string; days: number }
   per_resource: LedgerResource[]
   daily_series: LedgerDay[]
+  balance_series?: BalancePoint[]
   gaps: any[]
   attributions: LedgerAttribution[]
   unresolved_changes?: LedgerAttribution[]
@@ -411,6 +419,112 @@ export interface PlanningReport {
   acquisition?: Record<string, AcquisitionGuide>
   fragments?: Record<string, FragmentGuide>
   fragment_notes?: FragmentNotes
+}
+
+// ---- 日报 /api/daily_report ----
+
+export interface DailyReportResourceEntry {
+  ts: number
+  resource: string
+  delta: number
+  note: string
+  source: string
+  attribution: string
+}
+
+export interface DailyReportBalance {
+  ts: number
+  captured_at: string
+  resources: Record<string, number>
+}
+
+export interface DailyReportResources {
+  net: Record<string, number>
+  opening: DailyReportBalance | null
+  closing: DailyReportBalance | null
+  entries: DailyReportResourceEntry[]
+  entry_total: number
+  truncated: number
+}
+
+export interface DailyReportDropSword {
+  name: string
+  is_first_get_sword: boolean
+  ts: number
+}
+
+export interface DailyReportDropGroup {
+  label: string
+  swords: DailyReportDropSword[]
+  count: number
+  first_get_count: number
+}
+
+export interface DailyReportDrops {
+  groups: DailyReportDropGroup[]
+  total: number
+  first_get_total: number
+}
+
+export interface DailyReportTrainingRow {
+  name: string
+  serial_id: number
+  from: number | null
+  to: number
+}
+
+export interface DailyReportExpRow {
+  name: string
+  serial_id: number
+  exp_gain: number
+  exp: number | null
+}
+
+export interface DailyReportTraining {
+  snapshot_ts: number
+  snapshot_captured_at: string
+  previous_ts: number | null
+  previous_captured_at: string | null
+  has_previous: boolean
+  sword_count: number
+  level_ups: DailyReportTrainingRow[]
+  ranbu_ups: DailyReportTrainingRow[]
+  exp_top: DailyReportExpRow[]
+}
+
+export interface DailyReportGoal {
+  id: number | null
+  kind: string
+  resource: string | null
+  fragment: string | null
+  event: string | null
+  target: number | null
+  deadline: string | null
+  status: string
+  message: string
+  note: string
+}
+
+export interface DailyReportAttendance {
+  run_id: string | null
+  script: string | null
+  label: string | null
+  status: string | null
+  started_at: number | null
+  ended_at: number | null
+}
+
+export interface DailyReport {
+  schema_version: number
+  date: string
+  timezone: string
+  window: { start: number; end: number }
+  resources: DailyReportResources | null
+  drops: DailyReportDrops | null
+  training: DailyReportTraining | null
+  goals: DailyReportGoal[] | null
+  attendance: DailyReportAttendance[] | null
+  degraded: string[]
 }
 
 // ---- 活动日历 /api/events ----

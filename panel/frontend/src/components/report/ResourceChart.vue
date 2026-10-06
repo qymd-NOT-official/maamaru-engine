@@ -1,22 +1,20 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
-import { BarChart } from 'echarts/charts'
+import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { dayLabel, signed } from './reportModel'
-import type { ChartSeries } from './reportModel'
+import { dayLabel, resourceColors, resourceLabel } from './reportModel'
+import type { BalancePoint } from '../../types'
 
-echarts.use([BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 const props = withDefaults(defineProps<{
-  dates: string[]
-  labels?: string[]
-  series: ChartSeries[]
-  stacked?: boolean
+  points: BalancePoint[]
+  resources?: string[]
   selectedDate?: string
   loading?: boolean
-}>(), { labels: () => [], stacked: true, selectedDate: '', loading: false })
+}>(), { resources: () => [], selectedDate: '', loading: false })
 
 const emit = defineEmits<{ select: [payload: { date: string; key: string }] }>()
 
@@ -28,35 +26,47 @@ function cssVar(name: string, fallback: string) {
   return getComputedStyle(box.value || document.documentElement).getPropertyValue(name).trim() || fallback
 }
 
+function axisLabels() {
+  const points = props.points
+  const dayCounts = new Map<string, number>()
+  for (const point of points) dayCounts.set(point.date, (dayCounts.get(point.date) || 0) + 1)
+  const span = points.length > 1 ? points[points.length - 1].ts - points[0].ts : 0
+  // 一天内多个读数、或整体跨度不到两天时，标签带时分，避免重复的日期挤在一起
+  const withTime = dayCounts.size !== points.length || span < 2 * 86400
+  return points.map(point => {
+    const label = dayLabel(point.date)
+    if (!withTime) return label
+    const time = new Date(point.ts * 1000).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    return `${label} ${time}`
+  })
+}
+
 function buildOption() {
   const ink = cssVar('--ink', '#3d3229')
   const inkDim = cssVar('--ink-dim', '#8a7f72')
   const line = cssVar('--paper-line', '#ddd6cb')
   const card = cssVar('--paper-card', '#faf6ef')
   const selected = props.selectedDate
-  const displayLabel = (index: number) => props.labels[index] || dayLabel(props.dates[index] || '')
   return {
-    grid: { left: 12, right: 12, top: 30, bottom: 8, containLabel: true },
-    legend: { top: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 12, textStyle: { color: inkDim, fontSize: 12 } },
+    grid: { left: 12, right: 16, top: 30, bottom: 8, containLabel: true },
+    legend: { top: 0, itemWidth: 14, itemHeight: 8, textStyle: { color: inkDim, fontSize: 12 } },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
       backgroundColor: card,
       borderColor: line,
       textStyle: { color: ink, fontSize: 13 },
       formatter(params: any) {
-        const items = (Array.isArray(params) ? params : [params]).filter((item: any) => item.value != null && item.value !== 0)
-        if (!items.length) return `${displayLabel(items[0]?.dataIndex ?? 0)}：这段时间没有读数变化`
-        const total = items.reduce((sum: number, item: any) => sum + Number(item.value || 0), 0)
+        const items = (Array.isArray(params) ? params : [params]).filter((item: any) => item.value != null)
+        if (!items.length) return ''
         const rows = items.map((item: any) =>
-          `<div style="display:flex;justify-content:space-between;gap:16px"><span>${item.marker}${item.seriesName}</span><b>${signed(Number(item.value))}</b></div>`,
+          `<div style="display:flex;justify-content:space-between;gap:16px"><span>${item.marker}${item.seriesName}</span><b>${Number(item.value).toLocaleString()}</b></div>`,
         ).join('')
-        return `<div style="min-width:180px"><div style="margin-bottom:4px"><b>${displayLabel(items[0].dataIndex)}</b> 合计 <b>${signed(total)}</b></div>${rows}</div>`
+        return `<div style="min-width:180px"><div style="margin-bottom:4px"><b>${items[0].axisValue}</b></div>${rows}</div>`
       },
     },
     xAxis: {
       type: 'category',
-      data: props.dates.map((_, index) => displayLabel(index)),
+      data: axisLabels(),
       axisLine: { lineStyle: { color: line } },
       axisTick: { show: false },
       axisLabel: { color: inkDim, fontSize: 12 },
@@ -64,20 +74,21 @@ function buildOption() {
     yAxis: {
       type: 'value',
       splitLine: { lineStyle: { color: line, type: 'dashed' } },
-      axisLabel: { color: inkDim, fontSize: 12, formatter: (value: number) => Math.abs(value) >= 10000 ? `${value / 10000}万` : String(value) },
+      axisLabel: { color: inkDim, fontSize: 12, formatter: (value: number) => value >= 10000 ? `${value / 10000}万` : String(value) },
     },
-    series: props.series.map(item => ({
-      id: item.key,
-      name: item.name,
-      type: 'bar',
-      stack: props.stacked ? 'total' : undefined,
-      barMaxWidth: 42,
-      itemStyle: { color: item.color, borderRadius: props.stacked ? 0 : [3, 3, 0, 0] },
+    series: props.resources.map(name => ({
+      id: name,
+      name: resourceLabel(name),
+      type: 'line',
+      color: resourceColors[name] || '#8a7f72',
+      connectNulls: false,
+      symbolSize: 7,
+      lineStyle: { width: 2 },
       emphasis: { focus: 'series' },
-      data: item.values.map((value, index) => ({
-        value,
-        itemStyle: selected && props.dates[index] === selected
-          ? { borderColor: ink, borderWidth: 1.5 }
+      data: props.points.map(point => ({
+        value: point.values?.[name] ?? null,
+        itemStyle: selected && point.date === selected
+          ? { borderColor: ink, borderWidth: 2 }
           : undefined,
       })),
     })),
@@ -88,8 +99,8 @@ function render() {
   if (!chart && box.value) {
     chart = echarts.init(box.value)
     chart.on('click', (params: any) => {
-      const date = props.dates[params.dataIndex]
-      if (date) emit('select', { date, key: String(params.seriesId || params.seriesName || '') })
+      const point = props.points[params.dataIndex]
+      if (point) emit('select', { date: point.date, key: String(params.seriesId || '') })
     })
   }
   if (chart) chart.setOption(buildOption(), true)
@@ -103,7 +114,7 @@ onMounted(() => {
   }
 })
 
-watch(() => [props.dates, props.labels, props.series, props.stacked, props.selectedDate], render, { deep: true })
+watch(() => [props.points, props.resources, props.selectedDate], render, { deep: true })
 
 onBeforeUnmount(() => {
   observer?.disconnect()
@@ -114,9 +125,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="resource-echart" :class="{ loading }">
-    <div ref="box" class="resource-echart-box" role="img" aria-label="资源收支柱状图"></div>
-    <p v-if="loading" class="resource-echart-hint">狐之助正在整理这段时间的收支……</p>
-    <p v-else-if="!dates.length" class="resource-echart-hint">同一时间段至少需要两次库存读数，狐之助再攒一会儿账。</p>
+    <div ref="box" class="resource-echart-box" role="img" aria-label="资源余额折线图"></div>
+    <p v-if="loading" class="resource-echart-hint">狐之助正在整理这段时间的余额……</p>
+    <p v-else-if="points.length < 2" class="resource-echart-hint">同一时间段至少需要两次库存读数，狐之助再攒一会儿账。</p>
   </div>
 </template>
 

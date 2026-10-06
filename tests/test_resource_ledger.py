@@ -692,7 +692,7 @@ class ResourceLedgerTests(unittest.TestCase):
                 api_data_resource_ledger(days=7, from_ts=t0 - 60, to=t0 + 900))
             by_days = asyncio.run(api_data_resource_ledger(days=7, from_ts=None, to=None))
 
-        self.assertEqual(by_from_to["schema_version"], 2)
+        self.assertEqual(by_from_to["schema_version"], 3)
         self.assertEqual(by_from_to["window"]["from"], t0 - 60)
         self.assertEqual(by_from_to["window"]["to"], t0 + 900)
         self.assertEqual([r["resource"] for r in by_from_to["per_resource"]],
@@ -701,6 +701,39 @@ class ResourceLedgerTests(unittest.TestCase):
         # days 分支：窗口 7 天、八资源齐全（空窗期也返回完整结构）
         self.assertEqual(by_days["window"]["days"], 7.0)
         self.assertEqual(len(by_days["per_resource"]), 8)
+
+    def test_balance_series_collects_captured_readings(self):
+        t0 = sh("2026-10-01 08:00:00")
+        t1 = sh("2026-10-02 08:00:00")
+        t2 = sh("2026-10-02 20:00:00")
+        self._captured(t0, {"小判": 1000, "木炭": 500}, script="youzu_log")
+        self._captured(t1, {"小判": 800, "木炭": 700, "玉钢": 60}, script="youzu_log")
+        self._captured(t2, {"小判": 900}, script="youzu_log")
+
+        ledger = self.store.resource_ledger(t0 - 60, t2 + 60)
+        points = ledger["balance_series"]
+        self.assertEqual([p["ts"] for p in points], [t0, t1, t2])
+        self.assertEqual(points[0]["date"], "2026-10-01")
+        self.assertEqual(points[1]["date"], "2026-10-02")
+        self.assertEqual(points[0]["values"], {"小判": 1000, "木炭": 500})
+        # 缺的资源不补零，前端画成断点
+        self.assertEqual(points[2]["values"], {"小判": 900})
+
+    def test_balance_series_merges_sources_and_keeps_latest_at_same_ts(self):
+        t0 = sh("2026-10-03 09:00:00")
+        # 大阪城同刻 before/after：留 after；同刻 peek 的顶栏资源并进同一个点
+        self._event(t0, "osaka.koban_session", {"before": 5000, "after": 5600})
+        self._event(t0, "inventory.peek", {"木炭": 100, "玉钢": 200})
+
+        ledger = self.store.resource_ledger(t0 - 60, t0 + 60)
+        points = ledger["balance_series"]
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["values"],
+                         {"小判": 5600, "木炭": 100, "玉钢": 200})
+
+    def test_balance_series_empty_without_readings(self):
+        ledger = self.store.resource_ledger(1000, 2000)
+        self.assertEqual(ledger["balance_series"], [])
 
     def test_api_claim_roundtrip_and_validation(self):
         from panel.server import api_add_human_report, api_human_reports

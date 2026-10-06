@@ -341,7 +341,7 @@ updated_at epoch）：
 
 空账本引导不以最近 7 天是否有数据为准，而是检查全历史家底观察。已有任何有效库存快照、途中观察、带前后余额的资源流水或大阪城小判实验时，都不会打扰老用户。真正开始引导后，抄完家底会继续到可选旧账和可选目标；完成或明确选择“不需要引导”后持久隐藏。
 
-## 资源总账（resource-ledger，schema_version 1）
+## 资源总账（resource-ledger，schema_version 3）
 
 `GET /api/data/resource-ledger?days=7` / `?from=<ts>&to=<ts>`，聚合窗口内八种资源的账目。
 资源全集（顺序固定）：木炭、玉钢、冷却材、砥石、小判、甲州金、委托符、加速符。
@@ -350,7 +350,7 @@ updated_at epoch）：
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "generated_at": 1787219985.79,
   "window": {"from": 1786615185.79, "to": 1787219985.79,
              "timezone": "Asia/Shanghai", "days": 7.0},
@@ -365,6 +365,10 @@ updated_at epoch）：
     "total_delta": 43450, "attributed_delta": 42850, "unattributed_delta": 600,
     "observation_count": 2, "confidence": "high",
     "gap_ids": [], "attribution_ids": ["a2"]
+  }],
+  "balance_series": [{
+    "ts": 1787150000.0, "date": "2026-08-20",
+    "values": {"小判": 788506, "木炭": 12800, "玉钢": 9600}
   }],
   "gaps": [{
     "id": "gap-1786768892-1786791169", "from": 1786768892.0, "to": 1786791169.0,
@@ -388,6 +392,12 @@ updated_at epoch）：
   `total_delta = null`（不是 0），但 confirmed 明细仍保留在 `attributions` 里。
 - **daily_series**：按 Asia/Shanghai 日期分桶；跨日 run 按观察发生日记账，
   不按 run 归属日。
+- **balance_series**（schema_version 3 起）：余额折线图取点序列，与
+  opening/closing 同一条观察链。每个元素是一个观察时刻：`ts`（Unix 秒）、
+  `date`（Asia/Shanghai 日期）、`values`（该时刻读到的资源余额，只含有读数
+  的资源，缺的不补零，前端画成断点）。同一时刻多笔读数（如大阪城
+  before/after 同 ts）只留最新一笔，保证一个时刻只对应一个点；窗口前的
+  基线观察不进序列。
 
 ### 观察点来源与优先级
 

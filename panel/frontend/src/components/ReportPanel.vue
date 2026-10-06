@@ -6,10 +6,10 @@ import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
+import DailyReport from './report/DailyReport.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
-import { resourceLabel, categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceColors, resourceNames, scriptNames, shanghaiDate, signed, sourceCategories, swordReceiptEntries } from './report/reportModel'
-import type { ChartSeries } from './report/reportModel'
+import { resourceLabel, categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceNames, scriptNames, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
 
 const emit = defineEmits<{
   'gameplay-settings-saved': [script: string, params: ScriptParams]
@@ -51,9 +51,7 @@ const recordLoading = ref(false)
 const recordHasMoreEvents = ref(false), recordHasMoreRuns = ref(false)
 const recordEventCursor = ref<number | null>(null), recordRunCursor = ref<number | null>(null)
 
-const mode = ref<'single' | 'compare'>('single')
 const selectedResource = ref('小判')
-const compareResources = ref(['小判', '加速符'])
 const selectedDate = ref('')
 const highlightCategory = ref('')
 const inventoryFormOpen = ref(false)
@@ -374,8 +372,8 @@ async function followInsight(insight: ReportInsight) {
     return
   }
   if (insight.target === 'chart' && insight.resource) {
-    mode.value = 'single'
-    chooseResource(insight.resource)
+    selectedResource.value = insight.resource
+    highlightCategory.value = ''
     if (insight.date) selectedDate.value = insight.date
     await nextTick()
     document.querySelector('.resource-trend')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -505,134 +503,26 @@ function remainingUnknown(date: string, resource: string): number | null {
     + Number(claimedDailyTotals.value[date]?.[resource] || 0)
   return Number(row.unattributed_delta) - claimWithinUnknown(Number(row.unattributed_delta), requested)
 }
-const chartDates = computed(() => {
-  const names = mode.value === 'single' ? [selectedResource.value] : compareResources.value
-  const dates = new Set<string>()
-  for (const item of ledger.value?.daily_series || []) {
-    if (names.includes(item.resource) && item.total_delta != null) dates.add(item.date)
-  }
-  // 有些天只有确认来源、没有成对的库存读数（比如挂机跨午夜），也不能丢
-  for (const attr of ledger.value?.attributions || []) {
-    if (names.includes(attr.resource)) dates.add(shanghaiDate(attr.ts))
-  }
-  return [...dates].sort()
-})
+// ---- 图表数据（余额折线：直接取服务端观察链，不再按日聚合收支） ----
+
+const balancePoints = computed(() => ledger.value?.balance_series || [])
+const balanceResources = computed(() => resourceNames.filter(name =>
+  balancePoints.value.some(point => point.values?.[name] != null)))
 const ledgerDateRange = computed(() => {
-  if (!chartDates.value.length) return '暂无日期范围'
+  const dates = [...new Set(balancePoints.value.map(point => point.date))].sort()
+  if (!dates.length) return '暂无日期范围'
   const label = (date: string) => {
     const [, month, day] = date.split('-').map(Number)
     return `${month}月${day}日`
   }
-  return `${label(chartDates.value[0])}至${label(chartDates.value[chartDates.value.length - 1])}`
-})
-const chartSeries = computed<ChartSeries[]>(() => {
-  const book = ledger.value
-  if (!book) return []
-  if (mode.value === 'compare') {
-    return compareResources.value.map(name => ({
-      key: name, name, color: resourceColors[name] || '#8a7f72',
-      values: chartDates.value.map(date =>
-        book.daily_series.find(item => item.resource === name && item.date === date)?.total_delta ?? null),
-    }))
-  }
-  const name = selectedResource.value
-  const dayIndex = new Map(chartDates.value.map((date, index) => [date, index]))
-  const byKey: Record<string, number[]> = {}
-  for (const cat of sourceCategories) byKey[cat.key] = chartDates.value.map(() => 0)
-  for (const attr of book.attributions || []) {
-    if (attr.resource !== name) continue
-    const index = dayIndex.get(shanghaiDate(attr.ts))
-    if (index != null) byKey[categoryOf(attr.source)][index] += Number(attr.delta || 0)
-  }
-  chartDates.value.forEach((date, index) => {
-    const row = book.daily_series.find(item => item.resource === name && item.date === date)
-    if (row?.unattributed_delta != null) {
-      const requested = Number(reportedDailyTotals.value[date]?.[name] || 0)
-        + Number(claimedDailyTotals.value[date]?.[name] || 0)
-      const claimed = claimWithinUnknown(row.unattributed_delta, requested)
-      byKey.human[index] += claimed
-      byKey.unknown[index] += row.unattributed_delta - claimed
-    }
-  })
-  return sourceCategories.map(cat => ({
-    key: cat.key, name: cat.label, color: cat.color,
-    values: byKey[cat.key].map(value => value || null),
-  }))
-})
-const dayResourceOverview = computed(() => {
-  if (days.value !== 1 || !ledger.value) return []
-  const from = Number(ledger.value.window?.from || 0)
-  const to = Number(ledger.value.window?.to || Date.now() / 1000)
-  return resourceNames.map(resource => {
-    const ledgerRow = ledger.value!.per_resource.find(item => item.resource === resource)
-    const parts = new Map<string, number>()
-    for (const item of ledger.value!.attributions || []) {
-      if (item.resource !== resource || item.ts < from || item.ts > to) continue
-      const key = categoryOf(item.source)
-      parts.set(key, (parts.get(key) || 0) + Number(item.delta || 0))
-    }
-    const unknown = Number(ledgerRow?.unattributed_delta || 0)
-    const requested = humanReports.value.filter(report => (
-      report.source === 'proactive' && report.resource === resource
-      && Number(report.occurred_at) >= from && Number(report.occurred_at) <= to
-    )).reduce((sum, report) => sum + Number(report.claimed_delta || 0), 0)
-    const claimed = claimWithinUnknown(unknown, requested)
-    if (claimed) parts.set('human', claimed)
-    if (unknown - claimed) parts.set('unknown', unknown - claimed)
-    return {
-      resource, total: ledgerRow?.total_delta ?? null,
-      parts: sourceCategories.map(cat => ({ ...cat, label: cat.key === 'human' ? '你记的' : cat.label, value: parts.get(cat.key) || 0 })).filter(item => item.value),
-    }
-  })
-})
-const dayChartResources = computed(() => resourceNames.filter(resource => resource !== '甲州金'))
-const displayedChartDates = computed(() => days.value === 1 ? dayChartResources.value : chartDates.value)
-const displayedChartLabels = computed(() => days.value === 1 ? dayChartResources.value.map(resourceLabel) : [])
-const displayedChartSeries = computed<ChartSeries[]>(() => {
-  if (days.value !== 1) return chartSeries.value
-  return sourceCategories.map(category => ({
-    key: category.key,
-    name: category.key === 'human' ? '你记的' : category.label,
-    color: category.color,
-    values: dayChartResources.value.map(resource => {
-      const row = dayResourceOverview.value.find(item => item.resource === resource)
-      return row?.parts.find(part => part.key === category.key)?.value || null
-    }),
-  }))
+  return `${label(dates[0])}至${label(dates[dates.length - 1])}`
 })
 
-function toggleCompareResource(name: string) {
-  if (compareResources.value.includes(name)) {
-    if (compareResources.value.length > 1) compareResources.value = compareResources.value.filter(item => item !== name)
-  } else if (compareResources.value.length < 4) compareResources.value = [...compareResources.value, name]
-}
-function chooseResource(name: string) {
-  selectedResource.value = name
-  highlightCategory.value = ''
-}
 function onChartSelect({ date, key }: { date: string; key: string }) {
-  if (mode.value === 'single' && key === 'unknown') {
-    // 点灰色 = 认领这部分：展开当天明细，并直接弹报备框
-    selectedDate.value = date
-    highlightCategory.value = key
-    const gap = gapForDay(date, selectedResource.value)
-    if (gap) openGapReport(gap)
-    else openDayClaim(date, selectedResource.value, remainingUnknown(date, selectedResource.value))
-    return
-  }
-  if (mode.value === 'compare' && resourceNames.includes(key)) selectedResource.value = key
-  if (selectedDate.value === date && highlightCategory.value === key) {
-    selectedDate.value = ''
-    highlightCategory.value = ''
-    return
-  }
-  selectedDate.value = date
-  highlightCategory.value = mode.value === 'single' ? key : ''
-}
-function gapForDay(date: string, resource: string) {
-  const [start, end] = dayRange(date)
-  return unreportedGaps.value.find(gap => gap.started_at < end && gap.ended_at >= start
-    && Number(gap.resource_delta?.[resource] || 0) !== 0) || null
+  const samePick = selectedDate.value === date && selectedResource.value === key
+  if (resourceNames.includes(key)) selectedResource.value = key
+  highlightCategory.value = ''
+  selectedDate.value = samePick ? '' : date
 }
 
 function latestRecordDate(): string {
@@ -1159,6 +1049,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
+      <DailyReport v-if="currentSection === 'report'" @open-planning="openPlanning" />
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="props.ledgerMode && view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
@@ -1211,16 +1102,11 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         <section class="resource-trend">
           <header>
             <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
-            <div><h3>{{ days === 1 ? '24 小时收支' : '变化趋势' }}</h3></div>
-            <nav v-if="days !== 1 && mode === 'single'" aria-label="选择资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: selectedResource === name }" @click="chooseResource(name)">{{ resourceLabel(name) }}</button></nav>
-            <nav v-else-if="days !== 1" aria-label="选择要对比的资源"><button v-for="name in resourceNames" :key="name" type="button" :class="{ active: compareResources.includes(name) }" @click="toggleCompareResource(name)">{{ resourceLabel(name) }}</button></nav>
-            <label v-if="days !== 1" class="compare-toggle"><input v-model="mode" type="checkbox" true-value="compare" false-value="single">对比几种资源</label>
+            <div><h3>{{ days === 1 ? '近 24 小时余额' : '余额走势' }}</h3></div>
           </header>
-          <p v-if="anomalyInsight && (mode === 'compare' ? compareResources.includes(anomalyInsight.resource || '') : selectedResource === anomalyInsight.resource)" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
-          <ResourceChart :dates="displayedChartDates" :labels="displayedChartLabels" :series="displayedChartSeries" :stacked="days === 1 || mode === 'single'" :selected-date="selectedDate" :loading="loading" @select="days !== 1 && onChartSelect($event)" />
-          <template v-if="days !== 1">
-            <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
-          </template>
+          <p v-if="anomalyInsight" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
+          <ResourceChart :points="balancePoints" :resources="balanceResources" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
+          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
         </section>
 
       </template>
@@ -1381,6 +1267,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 .ledger-editor-dialog .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.daily-report { margin-bottom: 12px; }
 .report-context-toolbar-range { justify-content: flex-end; }
 .ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .ledger-onboarding > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -1431,9 +1318,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 .resource-trend > header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
 .resource-trend > header h3 { margin: 0; }
 .resource-trend > header p { margin: 2px 0 0; color: var(--ink-dim); font-size: 13px; }
-.resource-trend nav { display: flex; gap: 6px; flex-wrap: wrap; }
-.resource-trend nav button { border: 1px solid var(--paper-line); background: var(--paper-card); color: var(--ink-dim); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
-.resource-trend nav button.active { background: var(--fox-gold-pale); border-color: var(--fox-gold); color: var(--ink); font-weight: 600; }
 @media (max-width: 520px) {
   .report-glance { padding: 15px 13px; }
   .report-glance > header { align-items: flex-start; flex-direction: column; gap: 4px; }
@@ -1443,7 +1327,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
   .report-insight-list li:not(.lead):last-child { border-left-color: transparent; }
   .report-insight-list li > button { grid-column: 2; justify-self: start; min-height: 28px; padding: 0; }
 }
-.compare-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-dim); font-size: 13px; }
 .ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .ledger-transfer { display: grid; gap: 12px; margin-bottom: 12px; padding: 14px 16px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
 .ledger-transfer > header, .ledger-import-preview > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

@@ -3332,6 +3332,25 @@ async def api_data_resource_ledger(days: int = 7,
     return get_telemetry_store().resource_ledger(start, to_ts)
 
 
+@app.get("/api/daily_report")
+async def api_daily_report(date: str = ""):
+    """日报：一天的收支 / 掉落 / 练度 / 目标进度 / 出勤，全部服务端聚合。
+
+    date 缺省=今天（Asia/Shanghai），格式 YYYY-MM-DD。契约见 touken/daily_report.py。
+    """
+    from datetime import date as date_type
+
+    from touken import daily_report
+    from touken.telemetry import get_telemetry_store
+    day = str(date or "").strip()
+    if day:
+        try:
+            date_type.fromisoformat(day)
+        except ValueError:
+            return JSONResponse({"error": "日期格式得是 YYYY-MM-DD"}, status_code=400)
+    return daily_report.build_daily_report(get_telemetry_store(), day or None)
+
+
 @app.get("/api/data/ledger-onboarding")
 async def api_ledger_onboarding():
     """只给真正空账本的新用户显示一次三步引导。"""

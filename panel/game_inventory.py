@@ -4,28 +4,18 @@ import json
 from pathlib import Path
 
 from touken.flow_control import FlowAborted
-from touken.runtime_paths import DEBUG_DIR, STATUS_DIR
-from touken.telemetry import get_telemetry_store, record_event
+from touken.runtime_paths import STATUS_DIR
+from touken.telemetry import record_event
 
 
 def sync_game_records(adb_path, adb_address):
-    from touken import youzu_log
-    from touken.sword_receipts import sync_receipts
+    """统一采集管线 + 远征观察消费方；行为见 touken.record_sync。"""
+    from touken.record_sync import collect_game_records
     from .expedition_observation import FILENAME, save_observations
 
-    path = youzu_log.pull_log(adb_path, adb_address, dest_dir=DEBUG_DIR)
-    try:
-        events = youzu_log.parse_events(path)
-        ledger = youzu_log.build_ledger(events)
-        result = youzu_log.write_ledger(get_telemetry_store(), ledger)
-        sync_receipts(events)
-        save_observations(events, STATUS_DIR / FILENAME)
-        youzu_log.save_home_situation(events, STATUS_DIR / "youzu_home_situation.json")
-        result["resources"] = next((obs["reading"] for obs in reversed(ledger["observations"])
-                                    if obs.get("reading")), {})
-        return result
-    finally:
-        path.unlink(missing_ok=True)
+    return collect_game_records(
+        adb_path, adb_address,
+        extra_consumers=(lambda events: save_observations(events, STATUS_DIR / FILENAME),))
 
 
 def refresh_game_inventory(config_path, params, *, make_agent):

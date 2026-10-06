@@ -31,6 +31,7 @@ import time
 from ..runtime_paths import STATUS_DIR
 
 from ..maa_adapter import Point, roi_4to4
+from ..record_sync import collect_game_records
 from . import naihanka_report
 # 判分词表抽到 report_judge 共用（工作流节点判分复用同一份，行为不变）；
 # 这里 re-export，老 import 路径（tests 等）不受影响。
@@ -519,6 +520,30 @@ class DailyMixin:
 
     # ========== 冷启动：优先按包名直启，可信图标只作回退 ==========
 
+    def _collect_pending_game_records(self):
+        """am start 之前收走上一局的游戏记录（游戏一启动日志就被清空重写）。
+
+        幂等：write_ledger 按 last_ts、sync_receipts 按 receipt_key、
+        training.captured 按 payload 去重，重复收不重复记账。任何失败
+        （adb 不通/日志不存在/解析翻车）都静默吞掉——收账是顺手福利，
+        绝不能阻塞或炸掉游戏启动（日课主流程铁律）。成功时把计数留给
+        调用处播报，并留一条机器事件。
+        """
+        self._records_precollected = None
+        try:
+            result = collect_game_records(self.maa.adb_path, self.maa.adb_address)
+        except Exception:
+            return
+        self._records_precollected = result
+        if hasattr(self, "record_event"):
+            receipts = result.get("receipts") or {}
+            training = result.get("training") or {}
+            self.record_event("youzu_log.precollected",
+                              observations_written=result.get("observations_written", 0),
+                              changes_written=result.get("changes_written", 0),
+                              receipts_written=receipts.get("written", 0),
+                              training_written=training.get("written", 0))
+
     def _launch_game_via_adb(self) -> bool:
         """通过已配置的包名解析入口并启动游戏；不依赖可能被广告遮住的桌面。"""
         package = (self.config.get("daily", {}).get("logout", {})
@@ -539,6 +564,9 @@ class DailyMixin:
                 break
         if not component:
             return False
+
+        # 启动前顺手收走上一局日志：游戏一旦 am start，旧日志立刻没了
+        self._collect_pending_game_records()
 
         started = self.maa._adb_run(
             ["shell", "am", "start", "-W", "-n", component], timeout=30.0)
@@ -592,6 +620,11 @@ class DailyMixin:
 
         if self._launch_game_via_adb():
             yield "[日课] 已绕过 MuMu 桌面遮挡，直接启动刀剑乱舞"
+            pre = getattr(self, "_records_precollected", None)
+            if pre:
+                yield (f"[日课] 启动前已收走上一局游戏记录："
+                       f"观察 {pre.get('observations_written', 0)} 条，"
+                       f"收支 {pre.get('changes_written', 0)} 条")
             return (yield from self._wait_for_game_entry())
 
         yield "[日课] ADB 直启失败，尝试寻找经过文字确认的桌面图标"

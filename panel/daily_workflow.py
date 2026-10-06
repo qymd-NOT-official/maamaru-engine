@@ -132,24 +132,13 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
         失败只许播报不许炸——账本丢了不影响日课本体（telemetry 铁律同款）。
         """
         try:
-            from touken import youzu_log
-            from touken.telemetry import TelemetryStore
-            from touken.runtime_paths import DEBUG_DIR, STATUS_DIR
-            path = youzu_log.pull_log(agent.maa.adb_path,
-                                      agent.maa.adb_address,
-                                      dest_dir=DEBUG_DIR)
-            try:
-                events = youzu_log.parse_events(path)
-                from .expedition_observation import FILENAME, save_observations
-                save_observations(events, STATUS_DIR / FILENAME)
-                result = youzu_log.write_ledger(TelemetryStore(),
-                                                 youzu_log.build_ledger(events))
-                from touken.sword_receipts import sync_receipts
-                sync_receipts(events)
-                youzu_log.save_home_situation(
-                    events, STATUS_DIR / "youzu_home_situation.json")
-            finally:
-                path.unlink(missing_ok=True)  # 阅后即焚，原始日志不留本地
+            from touken.record_sync import collect_game_records
+            from touken.runtime_paths import STATUS_DIR
+            from .expedition_observation import FILENAME, save_observations
+            result = collect_game_records(
+                agent.maa.adb_path, agent.maa.adb_address,
+                extra_consumers=(
+                    lambda events: save_observations(events, STATUS_DIR / FILENAME),))
             yield (f"[日课] ✓ 账本已同步：观察 {result['observations_written']} 条，"
                    f"收支 {result['changes_written']} 条")
         except Exception as exc:

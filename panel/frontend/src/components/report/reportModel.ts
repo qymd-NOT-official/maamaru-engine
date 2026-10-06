@@ -209,13 +209,6 @@ export interface DayStack {
   byCategory: Record<string, number>
 }
 
-export interface ChartSeries {
-  key: string
-  name: string
-  color: string
-  values: (number | null)[]
-}
-
 export function kobanPerHour(run: any): number | null {
   const koban = Number(run.resource_delta?.['小判'])
   const seconds = Number(runElapsedSeconds(run))

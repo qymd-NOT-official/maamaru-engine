@@ -1222,6 +1222,65 @@ def write_ledger(store, ledger: dict,
             "changes_written": written_changes, "last_ts": max_ts}
 
 
+# ---------------------------------------------------------------- training snapshot
+
+# 练度快照只收日志原文里已有的数字：等级/累积经验/乱舞/内番已喂数值。
+# 刀名一律不入库（展示层拿 sword_id 走 sword_db 解析）。
+_TRAINING_UP_FIELDS = ("hp_up", "atk_up", "def_up", "mobile_up",
+                       "back_up", "scout_up", "hide_up")
+
+
+def build_training_snapshot(events: list[dict]) -> dict | None:
+    """最新全量刀池 → 练度快照 {"ts", "payload"}；没有刀池返回 None。
+
+    ts 取刀池事件自身的 now_time/日志行时间——数据时间绝不拿 pull 时间冒充。
+    """
+    pool, pool_ev = _latest_sword_pool(events)
+    if pool is None:
+        return None
+    ts = _event_epoch(pool_ev)
+    if ts is None:
+        return None
+    swords = []
+    for raw in pool.values():
+        if not isinstance(raw, dict):
+            continue
+        serial = _int(raw.get("serial_id"))
+        if serial <= 0:
+            continue
+        entry = {"serial_id": serial, "sword_id": _int(raw.get("sword_id")),
+                 "level": _int(raw.get("level")), "exp": _int(raw.get("exp")),
+                 "ranbu_level": _int(raw.get("ranbu_level")),
+                 "ranbu_exp": _int(raw.get("ranbu_exp"))}
+        for field in _TRAINING_UP_FIELDS:
+            entry[field] = _int(raw.get(field), None)
+        swords.append(entry)
+    swords.sort(key=lambda row: row["serial_id"])
+    return {"ts": ts, "payload": {
+        "captured_at": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+        "source": "youzu_log", "swords": swords}}
+
+
+def save_training_snapshot(store, events: list[dict]) -> dict:
+    """练度快照入库为 training.captured；同 ts 同 payload 不重写。
+
+    仿 game_assets.captured 的 INSERT ... WHERE NOT EXISTS 幂等写法：
+    重复 pull 同一局日志不会堆重复快照。
+    """
+    snap = build_training_snapshot(events)
+    if snap is None:
+        return {"written": 0}
+    encoded = json.dumps(snap["payload"], ensure_ascii=False)
+    cursor = store._conn().execute(
+        "INSERT INTO events(ts, run_id, script, event_type, payload) "
+        "SELECT ?, NULL, ?, 'training.captured', ? WHERE NOT EXISTS "
+        "(SELECT 1 FROM events WHERE ts = ? AND script = ? "
+        "AND event_type = 'training.captured' AND payload = ?)",
+        (snap["ts"], _LEDGER_SCRIPT, encoded, snap["ts"], _LEDGER_SCRIPT, encoded))
+    store._conn().commit()
+    return {"written": cursor.rowcount}
+
+
 # ---------------------------------------------------------------- display
 
 def format_summary(snap: dict) -> str:
