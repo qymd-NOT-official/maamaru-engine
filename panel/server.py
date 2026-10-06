@@ -312,7 +312,7 @@ def _sweep_return_screens(agent, tag):
         yield f"[{tag}] ⚠️ 收尾扫地失败（不影响任务结果）：{exc}"
 
 
-def _wrap_inventory(tag: str, runner, inventory=False):
+def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
     """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 必做的回本丸 + 强制 peek。
 
     为什么盘点默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
@@ -329,7 +329,21 @@ def _wrap_inventory(tag: str, runner, inventory=False):
       收尾失败同样不拖垮任务结果。
     """
     def _fn(config_path, params):
+        from touken.flow_control import FlowAborted
+        if scheduled_startup and params.get("scheduled"):
+            yield "[排班] 先开模拟器、登录游戏，再派遣远征"
+            ok, detail = yield from _workflow._run_node(
+                _workflow.NODE_REGISTRY["boot_emulator"], None, {}, config_path)
+            if not ok:
+                _write_dispatch_result(params.get("slot_key", ""), "failed", "模拟器启动失败")
+                raise FlowAborted("远征排班模拟器启动失败，本班未派遣")
         agent = _make_agent(config_path)
+        if scheduled_startup and params.get("scheduled"):
+            ok, detail = yield from _workflow._run_node(
+                _workflow.NODE_REGISTRY["login"], agent, {}, config_path)
+            if not ok:
+                _write_dispatch_result(params.get("slot_key", ""), "failed", "登录游戏失败")
+                raise FlowAborted("远征排班登录游戏失败，本班未派遣")
         enabled = inventory(params) if callable(inventory) else inventory
         if enabled and hasattr(agent, "status_snapshot_stream"):
             try:
@@ -1340,7 +1354,7 @@ def _map_select_field():
 
 
 register_script("dispatch", "派遣远征", "立刻派一支部队去指定远征图",
-                _wrap_inventory("派遣", _build_dispatch),
+                _wrap_inventory("派遣", _build_dispatch, scheduled_startup=True),
                 params=[_team_field("2"), _map_select_field()], hidden=True)
 register_script("forge", "锻刀", "收完成的刀，再给空闲炉点火；普通锻刀不使用加速符，十连限锻才烧",
                 _wrap_inventory("锻刀", _build_forge),
