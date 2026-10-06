@@ -1,3 +1,4 @@
+import type { TrainingOverviewResponse, TrainingHistoryResponse, InternalAffairsResponse, DropStatsResponse, ForgeHistoryResponse, EventPointsListResponse, EventPointsTimelineResponse, SwordJournalResponse } from './types'
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptInfo, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 import type { DailyReport } from './types'
 
@@ -12,7 +13,23 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+async function optionalRecord<T>(url: string): Promise<T | null> {
+  const response = await fetch(url)
+  const body = await response.json()
+  if (response.status === 404 && body.detail !== 'Not Found') return null
+  if (!response.ok) throw new Error(body.detail || `请求失败（${response.status}）`)
+  return body as T
+}
+
 export const api = {
+  trainingOverview: () => optionalRecord<TrainingOverviewResponse>('/api/data/training/overview'),
+  trainingHistory: (id: number) => optionalRecord<TrainingHistoryResponse>(`/api/data/training/history/${id}`),
+  internalAffairs: () => optionalRecord<InternalAffairsResponse>('/api/data/training/internal-affairs'),
+  dropStats: (days: number) => request<DropStatsResponse>(`/api/data/drop-stats?days=${days}`),
+  forgeHistory: (days: number) => request<ForgeHistoryResponse>(`/api/data/forge-history?days=${days}`),
+  eventPointsList: () => request<EventPointsListResponse>('/api/data/event-points'),
+  eventPoints: (id: string) => request<EventPointsTimelineResponse>(`/api/data/event-points?event_id=${encodeURIComponent(id)}`),
+  swordJournal: (id: number) => request<SwordJournalResponse>(`/api/data/sword-journal/${id}`),
   honmaruHome: () => request<HonmaruHomeData>('/api/honmaru-home'),
   honmaruSituation: () => request<{ situation: HonmaruSituation | null }>('/api/honmaru-home/situation'),
   refreshHonmaruSituation: () => request<{ situation: HonmaruSituation }>('/api/honmaru-home/situation/refresh', { method: 'POST' }),

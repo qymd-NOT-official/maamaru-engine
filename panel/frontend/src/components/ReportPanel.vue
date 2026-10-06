@@ -6,7 +6,7 @@ import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
-import DailyReport from './report/DailyReport.vue'
+import CollectionRecords from './report/CollectionRecords.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
 import { resourceLabel, categoryLabel, categoryOf, honmaruReceipts, dayRange, eventTime, resourceNames, scriptNames, shanghaiDate, signed, swordReceiptEntries } from './report/reportModel'
@@ -1049,13 +1049,13 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
-      <DailyReport v-if="currentSection === 'report'" @open-planning="openPlanning" />
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="props.ledgerMode && view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
         <button v-if="!props.ledgerMode && view === 'records'" type="button" class="secondary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button>
       </div>
       <template v-if="currentSection === 'report'">
+        <CollectionRecords v-if="view === 'records'" />
       <template v-if="view === 'chart'">
         <section v-if="props.ledgerMode && ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
           <header>

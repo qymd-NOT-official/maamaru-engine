@@ -7,6 +7,7 @@ import { resourceNames } from './reportModel'
 const goalResources = resourceNames.filter(name => name !== '甲州金')
 // 异去碎片清单由服务端途径卡给出（数据卡没收录就是空，不硬编）
 const fragmentNames = computed(() => Object.keys(planning.value?.fragments || {}))
+import EventPointsHistory from './EventPointsHistory.vue'
 import EventTimeline from './EventTimeline.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
@@ -437,6 +438,7 @@ onMounted(load)
       @open-raid-recommendation="openRaidRecommendation"
     />
 
+    <EventPointsHistory />
     <header class="planning-toolbar">
       <div><h3>自定目标</h3><span v-if="customGoals.length">{{ customGoals.length }} 个</span></div>
       <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 添加</button>

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import PaperCard from './PaperCard.vue'
 import PanelHeader from './PanelHeader.vue'
+import SwordGrowth from './report/SwordGrowth.vue'
 import SwordReadActions from './SwordReadActions.vue'
 import PixelControl from './PixelControl.vue'
 import SegmentedControl from './SegmentedControl.vue'
@@ -285,6 +286,7 @@ onMounted(load)
 
       <PaperCard v-if="archiveView !== 'attention'" variant="task" tag="section" class="archive-book">
         <h3 class="archive-sub">{{ viewTitle }} · {{ visibleEntries.length }} 振</h3>
+        <p v-if="visibleEntries.some(entry => !entry.serial_id)" class="archive-growth-note">旧盘点缺少成长数据时显示「—」；采集到可关联的游戏记录后，可展开该振的成长与履历。</p>
         <div class="archive-toolbar">
           <PixelControl v-model="query" type="search" placeholder="输入刀名找一找" aria-label="搜索刀名" />
           <em>{{ visibleEntries.length }} 振</em>
@@ -305,7 +307,8 @@ onMounted(load)
               <div class="archive-entry-facts">
                 <i class="archive-form" :class="entry.form_status" :title="(entry.form_evidence || []).join('；')">{{ archiveFormLabel(entry) }}</i>
                 <span>Lv.{{ entry.level ?? '—' }}<i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="机器没读出来，这个等级是你填的">你填的</i></span>
-                <span>乱舞 Lv.{{ entry.tou_level ?? '—' }}</span>
+                <span>累计经验 {{ entry.exp == null ? '—' : entry.exp.toLocaleString() }}</span>
+                <span>乱舞 Lv.{{ entry.tou_level ?? '—' }} · 习合值 {{ entry.ranbu_exp == null ? '—' : entry.ranbu_exp.toLocaleString() }}</span>
                 <span>显现 {{ entry.kiwame_date || '—' }}</span>
                 <i v-if="entry.human?.favorite" class="archive-mark favorite">常用</i>
                 <i v-if="entry.human?.watch" class="archive-mark watch">特别关心</i>
@@ -324,6 +327,7 @@ onMounted(load)
                 <button type="button" class="archive-pill keeper" :class="{ active: entry.human?.keeper }" :aria-pressed="Boolean(entry.human?.keeper)" :disabled="saving" title="点了就是要练的刀，再点取消" @click="toggleKeeper(entry)">{{ entry.human?.keeper ? '要练 ✓' : '要练' }}</button>
                 <button v-if="entry.human" type="button" class="archive-revoke" :disabled="saving" title="撤销亲手标注，回到机器盘点的识别结果" @click="revokeEntry(entry)">撤销</button>
               </div>
+              <SwordGrowth v-if="entry.serial_id" :key="entry.serial_id" :serial-id="entry.serial_id" />
               <small v-if="entry.human?.stale" class="archive-stale-note">同名同日有多振，标记挂在这一组上，不保证选中具体哪一振</small>
             </li>
           </template>
@@ -421,6 +425,7 @@ onMounted(load)
 
 /* 整本刀帐：每行 = 名字带来源徽标 / 操作组 / 事实行，操作组窄屏自动换行。
    特别关心置顶，和其余刀之间隔一条金色分隔线。 */
+.archive-growth-note { color: var(--ink-dim); font-size: 12px; line-height: 1.7; }
 .archive-toolbar { display: grid; grid-template-columns: minmax(170px, 330px) auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-dim); font-size: 12px; }
 .archive-toolbar :deep(.pixel-control) { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; }
 .archive-toolbar em { font-style: normal; white-space: nowrap; }
