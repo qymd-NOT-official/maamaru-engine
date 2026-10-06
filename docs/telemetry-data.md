@@ -351,8 +351,9 @@ updated_at epoch）：
 `touken/ranbu_rules.py`）：按稀有度（1~5）给乱舞 Lv2→Lv10 每级所需
 **累计**习合值（抄日服 wiki 2025-09 版并已抓取核对；每喂 1 振同名刀 =
 100 习合值为国服官网公告口径）。诚实标注都在 `_meta`：
-`exp_per_sword_calibrated=false`（公告推断未实测，由此得出的
-need_swords_est 一律是估算）、`cn_max_level=null`（国服当前开放上限
+`exp_per_sword_calibrated=true`（2026-10-07 日服实抓校准：lv2 刀
+ranbu_exp 恰为 100，lv2-5 阈值与 wiki 表一致；need_swords_est 仍是按
+此规则的估算值）、`cn_max_level=null`（国服当前开放上限
 未实测锤死，换算只覆盖 wiki 表有的 Lv10，超出一律返回 null 不瞎猜）。
 髭切/膝丸是 wiki 特例：swords.json 记稀有 2，乱舞按稀有 4 计
 （`exceptions` 按目录 id 覆盖）。

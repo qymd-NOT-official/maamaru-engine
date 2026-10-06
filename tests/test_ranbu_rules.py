@@ -12,7 +12,7 @@ from touken import sword_db
 def test_meta_honesty_marks():
     meta = ranbu_rules.load_rules()["_meta"]
     assert meta["exp_per_sword"] == 100
-    assert meta["exp_per_sword_calibrated"] is False
+    assert meta["exp_per_sword_calibrated"] is True  # 2026-10-07 日服实抓校准
     assert meta["cn_max_level"] is None
     assert meta["max_table_level"] == 10
     assert "touken.youzu.com" in meta["sources"]["exp_per_sword"]

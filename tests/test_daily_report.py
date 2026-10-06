@@ -95,8 +95,9 @@ def test_empty_day_returns_all_none_and_serializable(store):
 
 
 def test_default_date_is_today(store):
+    # autouse fixture 把 _today 钉在 D，默认日期应等于 D 而不是真实今天
     report = daily_report.build_daily_report(store)
-    assert report["date"] == datetime.now(SH).date().isoformat()
+    assert report["date"] == D
 
 
 # ---------------------------------------------------------------- 今日收支
