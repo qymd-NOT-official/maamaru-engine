@@ -8,7 +8,7 @@
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.0.1 (Chinese)](docs/releases/v1.0.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.2.0 (Chinese)](docs/releases/v1.2.0.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 Maamaru supports the **Simplified Chinese client on the China server**. The app is currently in Simplified Chinese.
 
@@ -22,11 +22,15 @@ To hand over repetitive work, pick a task, check the team, spending permissions,
 
 Recent game state, new swords, and your own notes stay here.
 
-![1. Return to My Honmaru](docs/assets/v1-home.png)
+![1. Return to My Honmaru](docs/assets/v1.2-home.png)
 
 **2. Save a daily routine**
 
-Arrange the daily steps in order and save them for reuse.
+Choose Execute Today’s Schedule (一键执行今日安排) on the home page to adopt the current expedition and Regiment Battle suggestions, then run dailies after the battles finish. Completed dailies are skipped. Check your saved gameplay settings first; arrangements remain editable in Planning.
+
+![Today’s arrangements accepted](docs/assets/v1.2-today-arranged.png)
+
+You can also arrange the daily steps in order and save a workflow for reuse.
 
 ![2. Save a daily routine](docs/assets/v1-daily-workflow.png)
 
@@ -34,21 +38,29 @@ Arrange the daily steps in order and save them for reuse.
 
 Set Regiment Battle runs and a start time, or schedule a saved workflow separately.
 
-![3. Put work on the timetable](docs/assets/v1-timetable.png)
+![3. Put work on the timetable](docs/assets/v1.2-timetable.png)
 
 **4. See what is happening**
 
 The task desk shows the current job and its execution log.
 
-![4. See what is happening](docs/assets/v1-running-log.png)
+![4. See what is happening](docs/assets/v1.2-running-log.png)
 
 **5. Review the ledger**
 
 Check balances, gains, and spending, then follow the records for details.
 
-![5. Review the ledger](docs/assets/v1-ledger.png)
+![5. Review the ledger](docs/assets/v1.2-balances.png)
 
 You arrange the day's work; when you return, you can see what got done: completed runs, where resources came from, and which swords came home. Open the report or ledger when you want the details.
+
+The records page groups tasks and transactions by date, with battle drops by map and a forging history. Each sword’s archive entry shows level, cumulative experience, Ranbu progress, and acquisition history.
+
+![Records by date](docs/assets/v1.2-records.png)
+
+![Battle drops](docs/assets/v1.2-drops.png)
+
+![Sword archive](docs/assets/v1.2-sword-archive.png)
 
 ## Hand over the repetitive work
 
