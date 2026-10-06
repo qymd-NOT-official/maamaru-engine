@@ -25,15 +25,20 @@ function backToToday() {
   date.value = ''
 }
 
+let requestId = 0
 async function load() {
+  const id = ++requestId
   loading.value = true
   try {
-    report.value = await api.dailyReport(date.value)
+    const nextReport = await api.dailyReport(date.value)
+    if (id !== requestId) return
+    report.value = nextReport
     error.value = ''
   } catch (cause) {
+    if (id !== requestId) return
     error.value = cause instanceof Error ? cause.message : '日报读取失败'
   } finally {
-    loading.value = false
+    if (id === requestId) loading.value = false
   }
 }
 watch(date, load)
@@ -69,12 +74,18 @@ const balanceRows = computed(() => {
 
 const clock = (capturedAt: string) => (capturedAt || '').slice(11, 16)
 
-const entryRows = computed(() => report.value?.resources?.entries.slice(0, 8) || [])
+const entryRows = computed(() => report.value?.resources?.entries || [])
+const resourceGroups = computed(() => report.value?.resources?.groups || [])
+function groupAmounts(net: Record<string, number>) {
+  return resourceNames.filter(name => net[name]).map(name => `${resourceLabel(name)} ${signed(net[name])}`).join(' · ')
+}
+const balanceMismatch = computed(() => balanceRows.value.some(row =>
+  row.to - row.from !== (report.value?.resources?.net[row.name] || 0)))
 const entryHint = computed(() => {
   const section = report.value?.resources
   if (!section) return ''
   const rest = section.entry_total - entryRows.value.length
-  return rest > 0 ? `还有 ${rest} 笔小的没展开` : ''
+  return rest > 0 ? `这里只列金额较大的 ${entryRows.value.length} 笔，其余 ${rest} 笔可在「全部记录」查看` : ''
 })
 
 // ---- 今日掉落 ----
@@ -89,7 +100,7 @@ const trainingEmptyText = computed(() => {
   const section = training.value
   if (!section) return ''
   if (!section.has_previous) return '狐之助还没攒够两次快照，练度从下次收账开始记。'
-  return '今天没有练度变化，刀刀们原地踏步。'
+  return '这次记录对比没有发现练度变化。'
 })
 
 // ---- 目标进度 ----
@@ -141,20 +152,31 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
 
     <template v-else>
       <section v-if="report?.resources" class="daily-report-section" aria-label="今日收支">
-        <h4>今日收支</h4>
+        <h4>已记账收支</h4>
         <ul v-if="netRows.length" class="daily-report-net">
           <li v-for="row in netRows" :key="row.name" :class="{ gain: row.delta! > 0, loss: row.delta! < 0 }">
             <span>{{ resourceLabel(row.name) }}</span><b>{{ signed(row.delta) }}</b>
           </li>
         </ul>
-        <p v-if="balanceRows.length" class="daily-report-balance">
-          首末读数
+        <details v-if="balanceRows.length" class="daily-report-details">
+          <summary>库存变化 · {{ clock(report.resources.opening?.captured_at || '') }}—{{ clock(report.resources.closing?.captured_at || '') }} 的读数对比</summary>
+          <p class="daily-report-balance">
           <template v-for="row in balanceRows" :key="row.name"> · {{ resourceLabel(row.name) }} {{ row.from.toLocaleString() }} → {{ row.to.toLocaleString() }}</template>
-        </p>
+          </p>
+          <p v-if="balanceMismatch" class="daily-report-note">库存变化与已记账收支不完全一致，读数覆盖的时段也可能不同，差额需结合明细核对。</p>
+        </details>
         <p v-else-if="report.resources.opening || report.resources.closing" class="daily-report-balance">
           读数时间 {{ report.resources.opening ? clock(report.resources.opening.captured_at) : '—' }} → {{ report.resources.closing ? clock(report.resources.closing.captured_at) : '—' }}
         </p>
-        <ul v-if="entryRows.length" class="daily-report-list">
+        <ul v-if="resourceGroups.length" class="daily-report-list">
+          <li v-for="(group, index) in resourceGroups" :key="index">
+            <span>{{ group.label || '来源待核对' }}<small> · {{ group.count }} 笔</small></span>
+            <span class="daily-report-group-amount">{{ groupAmounts(group.net) }}</span>
+          </li>
+        </ul>
+        <details v-if="entryRows.length" class="daily-report-details">
+          <summary>查看 {{ report.resources.entry_total }} 笔记账明细</summary>
+        <ul class="daily-report-list">
           <li v-for="(entry, index) in entryRows" :key="`${entry.ts}:${index}`">
             <span class="daily-report-entry-note">{{ entry.label || '来源未确认的一笔' }}</span>
             <b :class="{ gain: entry.delta > 0, loss: entry.delta < 0 }">{{ resourceLabel(entry.resource) }} {{ signed(entry.delta) }}</b>
@@ -162,6 +184,7 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
           </li>
         </ul>
         <p v-if="entryHint" class="daily-report-more">{{ entryHint }}。</p>
+        </details>
       </section>
 
       <section v-if="dropGroups.length" class="daily-report-section" aria-label="今日掉落">
@@ -199,7 +222,7 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
         <p v-else class="daily-report-note">{{ trainingEmptyText }}</p>
       </section>
 
-      <section v-if="goalRows.length || report?.goals !== null" class="daily-report-section" aria-label="目标进度">
+      <section v-if="goalRows.length" class="daily-report-section" aria-label="目标进度">
         <h4>目标进度</h4>
         <ul v-if="goalRows.length" class="daily-report-list">
           <li v-for="goal in goalRows" :key="`goal-${goal.id ?? goal.message}`">
@@ -211,7 +234,8 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
       </section>
 
       <section v-if="attendanceRows.length" class="daily-report-section" aria-label="今日出勤">
-        <h4>今日出勤 <small>まあ丸出动 {{ attendanceRows.length }} 次</small></h4>
+        <details class="daily-report-details">
+        <summary>今天的任务记录 · {{ attendanceRows.length }} 次</summary>
         <ul class="daily-report-list">
           <li v-for="row in attendanceRows" :key="row.run_id || `${row.started_at}`">
             <span>{{ runName(row) }}</span>
@@ -219,6 +243,7 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
             <time>{{ runWindow(row) }}</time>
           </li>
         </ul>
+        </details>
       </section>
     </template>
   </section>
@@ -252,6 +277,10 @@ function runWindow(row: { started_at: number | null; ended_at: number | null }) 
 .daily-report-list li > time { grid-column: 1 / -1; color: var(--ink-dim); font-size: 10px; }
 .daily-report-list li > b small { color: var(--ink-dim); font-weight: 400; }
 .daily-report-more { margin: 6px 0 0; color: var(--ink-dim); font-size: 11px; }
+.daily-report-details { margin: 10px 0; font-size: 12px; }
+.daily-report-details summary { cursor: pointer; color: var(--ink-dim); padding: 5px 0; }
+.daily-report-details[open] summary { margin-bottom: 8px; }
+.daily-report-group-amount { color: var(--ink); line-height: 1.6; }
 .daily-report-drop-group { margin-top: 8px; }
 .daily-report-drop-group h5 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: 12px; }
 .daily-report-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }

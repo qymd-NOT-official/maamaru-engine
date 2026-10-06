@@ -441,6 +441,7 @@ export interface DailyReportBalance {
 
 export interface DailyReportResources {
   net: Record<string, number>
+  groups: { label: string; source: string; attribution: string; count: number; net: Record<string, number> }[]
   opening: DailyReportBalance | null
   closing: DailyReportBalance | null
   entries: DailyReportResourceEntry[]

@@ -26,6 +26,11 @@ def sh(text: str) -> float:
 D = "2026-10-06"  # 报告日
 
 
+@pytest.fixture(autouse=True)
+def report_today(monkeypatch):
+    monkeypatch.setattr(daily_report, "_today", lambda: date.fromisoformat(D))
+
+
 @pytest.fixture
 def store():
     # TestClient 会把路由跑进工作线程，那边的 sqlite 连接不在本线程的
@@ -309,6 +314,35 @@ def test_attendance_lists_runs_that_day(store):
 
 def test_attendance_none_when_no_runs(store):
     assert daily_report.build_daily_report(store, D)["attendance"] is None
+
+
+def test_old_unfinished_runs_are_not_today_attendance(store):
+    store.start_run("old", "osaka", started_at=sh("2026-08-14 12:00:00"))
+    assert daily_report.build_daily_report(store, D)["attendance"] is None
+    assert store.runs_between(sh(f"{D} 00:00:00"), sh("2026-10-07 00:00:00"))[0]["status"] == "running"
+
+
+def test_group_totals_include_entries_beyond_preview_limit(store):
+    for i in range(30):
+        _change(store, sh(f"{D} 12:00:00") + i, "木炭", 100, "", source="task_rewards.reward_popup")
+    section = daily_report.build_daily_report(store, D)["resources"]
+    assert len(section["entries"]) == 20
+    assert section["groups"][0]["count"] == 30
+    assert section["groups"][0]["net"] == {"木炭": 3000}
+
+
+def test_historical_report_does_not_evaluate_current_goals(store, monkeypatch):
+    spy = lambda *args, **kwargs: pytest.fail("不能用当前家底计算历史目标")
+    monkeypatch.setattr(advisor, "get_planning", spy)
+    assert daily_report.build_daily_report(store, "2026-10-05")["goals"] is None
+
+
+def test_past_deadline_goal_is_hidden_even_if_marked_done(store, monkeypatch):
+    monkeypatch.setattr(advisor, "get_planning", lambda *args, **kwargs: {"goals": [
+        {"deadline": "2026-09-10", "status": "done", "message": "旧目标"},
+        {"deadline": D, "status": "active", "message": "今天的目标"}]})
+    goals = daily_report.build_daily_report(store, D)["goals"]
+    assert [goal["message"] for goal in goals] == ["今天的目标"]
 
 
 # ---------------------------------------------------------------- API 路由

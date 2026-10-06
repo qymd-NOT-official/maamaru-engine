@@ -150,6 +150,14 @@ def _build_resources(store, start_ts: float, end_ts: float) -> dict | None:
             "attribution": str(payload.get("attribution") or ""),
         })
     entries.sort(key=lambda item: -abs(item["delta"]))
+    groups = {}
+    for entry in entries:
+        key = (entry["label"], entry["source"], entry["attribution"])
+        group = groups.setdefault(key, {"label": entry["label"], "source": entry["source"],
+            "attribution": entry["attribution"], "count": 0, "net": {}})
+        group["count"] += 1
+        resource = entry["resource"]
+        group["net"][resource] = group["net"].get(resource, 0) + entry["delta"]
     truncated = max(0, len(entries) - _MAX_ATTRIBUTION_ENTRIES)
     entries = entries[:_MAX_ATTRIBUTION_ENTRIES]
 
@@ -165,6 +173,7 @@ def _build_resources(store, start_ts: float, end_ts: float) -> dict | None:
 
     return {
         "net": {name: net[name] for name in _LEDGER_RESOURCE_ORDER if name in net},
+        "groups": list(groups.values()),
         "opening": _balance(captures[0] if captures else None),
         "closing": _balance(captures[-1] if captures else None),
         "entries": entries,
@@ -340,7 +349,9 @@ def _build_training(store, start_ts: float, end_ts: float) -> dict | None:
 
 
 def _build_goals(store, day: date) -> list[dict] | None:
-    """按报告日当天口径评估目标；任何失败都当「没有目标」，不炸。"""
+    """只展示当前目标；未保存历史目标快照时不倒推过去的进度。"""
+    if day != _today():
+        return None
     from . import advisor
     now = datetime.combine(day, time(hour=12), tzinfo=_TZ)
     planning = advisor.get_planning(
@@ -348,6 +359,9 @@ def _build_goals(store, day: date) -> list[dict] | None:
     goals = []
     for goal in planning.get("goals") or []:
         if not isinstance(goal, dict):
+            continue
+        deadline = goal.get("deadline")
+        if deadline and date.fromisoformat(str(deadline)[:10]) < day:
             continue
         goals.append({
             "id": goal.get("id"), "kind": goal.get("kind") or "resource",
@@ -368,6 +382,9 @@ def _build_goals(store, day: date) -> list[dict] | None:
 
 def _build_attendance(store, start_ts: float, end_ts: float) -> list[dict] | None:
     runs = store.runs_between(start_ts, end_ts)
+    # 旧运行缺收尾时间不代表它持续到今天；不改历史记录，只过滤日报。
+    runs = [run for run in runs if (run.get("started_at") or 0) >= start_ts
+            or run.get("ended_at") is not None]
     if not runs:
         return None
     return [{

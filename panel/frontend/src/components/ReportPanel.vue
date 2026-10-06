@@ -1086,7 +1086,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         </section>
 
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
-          <header><div><h3 id="resource-overview-title">现在的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
+          <header><div><h3 id="resource-overview-title">最近记下的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
           <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
