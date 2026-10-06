@@ -430,10 +430,6 @@ onMounted(load)
 .archive-toolbar :deep(.pixel-control) { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); background: var(--paper); border: 1px solid var(--paper-line); border-radius: 8px; font: inherit; }
 .archive-toolbar em { font-style: normal; white-space: nowrap; }
 .archive-list { display: grid; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }
-/* 列表长就内部限高滚动，且全页只此一层内滚；窄屏取消内滚整页滚动。 */
-@media (min-width: 901px) {
-  .archive-list { max-height: 620px; overflow: auto; padding-right: 4px; }
-}
 .archive-watch-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; color: var(--fox-gold-deep); font-size: 11px; letter-spacing: .08em; }
 .archive-watch-divider::before, .archive-watch-divider::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--fox-gold) 55%, var(--paper-line)); }
 .archive-watch-divider span { white-space: nowrap; }
