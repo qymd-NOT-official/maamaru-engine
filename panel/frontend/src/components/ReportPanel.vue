@@ -276,9 +276,11 @@ const caretakerSummary = computed(() => {
   return { completed, failed }
 })
 
+const trendResourceNames = ['小判', '木炭', '玉钢', '冷却材', '砥石']
+
 const anomalyInsight = computed<ReportInsight | null>(() => {
   const candidates: Array<{ resource: string; date: string; delta: number; ratio: number }> = []
-  for (const resource of resourceNames.filter(name => name !== '甲州金')) {
+  for (const resource of trendResourceNames) {
     const rows = (ledger.value?.daily_series || []).filter(item => item.resource === resource
       && item.total_delta != null && Number(item.total_delta) !== 0)
     if (rows.length < 3) continue
@@ -506,7 +508,7 @@ function remainingUnknown(date: string, resource: string): number | null {
 // ---- 图表数据（余额折线：直接取服务端观察链，不再按日聚合收支） ----
 
 const balancePoints = computed(() => ledger.value?.balance_series || [])
-const balanceResources = computed(() => resourceNames.filter(name => name !== '甲州金').filter(name =>
+const balanceResources = computed(() => trendResourceNames.filter(name =>
   balancePoints.value.some(point => point.values?.[name] != null)))
 const ledgerDateRange = computed(() => {
   const dates = [...new Set(balancePoints.value.map(point => point.date))].sort()
@@ -1089,7 +1091,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <header><div><h3 id="resource-overview-title">最近记下的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
           <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
           <div class="resource-ledger-grid">
-            <article v-for="row in resourceRows.filter(row => row.name !== '甲州金')" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
+            <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ resourceLabel(row.name) }}</small>
               <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
               <small v-if="!props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
