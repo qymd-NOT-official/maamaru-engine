@@ -125,7 +125,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="resource-echart" :class="{ loading }">
-    <p class="resource-observation-note">圆点是实读余额；线段连接前后读数，中间未连续观察。未读到的资源不补零。</p>
     <div ref="box" class="resource-echart-box" role="img" aria-label="资源余额折线图"></div>
     <p v-if="loading" class="resource-echart-hint">狐之助正在整理这段时间的余额……</p>
     <p v-else-if="points.length < 2" class="resource-echart-hint">同一时间段至少需要两次库存读数，狐之助再攒一会儿账。</p>
@@ -133,7 +132,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.resource-observation-note { color: var(--ink-dim); font-size: 12px; line-height: 1.7; margin: 0 0 8px; }
 .resource-echart { position: relative; }
 .resource-echart-box { width: 100%; height: 320px; }
 .resource-echart-hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-dim); background: color-mix(in srgb, var(--paper-card) 70%, transparent); margin: 0; }
