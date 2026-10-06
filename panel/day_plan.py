@@ -46,7 +46,8 @@ def _normalize_block(block: dict) -> dict | None:
         return {"start_min": block["start_min"], "kind": "workflow",
                 "workflow_id": block["workflow_id"]}
     if kind == "daily":
-        return {"start_min": block["start_min"], "kind": "daily"}
+        return {"start_min": block["start_min"], "kind": "daily",
+                **({"after_raids": True} if block.get("after_raids") is True else {})}
     return None
 
 

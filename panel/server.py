@@ -2366,6 +2366,19 @@ def _day_timeline_payload():
     return timeline
 
 
+@app.post("/api/today/execute")
+def api_execute_today():
+    if _ledger_mode():
+        raise HTTPException(403, "纯净账房模式不能自动开工")
+    from .today_execution import execute_today
+    try:
+        return execute_today(
+            get_runner(), _day_timeline_payload,
+            lambda: (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.post("/api/day-conductor/resume-raid")
 async def api_resume_day_raid(request: Request):
     from .day_conductor import resume_raid
@@ -2667,7 +2680,8 @@ def _clean_schedule_blocks(blocks) -> list[dict]:
                           "workflow_id": str(block["workflow_id"])})
         else:
             clean.append({"start_min": int(block["start_min"]),
-                          "kind": "daily"})
+                          "kind": "daily",
+                          **({"after_raids": True} if block.get("after_raids") is True else {})})
     return clean
 
 

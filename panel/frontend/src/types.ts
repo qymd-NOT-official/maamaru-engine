@@ -1495,6 +1495,7 @@ export interface DayScheduleBlock {
   workflow_id?: string
   script?: string
   event_key?: string
+  after_raids?: boolean
 }
 
 export interface DayBooking {

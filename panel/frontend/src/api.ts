@@ -74,6 +74,7 @@ export const api = {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ blocks, raid_workflow_id: raidWorkflowId }),
   }),
+  executeToday: () => request<{ ok: boolean; message: string }>('/api/today/execute', { method: 'POST' }),
   resumeDayRaid: (runId: string, finishedRound: boolean) => request<{ ok: boolean }>('/api/day-conductor/resume-raid', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: runId, finished_round: finishedRound }),
   }),

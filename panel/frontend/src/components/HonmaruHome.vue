@@ -168,6 +168,23 @@ function eventBudget(event: EventTimelineEntry) {
 }
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : '暂时没能保存，请再试一次。' }
 
+const executingToday = ref(false)
+const todayExecutionMessage = ref('')
+async function executeToday() {
+  if (executingToday.value) return
+  executingToday.value = true
+  todayExecutionMessage.value = ''
+  try {
+    todayExecutionMessage.value = (await api.executeToday()).message
+    await loadSummaries()
+  } catch (error) {
+    todayExecutionMessage.value = errorMessage(error)
+    if (todayExecutionMessage.value.includes('中断')) emit('planning')
+  } finally {
+    executingToday.value = false
+  }
+}
+
 async function loadHome() {
   const data = await api.honmaruHome()
   profile.value = { ...emptyProfile(), ...data.profile }
@@ -284,7 +301,8 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
-      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><button type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div>
+      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><div class="home-office-actions"><button type="button" class="home-primary" :disabled="executingToday || active || !dayPlan?.conductor.available" @click="executeToday">{{ executingToday ? '正在接班…' : '一键执行今日安排' }}</button><button v-if="active" type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div></div>
+      <p v-if="todayExecutionMessage" class="home-notice" role="status">{{ todayExecutionMessage }}</p>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">
@@ -508,4 +526,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 @media (max-width: 1100px) { .honmaru-home { grid-template-columns: 175px minmax(0, 1fr); gap: 25px; } .honmaru-keepsakes { grid-column: 2; grid-template-columns: 1fr 1fr; gap: 20px; } }
 @media (max-width: 720px) { .honmaru-home { grid-template-columns: 1fr; gap: 25px; } .honmaru-profile { padding: 0 0 20px; border-right: 0; border-bottom: 1px solid var(--paper-line); display: grid; grid-template-columns: 66px minmax(0, 1fr); column-gap: 20px; } .profile-portrait { grid-row: 1 / 4; width: 66px; height: 74px; padding: 4px 4px 11px; margin: 3px 0 0; } .honmaru-profile .home-eyebrow { margin-bottom: 4px; } .honmaru-profile h1 { font-size: 21px; margin-bottom: 6px; } .profile-motto { grid-column: 2; } .profile-facts { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; margin: 20px 0 12px; gap: 12px; } .profile-anniversary { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; margin-top: 16px; padding-top: 12px; } .profile-anniversary strong { font-size: 24px; } .profile-edit { grid-column: 1 / -1; } .profile-footnote { display: none; } .journal-heading h2 { font-size: 20px; } .journal-heading { gap: 10px; } .home-primary { padding: 8px 12px; font-size: 12px; } .honmaru-keepsakes { grid-column: 1; grid-template-columns: 1fr; } .home-dialog { padding: 20px; } .home-dialog-backdrop { padding: 12px; } .journal-entry { padding: 14px; } }
 @media (prefers-reduced-motion: reduce) { .honmaru-home button { transition: none; } }
+.home-office-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.home-office-link .home-office-actions { flex-shrink: 0; }
+@media (max-width: 600px) { .home-office-link { flex-wrap: wrap; gap: 12px; } .home-office-actions { width: 100%; } }
 </style>

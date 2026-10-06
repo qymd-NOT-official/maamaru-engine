@@ -31,7 +31,7 @@ const conductorChoice = ref('')
 const conductorBusy = ref(false)
 const conductorMessage = ref('')
 const workflowPresets = ref<WorkflowPreset[]>([])
-interface DraftRow { time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
+interface DraftRow { after_raids?: boolean; time: string; kind: ScheduleBlockKind; runs: number; workflow_id: string; script: string; event_key: string }
 const draft = ref<DraftRow[]>([])
 const editedBlockIndex = ref<number | null>(null)
 let editedBlockSnapshot = ''
@@ -435,6 +435,7 @@ const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, stri
 function blockStatusText(block: DayConductorBlock): string {
   if (block.waiting_until) return `等待至 ${clockAt(block.waiting_until)}，其他任务可开工`
   if (block.status === 'pending') {
+    if (block.after_raids && data.value?.conductor.blocks.some(b => b.kind === 'raid' && b.status !== 'ended')) return '等联队战收工'
     // 过点不是错误：runner 忙完手头的活就排队开工
     return block.start_min <= smoothNowMin.value ? '排队中，手头收工就上' : '到点开工'
   }
@@ -459,7 +460,7 @@ function blockStatusClass(block: DayConductorBlock): string {
 }
 
 function toDraftRow(block: DayScheduleBlock): DraftRow {
-  return { time: fmtClock(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '', script: block.script || (block.kind === 'raid' ? 'raid' : ''), event_key: block.event_key || '' }
+  return { time: fmtClock(block.start_min), kind: block.kind, runs: block.runs ?? 1, workflow_id: block.workflow_id || '', script: block.script || (block.kind === 'raid' ? 'raid' : ''), event_key: block.event_key || '', after_raids: block.after_raids }
 }
 
 function recommendedBlocks(): DayScheduleBlock[] {
@@ -671,7 +672,7 @@ const preview = computed(() => {
       blocks.push({ start_min: start, kind: 'workflow', workflow_id: row.workflow_id })
       spans.push([start, start + 1])
     } else {
-      blocks.push({ start_min: start, kind: 'daily' })
+      blocks.push({ start_min: start, kind: 'daily', ...(row.after_raids ? { after_raids: true } : {}) })
       spans.push([start, start + GENERIC_BLOCK_MIN])
     }
   }
@@ -1317,7 +1318,7 @@ const caption = computed(() => {
         <div v-if="data.booking && !editing" class="tl-booked-list">
           <div v-for="row in bookedRows" :key="row.key" class="tl-booked-flow">
           <button type="button" class="tl-booking-link" @click="openBlockPopover({index: data.booking!.blocks.indexOf(row.block), lane: 'task', left: pct(row.block.start_min), origin: 'booking'})">
-            {{ fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
+            {{ row.block.after_raids ? '联队战收工后' : fmtMin(row.block.start_min) }} · {{ blockLabel(row.block) }}
             <template v-if="row.cblock"> · <small class="tl-status" :class="blockStatusClass(row.cblock)">{{ blockStatusText(row.cblock) }}</small></template>
             <template v-else-if="row.block.kind === 'raid' && blockEndMin(row.block) != null"> · 预计 {{ fmtMin(blockEndMin(row.block)!) }} 收工</template>
           </button>

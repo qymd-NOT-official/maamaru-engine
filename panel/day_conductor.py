@@ -263,7 +263,8 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
                 })
             else:
                 blocks.append({"start_min": block["start_min"], "kind": "daily",
-                               "label": "一键日课", "status": "pending"})
+                               "label": "一键日课", "status": "pending",
+                               **({"after_raids": True} if block.get("after_raids") is True else {})})
         # 编辑安排不能把已执行的同一段重新排队。身份由时间与内容决定，
         # 与整份计划的签名、数组下标和当前玩法设置无关。
         if old and old.get("day_start") == plan["day_start"]:
@@ -571,7 +572,11 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
             if block.get("status") != "pending":
                 continue
             due = float(state["day_start"]) + block["start_min"] * 60
-            if now < due:
+            after_raids = block.get("kind") == "daily" and block.get("after_raids") is True
+            if after_raids and any(b.get("kind") == "raid" and b.get("status") != "ended"
+                                   for b in state["blocks"]):
+                continue
+            if now < due and not after_raids:
                 break
             if runner.is_running:
                 # 到点的块保持 pending 排队等，远征或其他任务优先，不抢位置
