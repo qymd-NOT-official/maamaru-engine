@@ -560,7 +560,7 @@ class WorkflowPaused(Exception):
 
 
 def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
-                 resume=None, defer_wait=False):
+                 resume=None, defer_wait=False, defer_expedition=False):
     """
     流式跑一条工作流。
 
@@ -583,11 +583,21 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
     start = (resume or {}).get("next_index", 0)
     if type(start) is not int or not 0 <= start <= len(plan):
         raise WorkflowError("续跑位置无效，请重新安排")
-    if resume and (resume.get("nodes") != plan or start == 0
-                   or plan[start - 1]["type"] != "wait_until" or len(report) != start):
+    expedition_resume = bool(resume and resume.get("reason") == "expedition")
+    remaining = (resume or {}).get("remaining_runs")
+    valid_expedition = (defer_expedition and expedition_resume and start < len(plan)
+                        and plan[start]["type"] == "raid"
+                        and type(remaining) is int and 1 <= remaining <= plan[start]["params"].get("runs", 0))
+    if resume and (resume.get("nodes") != plan or len(report) != start
+                   or (not valid_expedition and (expedition_resume or start == 0
+                       or plan[start - 1]["type"] != "wait_until"))):
         raise WorkflowError("等待记录与任务流不一致，不能猜着续跑，请重新安排")
-    if resume and report:
+    if resume and report and not expedition_resume:
         report[-1] = (report[-1][0], "✓ 等待结束，已继续")
+    if expedition_resume:
+        ok, _ = yield from _run_node(NODE_REGISTRY["boot_emulator"], None, {}, config_path)
+        if not ok:
+            raise WorkflowError("续跑前模拟器未就绪，停止")
     if start == 0 and plan[0]["type"] == "boot_emulator":
         # 开模拟器不需要 agent（游戏都还没开），先跑它再建 agent
         yield "【工作流】▶ 第 1 块：开模拟器"
@@ -605,6 +615,10 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
 
     yield "【工作流】正在连接游戏（创建 Agent）..."
     agent = make_agent(config_path)
+    if expedition_resume:
+        ok, _ = yield from _run_node(NODE_REGISTRY["login"], agent, {}, config_path)
+        if not ok:
+            raise WorkflowError("续跑前登录未确认，停止")
     agent._workflow_forge_ran = bool((resume or {}).get("forge_ran", False))
     completed = True
 
@@ -639,7 +653,23 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                 agent.set_progress(f"workflow:{node['type']}")
         except Exception:
             pass
-        ok, detail = yield from _run_node(defn, agent, node["params"], config_path)
+        node_params = node["params"]
+        if expedition_resume and i == start:
+            node_params = {**node_params, "runs": remaining, "rounds": remaining}
+        if node["type"] == "raid":
+            agent._raid_takeover_remaining = None
+        ok, detail = yield from _run_node(defn, agent, node_params, config_path)
+        pending_runs = getattr(agent, "_raid_takeover_remaining", None)
+        if defer_expedition and ok and node["type"] == "raid" and type(pending_runs) is int and pending_runs > 0:
+            _flush_report(report + [(defn["label"], f"等待远征派遣，剩余 {pending_runs} 圈")], finished=False)
+            yield f"【工作流】联队战让位给远征，剩余 {pending_runs} 圈待续跑；未计作完成"
+            # 返回本丸后才释放执行位置，不运行后续步骤或下班安排。
+            yield from agent.navigate_to_stream("本丸")
+            if agent.current_location != "本丸":
+                raise WorkflowError("让位时未确认回到本丸，续跑停止")
+            raise WorkflowPaused(time.time() + 5, {"nodes": plan, "next_index": i,
+                "report": report, "game_closed": False, "reason": "expedition",
+                "remaining_runs": pending_runs, "forge_ran": agent._workflow_forge_ran})
         if node["type"] == "forge":
             agent._workflow_forge_ran = True
         report.append((defn["label"], detail or ("✓" if ok else "✗")))

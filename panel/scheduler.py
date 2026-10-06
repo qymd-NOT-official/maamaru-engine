@@ -801,7 +801,9 @@ def start_scheduler(config_path: str, emit_fn):
                 busy = runner.is_running and runner.current_script != "dispatch"
                 outcome = tick(cfg, due, now,
                                runner_busy=busy,
-                               emulator_ok=True if busy else _emulator_ready(config_path),
+                               # 已授权的排班由派遣入口负责开模拟器、登录。
+                               # 此处再要求游戏预先在线，会把冷启动挡在入口外。
+                               emulator_ok=True,
                                records=records,
                                inflight_key=inflight[0] if inflight else None)
                 changed = changed or outcome["changed"]

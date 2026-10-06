@@ -42,7 +42,7 @@ def _save(runs, path=None):
     temporary.replace(path)
 
 
-def park(run_id, config_path, params, deadline, resume, name, path=None):
+def park(run_id, config_path, params, deadline, resume, name, path=None, script="workflow"):
     with LOCK:
         runs = load(path)
         root = params.get("workflow_wait_root") or run_id
@@ -50,8 +50,11 @@ def park(run_id, config_path, params, deadline, resume, name, path=None):
         if runs.get(root, {}).get("status") == "cancelled":
             return False
         runs[root] = {"id": root, "run_id": run_id, "name": name,
+                      "script": script,
                       "status": "waiting", "wake_at": deadline, "config_path": config_path,
                       "params": {**params, "workflow_wait_root": root, "workflow_resume": resume}}
+        if resume.get("reason") == "expedition":
+            runs[root]["reason"] = f"等远征派遣后续跑联队战，剩余 {resume['remaining_runs']} 圈"
         _save(runs, path)
         return True
 
@@ -112,13 +115,31 @@ def resume_due(now, runner, path=None):
         for record in sorted(runs.values(), key=lambda r: r.get("wake_at", 0)):
             if record.get("status") != "waiting" or now < record["wake_at"]:
                 continue
+            if record["params"].get("workflow_resume", {}).get("reason") == "expedition":
+                deadline = record["params"].get("scheduled_deadline")
+                if deadline is not None and now >= deadline:
+                    record.update(status="interrupted", reason="本日安排或活动已结束，剩余圈数未补跑")
+                    _save(runs, path)
+                    continue
+                from .scheduler import takeover_flag_path, load_config, SLOT_READY, SLOT_WAITING_BUSY
+                slots = load_config().get("automation", {}).get("slot_states", {})
+                if any(slot.get("state") in {SLOT_READY, SLOT_WAITING_BUSY}
+                       and now <= float(slot.get("expires_at", now)) for slot in slots.values()):
+                    continue  # 包括接管预告窗口，防止联队战与派遣互相抢位置。
+                try:
+                    flag = json.loads(takeover_flag_path().read_text(encoding="utf-8"))
+                    requested = float(flag.get("requested_at", 0))
+                except (OSError, ValueError, TypeError):
+                    requested = 0
+                if requested > 0 and 0 <= now - requested <= 2 * 3600:
+                    continue  # 排班仍在排队，不能抢回执行位置。
             # 启动前写领取状态，崩溃也不会把已开始的积木再跑一次。
             record["status"] = "launching"
             _save(runs, path)
             selected = record
             break
     if selected:
-        run_id = runner.start("workflow", selected["config_path"], selected["params"])
+        run_id = runner.start(selected.get("script", "workflow"), selected["config_path"], selected["params"])
         if not run_id:
             with LOCK:
                 runs = load(path)

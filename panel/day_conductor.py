@@ -369,6 +369,8 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             "workflow_id": state.get("workflow_id") or BUILTIN_ID,
             "scheduled_raid_runs": block["runs"],
             "scheduled_workflow_signature": block.get("workflow_signature"),
+            "scheduled_deadline": min(state["day_start"] + day_timeline.DAY_MINUTES * 60,
+                                      float(event_end_at)),
         })
         if not run_id:
             return False
@@ -385,6 +387,9 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
         run_id = runner.start("scheduled_gameplay", config_path, {
             "script": block["script"], "runs": block["runs"],
             "event_key": block["event_key"], "gameplay_signature": block["gameplay_signature"],
+            "scheduled_deadline": min(state["day_start"] + day_timeline.DAY_MINUTES * 60,
+                next((option.get("end_at") or float("inf") for option in timeline_fn().get("gameplay_options", [])
+                      if option["script"] == block["script"]), float("inf"))),
         })
         if not run_id:
             return False

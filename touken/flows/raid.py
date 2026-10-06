@@ -113,6 +113,7 @@ class RaidMixin:
         # 委托配置缺块（老安装没补到键）就当没开，流程照旧手动打
         march_cfg = cfg.get("auto_march") if auto_march else None
 
+        self._raid_takeover_remaining = None
         self._ticket_buys = 0  # 本次运行的小判买票计数
 
         # ========== 1. 导航到出阵 ==========
@@ -156,6 +157,8 @@ class RaidMixin:
         # ========== 3. 逐圈跑 ==========
         for round_no in range(1, max_rounds + 1):
             if self._expedition_takeover_requested():
+                # 只在已确认上一圈结束的边界交接；当前圈尚未出发。
+                self._raid_takeover_remaining = max_rounds - round_no + 1
                 yield "[RAID] 🚩 远征排班请求接管：不开新圈，安全收工"
                 return
             yield f"[RAID] ===== 第 {round_no}/{max_rounds} 圈 ====="

@@ -146,7 +146,7 @@ class ScriptRunner:
                         self._current_workflow = {
                             "id": "builtin-scheduled-raid", "name": "今日联队战 · 自动开工"}
                 self._proc = self._spawn(script_name, config_path, params or {}, run_id)
-                if script_name == "workflow" and (params or {}).get("workflow_wait_root"):
+                if (params or {}).get("workflow_wait_root"):
                     from .workflow_waits import segment_started
                     segment_started(params["workflow_wait_root"], run_id)
                 from touken.telemetry import get_telemetry_store
@@ -202,7 +202,7 @@ class ScriptRunner:
         from .workflow_waits import cancel
         if cancel_waits:
             cancel()
-            if self._current_run_id and self._current_script == "workflow":
+            if self._current_run_id and self._current_script in {"workflow", "scheduled_gameplay"}:
                 cancel(self._current_run_id, remember=True)
         proc = self._proc
         if proc is not None and proc.poll() is None:
@@ -224,11 +224,11 @@ class ScriptRunner:
                 msg = line.rstrip()
                 if not msg:
                     continue
-                if script_name == "workflow" and msg.startswith("@@MAAMARU_WORKFLOW_WAIT@@"):
+                if script_name in {"workflow", "scheduled_gameplay"} and msg.startswith("@@MAAMARU_WORKFLOW_WAIT@@"):
                     from .workflow_waits import park
                     payload = json.loads(msg[len("@@MAAMARU_WORKFLOW_WAIT@@"):])
                     pause_saved = park(run_id, payload["config_path"], payload["params"], payload["wake_at"],
-                         payload["resume"], workflow_name or "任务流")
+                         payload["resume"], workflow_name or "时间表任务", script=script_name)
                     pause_cancelled = not pause_saved
                     continue
                 self._last_output = time.time()

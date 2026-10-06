@@ -51,7 +51,83 @@ def state():
         "report": [["等待", "等待至18:00"]], "game_closed": False, "forge_ran": True}
 
 
-def test_worker_pause_message_is_saved_without_exposing_checkpoint(monkeypatch):
+def test_raid_takeover_resumes_remaining_only_and_preserves_later_steps(tmp_path, monkeypatch):
+    calls = []
+    attempts = iter([6, 3, None])
+
+    def raid(agent, params, config):
+        calls.append(("raid", params["runs"]))
+        agent._raid_takeover_remaining = next(attempts)
+        yield "远征排班请求接管" if agent._raid_takeover_remaining else "全部圈数跑完"
+
+    def step(agent, params, config):
+        calls.append((params["name"], None))
+        yield "✓"
+
+    monkeypatch.setitem(workflow.NODE_REGISTRY, "raid", {"type": "raid", "label": "联队战", "run": raid})
+    monkeypatch.setitem(workflow.NODE_REGISTRY, "qa_step", {"type": "qa_step", "label": "测试", "run": step})
+    for kind in ("boot_emulator", "login"):
+        monkeypatch.setitem(workflow.NODE_REGISTRY, kind, {"type": kind, "label": kind,
+            "run": lambda *args: iter(["✓"])})
+    monkeypatch.setattr(workflow.time, "time", lambda: 100)
+    plan = workflow.normalize_nodes([
+        {"type": "qa_step", "params": {"name": "before"}},
+        {"type": "raid", "params": {"runs": 8}},
+        {"type": "qa_step", "params": {"name": "after"}}])
+    make = lambda _: SimpleNamespace(navigate_to_stream=lambda _: iter([]), current_location="本丸")
+    resume = None
+    for remaining in (6, 3):
+        with pytest.raises(workflow.WorkflowPaused) as paused:
+            list(workflow.run_workflow("qa", plan, make, resume=resume, defer_expedition=True))
+        resume = json.loads(json.dumps(paused.value.resume))
+        assert resume["remaining_runs"] == remaining
+        assert resume["next_index"] == 1
+        report = json.loads((tmp_path / "latest_report.json").read_text(encoding="utf-8"))
+        assert not report["finished"] and not report["all_green"]
+        assert calls[-1][0] == "raid"
+    list(workflow.run_workflow("qa", plan, make, resume=resume, defer_expedition=True))
+    assert calls == [("before", None), ("raid", 8), ("raid", 6), ("raid", 3), ("after", None)]
+
+
+@pytest.mark.parametrize("remaining", [0, 9, True, "3"])
+def test_invalid_raid_checkpoint_never_connects(remaining):
+    plan = workflow.normalize_nodes([{"type": "raid", "params": {"runs": 8}}])
+    resume = {"nodes": plan, "next_index": 0, "report": [], "reason": "expedition", "remaining_runs": remaining}
+    make = Mock()
+    with pytest.raises(workflow.WorkflowError):
+        list(workflow.run_workflow("qa", plan, make, resume=resume, defer_expedition=True))
+    make.assert_not_called()
+
+
+def test_raid_resume_waits_for_expedition_preview_and_stops_at_deadline(tmp_path, monkeypatch):
+    from panel import scheduler
+    monkeypatch.setattr(scheduler, "takeover_flag_path", lambda: tmp_path / "flag.json")
+    slots = {"one": {"state": "ready", "expires_at": 200}}
+    monkeypatch.setattr(scheduler, "load_config", lambda: {"automation": {"slot_states": slots}})
+    resume = {**state(), "reason": "expedition", "remaining_runs": 3}
+    params = {"scheduled_deadline": 150}
+    waits.park("root", "qa", params, 100, resume, "联队战")
+    runner = SimpleNamespace(is_running=False, start=Mock(return_value="new"))
+    waits.resume_due(110, runner)
+    runner.start.assert_not_called()
+    slots.clear()
+    (tmp_path / "flag.json").write_text(json.dumps({"requested_at": 100}))
+    waits.resume_due(110, runner)
+    runner.start.assert_not_called()
+    # 派遣完成清旗后仅续跑一次。
+    (tmp_path / "flag.json").write_text("{}")
+    waits.resume_due(110, runner)
+    runner.start.assert_called_once()
+    waits.resume_due(115, runner)
+    runner.start.assert_called_once()
+    waits.park("expired", "qa", params, 100, resume, "联队战")
+    waits.resume_due(150, runner)
+    assert waits.load()["expired"]["status"] == "interrupted"
+    runner.start.assert_called_once()
+
+
+@pytest.mark.parametrize("script", ["workflow", "scheduled_gameplay"])
+def test_worker_pause_message_is_saved_without_exposing_checkpoint(monkeypatch, script):
     from panel import script_runner
     from touken import telemetry
     store, telemetry_store = Mock(), Mock()
@@ -62,12 +138,20 @@ def test_worker_pause_message_is_saved_without_exposing_checkpoint(monkeypatch):
     process = SimpleNamespace(stdout=["@@MAAMARU_WORKFLOW_WAIT@@" + json.dumps(payload)], wait=lambda: 44)
     runner = script_runner.ScriptRunner()
     runner._proc = process
-    runner._pump(process, "root", "workflow", "晚班")
+    runner._pump(process, "root", script, "晚班")
     assert runner.last_run_result == ("root", "waiting")
     assert waits.load()["root"]["status"] == "waiting"
+    assert waits.load()["root"]["script"] == script
     assert runner._proc is None
     assert "PRIVATE_PATH" not in str(store.append.call_args_list)
     telemetry_store.finish_run.assert_called_once_with("root", "waiting")
+
+
+def test_single_gameplay_checkpoint_resumes_same_script():
+    waits.park("root", "qa", {}, 100, state(), "联队战", script="scheduled_gameplay")
+    runner = SimpleNamespace(is_running=False, start=Mock(return_value="child"))
+    waits.resume_due(110, runner)
+    assert runner.start.call_args.args[0] == "scheduled_gameplay"
 
 
 def test_missing_checkpoint_is_failed_instead_of_waiting(monkeypatch):

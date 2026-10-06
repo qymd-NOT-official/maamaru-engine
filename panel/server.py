@@ -1488,6 +1488,10 @@ def _build_workflow(config_path, params):
     from touken.flow_control import FlowAborted
     preset_id = str(params.get("workflow_id") or "")
     scheduled_runs = params.get("scheduled_raid_runs")
+    if (params.get("workflow_resume", {}).get("reason") == "expedition"
+            and params.get("scheduled_deadline") is not None
+            and time.time() >= params["scheduled_deadline"]):
+        raise FlowAborted("本日安排或活动已结束，联队战剩余圈数不再补跑")
     if scheduled_runs is not None:
         from .day_conductor import workflow_spec
         if type(scheduled_runs) is not int or not 1 <= scheduled_runs <= 99:
@@ -1538,7 +1542,8 @@ def _build_workflow(config_path, params):
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
         daily_mode=preset.get("daily_mode", False),
-        resume=params.get("workflow_resume"), defer_wait=os.environ.get("MAAMARU_WORKER") == "1")
+        resume=params.get("workflow_resume"), defer_wait=os.environ.get("MAAMARU_WORKER") == "1",
+        defer_expedition=scheduled_runs is not None)
     if scheduled_runs is not None and completed is False:
         raise FlowAborted("今日安排的联队战步骤未完成")
 
@@ -1547,6 +1552,8 @@ def _build_scheduled_gameplay(config_path, params):
     from touken.flow_control import FlowAborted
     from .scheduled_gameplay import catalog, issues, spec
     try:
+        if params.get("scheduled_deadline") is not None and time.time() >= params["scheduled_deadline"]:
+            raise ValueError("本日安排或活动已结束，剩余次数不再补跑")
         runs = params.get("runs")
         if type(runs) is not int or not 1 <= runs <= 99:
             raise ValueError("今日安排的次数无效")
@@ -1566,7 +1573,8 @@ def _build_scheduled_gameplay(config_path, params):
              {"type": params["script"], "params": {**current["params"], "runs": runs},
               "on_error": "stop"}]
     completed = yield from _workflow.run_workflow(
-        config_path, nodes, make_agent=_make_agent, after="none", daily_mode=False)
+        config_path, nodes, make_agent=_make_agent, after="none", daily_mode=False,
+        resume=params.get("workflow_resume"), defer_expedition=params["script"] == "raid")
     if completed is False:
         raise FlowAborted("今日安排的玩法未完成")
 
