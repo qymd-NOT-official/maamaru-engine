@@ -10,7 +10,7 @@ import { homeMoments, remainingTime } from './homeClockModel'
 import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
 const props = defineProps<{ activity: any; busy: boolean }>()
-const emit = defineEmits<{ office: []; report: []; records: []; planning: [] }>()
+const emit = defineEmits<{ office: []; report: []; records: []; planning: []; resumeRaid: [runId: string] }>()
 const emptyProfile = (): HonmaruProfile => ({ honmaru_name: '', saniwa_name: '', province: '', attendant: '', motto: '', joined_on: '', avatar: '' })
 const profile = ref<HonmaruProfile>(emptyProfile())
 const draft = ref<HonmaruProfile>(emptyProfile())
@@ -20,6 +20,11 @@ const planning = ref<PlanningReport | null>(null)
 const timeline = ref<EventTimelineReport | null>(null)
 const inventory = ref<any>(null)
 const dayPlan = ref<DayTimeline | null>(null)
+const interruptedRaids = computed(() => dayPlan.value?.conductor.blocks.filter(block => block.recovery && block.run_id) || [])
+let dayPlanTimer: number | undefined
+async function refreshDayPlan() {
+  try { dayPlan.value = await api.dayTimeline() } catch { /* keep the last known arrangement */ }
+}
 const journalEvents = ref<any[]>([])
 const swordDepartures = ref<any[]>([])
 const situation = ref<HonmaruSituation | null>(null)
@@ -277,8 +282,9 @@ async function saveNote() {
 onMounted(() => {
   void refresh()
   timer = window.setInterval(() => { now.value = Date.now() }, 1000)
+  dayPlanTimer = window.setInterval(refreshDayPlan, 30000)
 })
-onBeforeUnmount(() => window.clearInterval(timer))
+onBeforeUnmount(() => { window.clearInterval(timer); window.clearInterval(dayPlanTimer) })
 watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refresh() })
 </script>
 
@@ -302,6 +308,10 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
       <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><div class="home-office-actions"><button v-if="!active" type="button" class="home-primary" :disabled="executingToday || !dayPlan?.conductor.available" @click="executeToday">{{ executingToday ? '正在接班…' : '一键执行今日安排' }}</button><button v-if="active" type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div></div>
+      <div v-for="block in interruptedRaids" :key="block.run_id" class="home-raid-reminder" role="status">
+        <span>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</span>
+        <button type="button" class="home-text-button" @click="emit('resumeRaid', block.run_id!)">去继续 →</button>
+      </div>
       <p v-if="todayExecutionMessage" class="home-notice" role="status">{{ todayExecutionMessage }}</p>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
@@ -529,4 +539,6 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 .home-office-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .home-office-link .home-office-actions { flex-shrink: 0; }
 @media (max-width: 600px) { .home-office-link { flex-wrap: wrap; gap: 12px; } .home-office-actions { width: 100%; } }
+.home-raid-reminder { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin: -12px 0 20px; padding: 10px 14px; border-left: 3px solid var(--fox-gold); color: var(--ink); background: var(--fox-gold-pale); font-size: 12px; }
+.home-raid-reminder button { flex-shrink: 0; }
 </style>

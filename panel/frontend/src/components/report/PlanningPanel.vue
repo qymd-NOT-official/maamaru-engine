@@ -15,6 +15,7 @@ import GameplayPlanner from './GameplayPlanner.vue'
 import PlanningOverview from './PlanningOverview.vue'
 import DayTimeline from '../DayTimeline.vue'
 
+const props = defineProps<{ recoveryRunId?: string }>()
 const emit = defineEmits<{
   gameplaySettingsSaved: [script: string, params: ScriptParams]
   goalSaved: []
@@ -415,7 +416,7 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
+    <DayTimeline :recovery-run-id="props.recoveryRunId" :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
     <EventTimeline
       id="event-timeline"

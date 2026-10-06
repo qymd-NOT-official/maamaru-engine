@@ -71,6 +71,12 @@ const message = ref('')
 type AppTab = 'home' | 'planning' | 'swords' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
 type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
+const raidRecoveryRunId = ref('')
+function openRaidRecovery(runId: string) {
+  raidRecoveryRunId.value = runId
+  tab.value = 'planning'
+}
+watch(tab, value => { if (value !== 'planning') raidRecoveryRunId.value = '' })
 // 刀剑页内视图：刀帐 / 部队预设（'archive' tab 保留为旧入口兼容别名）
 const swordView = ref<'archive' | 'formation'>('archive')
 const lastWorkshopTab = ref<WorkshopTab>('office')
@@ -550,7 +556,8 @@ watch(selected, async () => {
   contentEl.value?.closest<HTMLElement>('.tasks-frame')?.scrollTo({ top: 0 })
 })
 watch(tab, value => {
-  stageCollapsed.value = false
+  stageCollapsed.value = value === 'planning' && !!raidRecoveryRunId.value
+  if (stageCollapsed.value) stageCollapseLockedUntil = Date.now() + 260
   if (value === 'office' || value === 'tasks' || value === 'workflow' || value === 'devtools') lastWorkshopTab.value = value
   if (value !== 'report') reportEntry.value = 'report'
   if (value === 'system') systemMounted.value = true
@@ -676,7 +683,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" @resume-raid="openRaidRecovery" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">
@@ -753,7 +760,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->

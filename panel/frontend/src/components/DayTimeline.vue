@@ -7,7 +7,7 @@ import PaperCard from './PaperCard.vue'
 import { draggedMinute } from './timelineDrag'
 import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
 
-const props = withDefaults(defineProps<{ collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
+const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
   collapsible: false,
   adoptRecommendationRequest: 0,
 })
@@ -18,7 +18,7 @@ const DAY = 1680
 const GENERIC_BLOCK_MIN = 30
 const MAX_BLOCKS = 6
 const data = ref<DayTimeline | null>(null)
-const expanded = ref(!props.collapsible)
+const expanded = ref(!props.collapsible || !!props.recoveryRunId)
 const editing = ref(false)
 const saving = ref(false)
 const removing = ref(false)
@@ -307,6 +307,7 @@ onMounted(() => {
   document.addEventListener('keydown', closePopoverOnEscape)
 })
 onBeforeUnmount(() => {
+  stopRecoveryTracking()
   if (timer) window.clearInterval(timer)
   if (clockTimer) window.clearInterval(clockTimer)
   document.removeEventListener('click', closePopoverOnOutside)
@@ -557,6 +558,50 @@ async function openRaidRecommendation() {
   document.querySelector('.tl-booking-editor')?.scrollIntoView({ behavior, block: 'start' })
   return true
 }
+
+let focusedRecoveryId = ''
+let recoveryResizeObserver: ResizeObserver | undefined
+function stopRecoveryTracking() {
+  recoveryResizeObserver?.disconnect()
+  recoveryResizeObserver = undefined
+  document.removeEventListener('pointerdown', stopRecoveryTracking)
+  document.removeEventListener('wheel', stopRecoveryTracking)
+  document.removeEventListener('keydown', stopRecoveryTracking)
+}
+async function focusRaidRecovery() {
+  const runId = props.recoveryRunId
+  if (!runId || runId === focusedRecoveryId || !data.value?.conductor.blocks.some(b => b.run_id === runId && b.recovery)) return
+  expanded.value = true
+  await nextTick()
+  const target = Array.from(document.querySelectorAll<HTMLElement>('.tl-raid-recovery'))
+    .find(element => element.dataset.raidRecovery === runId)
+  if (!target) return
+  focusedRecoveryId = runId
+  const stage = document.querySelector('.honmaru-stage')
+  await Promise.all((stage?.getAnimations() || []).map(animation => animation.finished.catch(() => undefined)))
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (!target.isConnected) return
+  stopRecoveryTracking()
+  function positionRecovery(behavior: ScrollBehavior = 'auto') {
+    if (!target?.isConnected) return
+    let scroller = target.parentElement
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement
+    if (scroller) {
+      scroller.scrollTo({ top: scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24, behavior })
+    } else {
+      window.scrollTo({ top: window.scrollY + target.getBoundingClientRect().top - 72, behavior })
+    }
+  }
+  // Chart layout settles after the first render; stop tracking as soon as the player interacts.
+  recoveryResizeObserver = new ResizeObserver(() => positionRecovery())
+  recoveryResizeObserver.observe(target.closest('.timeline-card') || target)
+  document.addEventListener('pointerdown', stopRecoveryTracking, { once: true })
+  document.addEventListener('wheel', stopRecoveryTracking, { once: true, passive: true })
+  document.addEventListener('keydown', stopRecoveryTracking, { once: true })
+  positionRecovery(window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth')
+
+}
+watch([() => props.recoveryRunId, data], () => { void focusRaidRecovery() })
 
 watch(() => props.refreshRequest, () => { void load() })
 
@@ -1368,7 +1413,7 @@ const caption = computed(() => {
         </dialog>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
-        <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" class="tl-expedition-help-note">
+        <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" :data-raid-recovery="block.run_id" tabindex="-1" class="tl-expedition-help-note tl-raid-recovery">
           <strong>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</strong>
           <p>先在游戏里回到本丸，再继续。</p>
           <div v-if="block.recovery!.uncertain_round">
