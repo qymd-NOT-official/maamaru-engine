@@ -3691,9 +3691,9 @@ async def api_jp_click_probe_action(action: str, request: Request):
             return await asyncio.to_thread(probe.prepare)
         if action == 'cancel':
             return probe.cancel()
-        if action == 'start':
+        if action in ('start', 'immediate'):
             body = await request.json()
-            return probe.start(body.get('x'), body.get('y'))
+            return probe.start(body.get('x'), body.get('y'), immediate=action == 'immediate')
         raise HTTPException(404, '没有这个测试操作')
     except ValueError as error:
         raise HTTPException(400, str(error)) from error

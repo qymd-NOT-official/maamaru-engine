@@ -38,7 +38,8 @@ def test_single_click_maps_image_point_to_css_viewport(reference, monkeypatch):
             pass
     monkeypatch.setattr(probe.jp_listener, '_CdpSocket', Socket)
     probe.guarded_click(reference, .8, .4)
-    assert [params['type'] for _, params in calls] == ['mousePressed', 'mouseReleased']
+    assert [params['type'] for _, params in calls] == ['mouseMoved', 'mousePressed', 'mouseReleased']
+    assert [params['buttons'] for _, params in calls] == [0, 1, 0]
     assert all(params['x'] == 800 and params['y'] == 240 for _, params in calls)
     assert all(method == 'Input.dispatchMouseEvent' for method, _ in calls)
 
@@ -66,7 +67,7 @@ def test_press_failure_still_releases_button(reference, monkeypatch):
     monkeypatch.setattr(probe.jp_listener, '_CdpSocket', Socket)
     with pytest.raises(TimeoutError):
         probe.guarded_click(reference, .5, .5)
-    assert calls == ['mousePressed', 'mouseReleased']
+    assert calls == ['mouseMoved', 'mousePressed', 'mouseReleased']
 
 
 def test_duplicate_start_rejected_and_no_success_claim(reference, monkeypatch):
@@ -88,3 +89,30 @@ def test_prepare_timeout_is_player_readable(monkeypatch):
     assert result.status_code == 400
     assert '读取超时' in result.json()['detail']
     assert 'private' not in result.text
+
+
+def test_immediate_mode_does_not_wait_six_minutes(reference, monkeypatch):
+    waits = []
+    class Cancel:
+        def wait(self, seconds):
+            waits.append(seconds)
+            return False
+        def is_set(self):
+            return False
+    monkeypatch.setattr(probe, '_cancel', Cancel())
+    clicks = []
+    monkeypatch.setattr(probe, 'guarded_click', lambda *args: clicks.append(args))
+    monkeypatch.setattr(probe, 'capture', lambda target: ({}, '', {'digest': 'changed'}, {}))
+    probe._run(reference, .5, .5, immediate=True)
+    assert waits == [0, 10] and len(clicks) == 1
+    assert probe.status()['click_sent'] and probe.status()['picture_changed']
+    assert '请确认' in probe.status()['detail']
+
+
+def test_immediate_endpoint_selects_immediate_mode(monkeypatch):
+    from fastapi.testclient import TestClient
+    from panel.server import app
+    calls = []
+    monkeypatch.setattr(probe, 'start', lambda x, y, immediate=False: calls.append(immediate) or {'state': 'running'})
+    assert TestClient(app).post('/api/jp-click-probe/immediate', json={'x': .5, 'y': .5}).status_code == 200
+    assert calls == [True]

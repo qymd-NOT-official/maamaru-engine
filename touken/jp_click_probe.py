@@ -59,17 +59,21 @@ def guarded_click(reference, x, y):
     try:
         point = {'x': x * view['clientWidth'], 'y': y * view['clientHeight'],
                  'button': 'left', 'clickCount': 1}
+        socket.call('Input.dispatchMouseEvent', {**point, 'type': 'mouseMoved', 'button': 'none', 'buttons': 0})
+        if _cancel.wait(0.1):
+            raise ValueError('测试已取消')
         try:
-            socket.call('Input.dispatchMouseEvent', {**point, 'type': 'mousePressed'})
+            socket.call('Input.dispatchMouseEvent', {**point, 'type': 'mousePressed', 'buttons': 1})
+            _cancel.wait(0.1)
         finally:
-            socket.call('Input.dispatchMouseEvent', {**point, 'type': 'mouseReleased'})
+            socket.call('Input.dispatchMouseEvent', {**point, 'type': 'mouseReleased', 'buttons': 0})
     finally:
         socket.close()
 
 
-def _run(reference, x, y):
+def _run(reference, x, y, immediate=False):
     try:
-        if _cancel.wait(360):
+        if _cancel.wait(0 if immediate else 360):
             return
         guarded_click(reference, x, y)
         with _lock:
@@ -81,7 +85,8 @@ def _run(reference, x, y):
             changed = after['digest'] != reference['summary']['digest']
             _state.update(picture_changed=changed,
                 detail='画面已变化，请确认是否进入结成' if changed else '未观察到画面变化，不能确认点击生效')
-        _cancel.wait(50)
+        if not immediate:
+            _cancel.wait(50)
     except ValueError as error:
         with _lock:
             _state['detail'] = str(error)
@@ -93,7 +98,7 @@ def _run(reference, x, y):
             _state.update(state='cancelled' if _cancel.is_set() else 'done', finished_at=time.time())
 
 
-def start(x, y):
+def start(x, y, immediate=False):
     global _state
     if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not (0 < x < 1 and 0 < y < 1):
         raise ValueError('请在截图内选择结成按钮')
@@ -106,8 +111,9 @@ def start(x, y):
         _cancel.clear()
         _state = {'state': 'running', 'started_at': time.time(), 'click_sent': False,
                   'picture_changed': False, 'formation_verified': False, 'screen_off_verified': False,
-                  'detail': '等待第 6 分钟；不要操作游戏或调整窗口'}
-        threading.Thread(target=_run, args=(reference, x, y), daemon=True, name='jp-click-probe').start()
+                  'mode': 'immediate' if immediate else 'timed',
+                  'detail': '正在进行亮屏单次点击测试，约 10 秒后查看结果' if immediate else '等待第 6 分钟；不要操作游戏或调整窗口'}
+        threading.Thread(target=_run, args=(reference, x, y, immediate), daemon=True, name='jp-click-probe').start()
         return dict(_state)
 
 
