@@ -1,6 +1,6 @@
 import type { TrainingOverviewResponse, TrainingHistoryResponse, InternalAffairsResponse, DropStatsResponse, ForgeHistoryResponse, EventPointsListResponse, EventPointsTimelineResponse, SwordJournalResponse } from './types'
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptInfo, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
-import type { DailyReport, JpNetlogImportResult } from './types'
+import type { DailyReport, JpNetlogImportResult, JpListenerStatus } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
@@ -168,6 +168,9 @@ export const api = {
   jpNetlogImport: (file: File) => request<JpNetlogImportResult>(`/api/data/jp-netlog-import?filename=${encodeURIComponent(file.name)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
   }),
+  jpListenerStatus: () => request<JpListenerStatus>('/api/jp-listener/status'),
+  jpListenerStart: () => request<JpListenerStatus>('/api/jp-listener/start', { method: 'POST' }),
+  jpListenerStop: () => request<{ state: string }>('/api/jp-listener/stop', { method: 'POST' }),
   manualInventory: (limit = 200) => request<{ schema_version: number; items: ManualInventory[] }>(`/api/data/manual-inventory?limit=${limit}`),
   addManualInventory: (resources: Record<string, number>, observedAt?: number) => request<{ ok: boolean; snapshot: ManualInventory }>('/api/data/manual-inventory', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources, observed_at: observedAt }),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
-import type { HumanReport, InventoryGap, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger, ScriptParams } from '../types'
+import type { HumanReport, InventoryGap, JpListenerStatus, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger, ScriptParams } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
@@ -146,6 +146,47 @@ const isJp = computed(() => props.server === 'jp')
 const jpNetlogInput = ref<HTMLInputElement | null>(null)
 const jpImportBusy = ref(false)
 const jpImportNotice = ref('')
+
+// ---- 日服自动听包：状态每 5 秒一探，入账数涨了就重拉账 ----
+const jpListener = ref<JpListenerStatus | null>(null)
+const jpListenerBusy = ref(false)
+let jpListenerTimer = 0
+const jpListenerOn = computed(() => jpListener.value?.state === 'listening' || jpListener.value?.state === 'waiting_browser')
+const jpListenerText = computed(() => {
+  const st = jpListener.value
+  if (!st || st.state === 'off') return '点右边按钮开一个日服专用浏览器（第一次要在里面登一次 DMM），之后你玩你的，账自己进。'
+  if (st.state === 'starting') return '正在竖耳朵……'
+  if (st.state === 'waiting_browser') return '在等日服浏览器上线；它没开的话点右边按钮拉一个起来。'
+  if (st.state === 'error') return `听包翻车：${st.detail}`
+  return `正在听包 · 已入账 ${st.events_written} 条（听到 ${st.transactions} 份报文）`
+})
+
+async function refreshJpListener() {
+  try {
+    const prev = jpListener.value?.events_written ?? 0
+    jpListener.value = await api.jpListenerStatus()
+    // 听包新落了账 → 折线和流水跟着刷新
+    if (jpListener.value.events_written > prev) await load()
+  } catch { /* 状态探不到不碍事，下一轮再探 */ }
+}
+
+async function startJpListener() {
+  jpListenerBusy.value = true
+  try {
+    await api.jpListenerStart()
+    await refreshJpListener()
+  } catch { /* 状态文案交给下一轮轮询 */ }
+  finally { jpListenerBusy.value = false }
+}
+
+async function stopJpListener() {
+  jpListenerBusy.value = true
+  try {
+    await api.jpListenerStop()
+    await refreshJpListener()
+  } catch { /* 同上 */ }
+  finally { jpListenerBusy.value = false }
+}
 
 function pickJpNetlog() { jpNetlogInput.value?.click() }
 
@@ -1061,7 +1102,12 @@ async function refreshRecords() {
 }
 onMounted(async () => {
   await load()
-  if (!props.ledgerMode && !isJp.value) {
+  if (isJp.value) {
+    await refreshJpListener()
+    jpListenerTimer = window.setInterval(refreshJpListener, 5000)
+    return
+  }
+  if (!props.ledgerMode) {
     const state = await api.scripts().catch(() => null)
     if (state?.running && state.current === 'game_inventory') {
       gameInventoryRunId.value = state.run_id || null
@@ -1070,7 +1116,7 @@ onMounted(async () => {
   }
   if (view.value === 'records' && recordDate.value) await loadRecordDay(recordDate.value)
 })
-onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTimer) })
+onUnmounted(() => { gameInventoryDisposed = true; clearTimeout(gameInventoryTimer); window.clearInterval(jpListenerTimer) })
 const reportEditor = ref<HTMLDialogElement>()
 const inventoryEditor = ref<HTMLDialogElement>()
 const sessionEditor = ref<HTMLDialogElement>()
@@ -1094,6 +1140,15 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
       <div v-if="isJp" class="jp-ledger">
+        <section class="jp-import jp-listener" aria-labelledby="jp-listener-title">
+          <header>
+            <div><h3 id="jp-listener-title">自动听包</h3><p>{{ jpListenerText }}</p></div>
+            <div class="ledger-actions">
+              <button v-if="!jpListenerOn" type="button" class="primary" :disabled="jpListenerBusy" @click="startJpListener">{{ jpListenerBusy ? '正在开……' : '打开日服浏览器听包' }}</button>
+              <button v-else type="button" class="secondary" :disabled="jpListenerBusy" @click="stopJpListener">停止听包</button>
+            </div>
+          </header>
+        </section>
         <section class="jp-import" aria-labelledby="jp-import-title">
           <header>
             <div><h3 id="jp-import-title">日服账房</h3><p>玩日服前在浏览器打开 chrome://net-export 点 Start Logging（勾 Include raw bytes），玩完点 Stop 存下 JSON，喂进这里就入账。</p></div>

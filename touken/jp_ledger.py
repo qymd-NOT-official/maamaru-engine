@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""日服抓包落账：把 netlog 解析出的事务写进 TelemetryStore，
-事件格式与国服账房一致（inventory.captured / training.captured /
-forge.collected / resource.change），下游日报、账房零改动直接可读。
+"""日服抓包落账：把抓来的事务（netlog 文件解析 / CDP 实时听包）写进
+TelemetryStore，事件格式与国服账房一致（inventory.captured /
+training.captured / forge.collected / resource.change），下游日报、
+账房零改动直接可读。
 
 落账原则：
 
@@ -74,55 +75,70 @@ def _record(store, ts: float, event_type: str, payload: dict,
     store._conn().commit()
 
 
-def import_transactions(store, transactions: list[Transaction],
-                        script: str = "jp_netlog") -> dict:
-    """把一次抓包的事务落进账房，返回各类事件的写入统计。"""
-    card = jp_import.load_card()
-    stats = {"inventory.captured": 0, "training.captured": 0,
-             "forge.started": 0, "forge.collected": 0,
-             "resource.change": 0,
-             "skipped_encrypted": 0, "skipped_no_now": 0,
-             "dedup_snapshots": 0}
-    last_resource: tuple | None = None
-    last_roster_fp: tuple | None = None
+class JpLedgerSession:
+    """可持续喂的事务入账会话。
 
-    for tx in sorted(transactions, key=lambda t: t.ts):
+    去重状态（上次资源快照键 / 上次刀帐指纹）挂在会话上跨批次保持：
+    手动整包导入（netlog 文件）一次喂完，CDP 实时听包来一条喂一条，
+    两种喂法共用，重复快照都不会刷账。
+    """
+
+    def __init__(self, store, script: str = "jp_netlog"):
+        self.store = store
+        self.script = script
+        self.card = jp_import.load_card()
+        self.stats = {"inventory.captured": 0, "training.captured": 0,
+                      "forge.started": 0, "forge.collected": 0,
+                      "resource.change": 0,
+                      "skipped_encrypted": 0, "skipped_no_now": 0,
+                      "dedup_snapshots": 0}
+        self._last_resource: tuple | None = None
+        self._last_roster_fp: tuple | None = None
+
+    def feed_all(self, transactions: list[Transaction]) -> dict:
+        for tx in sorted(transactions, key=lambda t: t.ts):
+            self.feed(tx)
+        return self.stats
+
+    def feed(self, tx: Transaction) -> None:
+        stats = self.stats
+        card = self.card
         info = jp_import.classify(tx.path or tx.url, card)
         if info is None or info.get("encrypted"):
             if info and info.get("encrypted"):
                 stats["skipped_encrypted"] += 1
-            continue
+            return
         payload = tx.response_json()
         if not isinstance(payload, dict):
-            continue
+            return
         ts = _parse_now(payload.get("now"))
         if ts is None:
             # 无服务器时间的报文不参与落账（时间错了比没账更糟）
             if payload.get("resource") or payload.get("sword"):
                 stats["skipped_no_now"] += 1
-            continue
+            return
 
         snap = _resource_snapshot(payload, card)
         if snap is not None:
             key = tuple(sorted(snap.items()))
-            if key != last_resource:
-                _record(store, ts, "inventory.captured", {
+            if key != self._last_resource:
+                _record(self.store, ts, "inventory.captured", {
                     "captured_at": _display_time(ts),
-                    "source": script, "resources": snap}, script)
+                    "source": self.script, "resources": snap}, self.script)
                 stats["inventory.captured"] += 1
-                last_resource = key
+                self._last_resource = key
             else:
                 stats["dedup_snapshots"] += 1
 
         roster = jp_import.sword_roster(payload)
         if roster:
             fp = _roster_fingerprint(roster)
-            if fp != last_roster_fp:
-                _record(store, ts, "training.captured", {
+            if fp != self._last_roster_fp:
+                _record(self.store, ts, "training.captured", {
                     "captured_at": _display_time(ts),
-                    "source": script, "swords": roster}, script)
+                    "source": self.script, "swords": roster}, self.script)
                 stats["training.captured"] += 1
-                last_roster_fp = fp
+                self._last_roster_fp = fp
             else:
                 stats["dedup_snapshots"] += 1
 
@@ -132,7 +148,7 @@ def import_transactions(store, transactions: list[Transaction],
             found = sword_db.find_by_id(payload["sword_id"])
             if found:
                 name = found[1].get("name_zh") or found[1]["name"]
-            _record(store, ts, "forge.collected", {
+            _record(self.store, ts, "forge.collected", {
                 "swords": [{
                     "name": name,
                     "sword_id": payload["sword_id"],
@@ -141,8 +157,8 @@ def import_transactions(store, transactions: list[Transaction],
                         payload.get("is_first_get_sword")),
                 }],
                 "count": 1,
-                "source": f"forge.{script}",
-                "acquired_at": _display_time(ts)}, script)
+                "source": f"forge.{self.script}",
+                "acquired_at": _display_time(ts)}, self.script)
             stats["forge.collected"] += 1
 
         if path == "/forge" and tx.request_body:
@@ -151,26 +167,30 @@ def import_transactions(store, transactions: list[Transaction],
             recipe = {key: _first_int(form.get(key))
                       for key in FORGE_RECIPE_KEYS}
             if any(recipe.values()):
-                _record(store, ts, "forge.started", {
+                _record(self.store, ts, "forge.started", {
                     "slot_no": (_first_int(form.get("slot_no"))
                                 or _first_int(form.get("slot"))),
                     **recipe,
-                    "source": f"forge.{script}"}, script)
+                    "source": f"forge.{self.script}"}, self.script)
                 stats["forge.started"] += 1
             for res_key in FORGE_RECIPE_KEYS:
                 amount = recipe[res_key]
                 if not amount:
                     continue
                 cn_name = card["resource_keys"][res_key]
-                _record(store, ts, "resource.change", {
+                _record(self.store, ts, "resource.change", {
                     "resource": cn_name, "delta": -amount,
                     "before": None, "after": None,
-                    "source": f"forge.{script}./forge",
+                    "source": f"forge.{self.script}./forge",
                     "note": f"锻刀 {cn_name} -{amount}",
-                    "attribution": "confirmed"}, script)
+                    "attribution": "confirmed"}, self.script)
                 stats["resource.change"] += 1
 
-    return stats
+
+def import_transactions(store, transactions: list[Transaction],
+                        script: str = "jp_netlog") -> dict:
+    """把一次抓包的事务落进账房，返回各类事件的写入统计。"""
+    return JpLedgerSession(store, script).feed_all(transactions)
 
 
 def _first_int(values) -> int | None:

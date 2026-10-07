@@ -3633,6 +3633,29 @@ async def api_jp_netlog_import(request: Request, filename: str = ""):
             "transactions": len(transactions)}
 
 
+@app.get("/api/jp-listener/status")
+async def api_jp_listener_status():
+    """日服实时听包状态（off/waiting_browser/listening/error + 计数）。"""
+    from touken import jp_listener
+    return jp_listener.listener_status()
+
+
+@app.post("/api/jp-listener/start")
+async def api_jp_listener_start():
+    """开始听包：日服浏览器没在跑就用专用配置档拉一个起来。
+
+    纯订阅 Network 事件，不注入脚本、不发请求；与手动抓包同质。"""
+    from touken import jp_listener
+    return jp_listener.start_listener(launch_browser_if_needed=True)
+
+
+@app.post("/api/jp-listener/stop")
+async def api_jp_listener_stop():
+    """停止听包（不动浏览器本身，也不动已落的账）。"""
+    from touken import jp_listener
+    return jp_listener.stop_listener()
+
+
 @app.post("/api/data/manual-inventory")
 async def api_add_manual_inventory(request: Request):
     """手动记家底：只把实际填写的资源作为当前时刻的库存观察。"""

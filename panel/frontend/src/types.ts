@@ -301,6 +301,21 @@ export interface JpNetlogImportResult {
   }
 }
 
+// ---- 日服实时听包 /api/jp-listener/* ----
+
+export interface JpListenerStatus {
+  state: 'off' | 'starting' | 'waiting_browser' | 'listening' | 'error'
+  detail: string
+  started_at: number | null
+  last_capture_at: number | null
+  /** 已听到的游戏报文数（含去重丢弃的） */
+  transactions: number
+  /** 实际落账的事件条数 */
+  events_written: number
+  /** 调试口活着（浏览器开着） */
+  browser_alive?: boolean
+}
+
 export interface LedgerOnboarding {
   schema_version: number
   visible: boolean
