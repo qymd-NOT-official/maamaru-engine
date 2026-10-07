@@ -104,13 +104,13 @@ export const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ script, params }),
   }),
-  honmaruProfile: () => request<HonmaruFormationProfile>('/api/data/honmaru-profile'),
+  honmaruProfile: (server = '') => request<HonmaruFormationProfile>(`/api/data/honmaru-profile?server=${server}`),
   clientInventory: (server = '') => request<import('./types').ClientInventory>(`/api/data/client-inventory?server=${server}`),
-  customFormations: () => request<{ formations: CustomFormation[] }>('/api/custom-formations'),
-  saveCustomFormation: (record: CustomFormationDraft, id?: string) => request<{ ok: boolean; formation: CustomFormation }>(`/api/custom-formations${id ? `/${encodeURIComponent(id)}` : ''}`, {
+  customFormations: (server = '') => request<{ formations: CustomFormation[] }>(`/api/custom-formations?server=${server}`),
+  saveCustomFormation: (record: CustomFormationDraft, id?: string, server = '') => request<{ ok: boolean; formation: CustomFormation }>(`/api/custom-formations${id ? `/${encodeURIComponent(id)}` : ''}?server=${server}`, {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record),
   }),
-  deleteCustomFormation: (id: string) => request<{ ok: boolean }>(`/api/custom-formations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteCustomFormation: (id: string, server = '') => request<{ ok: boolean }>(`/api/custom-formations/${encodeURIComponent(id)}?server=${server}`, { method: 'DELETE' }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
   cancelWorkflowWait: (id: string) => request<{ ok: boolean }>(`/api/workflows/waits/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
@@ -203,11 +203,11 @@ export const api = {
   }),
   deleteHumanReport: (id: number) => request<{ ok: boolean }>(`/api/data/human-reports/${id}`, { method: 'DELETE' }),
   deleteHumanReportGroup: (groupId: string) => request<{ ok: boolean }>(`/api/data/human-reports/group/${encodeURIComponent(groupId)}`, { method: 'DELETE' }),
-  planning: () => request<PlanningReport>('/api/planning'),
-  addPlanningGoal: (value: { resource?: string; goal_mode?: 'amount_target' | 'deadline_target'; kind?: 'fragment'; fragment?: string; target?: number; deadline?: string; note?: string }) => request<{ ok: boolean; goal: any }>('/api/planning/goals', {
+  planning: (server = '') => request<PlanningReport>(`/api/planning?server=${server}`),
+  addPlanningGoal: (value: { resource?: string; goal_mode?: 'amount_target' | 'deadline_target'; kind?: 'fragment'; fragment?: string; target?: number; deadline?: string; note?: string }, server = '') => request<{ ok: boolean; goal: any }>(`/api/planning/goals?server=${server}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
-  deletePlanningGoal: (id: number) => request<{ ok: boolean }>(`/api/planning/goals/${id}`, { method: 'DELETE' }),
+  deletePlanningGoal: (id: number, server = '') => request<{ ok: boolean }>(`/api/planning/goals/${id}?server=${server}`, { method: 'DELETE' }),
   events: () => request<EventsCalendar>('/api/events'),
   eventsTimeline: () => request<EventTimelineReport>('/api/events/timeline'),
   saveEventEstimate: (event: string, keysPerRun: number) => request<{ ok: boolean }>('/api/planning/event-estimate', {

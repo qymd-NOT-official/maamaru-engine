@@ -10,7 +10,7 @@ import json
 import re
 import time
 
-from .runtime_paths import STATE_DIR
+from .runtime_paths import STATE_DIR, JP_DATA_DIR
 
 MAX_FORMATIONS = 5
 SCHEMA_VERSION = 2
@@ -19,13 +19,17 @@ _ID_RE = re.compile(r"^[a-z0-9]+$")
 _SLOT_KEYS = frozenset("123456")
 
 
-def _formations_path():
+def _formations_path(server=""):
+    if server == 'jp':
+        return JP_DATA_DIR / 'state' / 'custom_formations.json'
+    if server not in ('', 'cn'):
+        raise ValueError('没有这个本丸')
     return STATE_DIR / "custom_formations.json"
 
 
-def load_formations() -> list[dict]:
+def load_formations(server="") -> list[dict]:
     """读预设编队；坏 JSON 备份成 .bad-时间戳 后返回空，绝不让调用方崩。"""
-    path = _formations_path()
+    path = _formations_path(server) if server else _formations_path()
     if not path.exists():
         return []
     try:
@@ -43,10 +47,12 @@ def load_formations() -> list[dict]:
     return [f for f in data["formations"] if isinstance(f, dict)]
 
 
-def save_formations(formations: list[dict]):
+def save_formations(formations: list[dict], server=""):
     """原子写：先落 .tmp 再 replace（同 data_relocation._write_json 风格）。"""
-    path = _formations_path()
+    path = _formations_path(server) if server else _formations_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if server == 'jp' and path.exists():
+        path.with_suffix('.json.bak').write_bytes(path.read_bytes())
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
         json.dumps({"schema_version": SCHEMA_VERSION,

@@ -3,6 +3,24 @@ import { api } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps JP goals, candidates and preset writes on JP routes without execution', async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
+  vi.stubGlobal('fetch', fetcher)
+  await api.planning('jp')
+  await api.addPlanningGoal({ resource: '小判', target: 200000, goal_mode: 'amount_target' }, 'jp')
+  await api.deletePlanningGoal(1, 'jp')
+  await api.honmaruProfile('jp')
+  await api.customFormations('jp')
+  await api.saveCustomFormation({ name: '日服', target_team: 2, slots: {} }, undefined, 'jp')
+  await api.saveCustomFormation({ name: '修改', target_team: 2, slots: {} }, 'f1', 'jp')
+  await api.deleteCustomFormation('f1', 'jp')
+  expect(fetcher.mock.calls.map(call => String((call as unknown[])[0]))).toEqual([
+    '/api/planning?server=jp', '/api/planning/goals?server=jp', '/api/planning/goals/1?server=jp',
+    '/api/data/honmaru-profile?server=jp', '/api/custom-formations?server=jp',
+    '/api/custom-formations?server=jp', '/api/custom-formations/f1?server=jp', '/api/custom-formations/f1?server=jp',
+  ])
+})
+
 it('keeps JP appearance requests separate from CN settings', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
   vi.stubGlobal('fetch', fetcher)

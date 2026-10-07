@@ -20,6 +20,7 @@ import {
 // 点名冒充实时编队。真正套用预设由出阵/远征/任务流在开工前统一调用。
 
 const props = withDefaults(defineProps<{
+  server?: string
   running?: boolean
   current?: string | null
   stopping?: boolean
@@ -86,6 +87,7 @@ const profileSummary = computed(() => {
   if (!profile.value) return ''
   if (!poolDone.value) return '请先更新刀帐，再选择具体一振'
   const skipped = pool.value?.skipped_newer_snapshots?.length || 0
+  if (props.server === 'jp' && pool.value?.completeness !== 'full') return `目前读到 ${entries.value.length} 振；进入游戏「结成」更新完整名单后再核对`
   const base = `刀帐候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
   return skipped ? `${base} · 之后还有 ${skipped} 次盘点没认全，以这份为准` : base
 })
@@ -102,7 +104,7 @@ async function load() {
   loadError.value = ''
   try {
     const [profileResult, inventoryResult, archiveResult] = await Promise.allSettled([
-      api.honmaruProfile(), api.clientInventory(), api.swordArchive(),
+      api.honmaruProfile(props.server), api.clientInventory(props.server), api.swordArchive(props.server),
     ])
     if (archiveResult.status === 'fulfilled') archive.value = archiveResult.value
     if (inventoryResult.status === 'fulfilled') clientInventory.value = inventoryResult.value
@@ -161,7 +163,7 @@ async function loadPresets() {
   presetsLoading.value = true
   presetsError.value = ''
   try {
-    const body = await api.customFormations()
+    const body = await api.customFormations(props.server)
     presets.value = body.formations || []
   } catch (cause) {
     presetsError.value = cause instanceof Error ? cause.message : '预设名单没有翻开'
@@ -323,7 +325,7 @@ async function savePreset() {
   try {
     const body = await api.saveCustomFormation(
       { name: draftName.value.trim(), target_team: draftTeam.value, slots: draftSlots.value },
-      editingId.value || undefined,
+      editingId.value || undefined, props.server,
     )
     if (!body.ok) throw new Error('没有保存成功，请重试')
     emit('notify', `预设「${body.formation.name}」已收好`)
@@ -342,7 +344,7 @@ async function removePreset(preset: CustomFormation) {
   if (presetSaving.value) return
   if (!window.confirm(`删除「${preset.name}」？这套预设将从名单里移除，无法恢复。`)) return
   try {
-    const body = await api.deleteCustomFormation(preset.id)
+    const body = await api.deleteCustomFormation(preset.id, props.server)
     if (!body.ok) throw new Error('没有删除成功，请重试')
     presets.value = presets.value.filter(item => item.id !== preset.id)
     if (editingId.value === preset.id) closePresetEditor()
@@ -364,11 +366,12 @@ onMounted(() => { load(); loadPresets() })
         variant="embedded"
       >
         <template #actions>
-          <SwordReadActions :running="props.running" :current="props.current" :stopping="props.stopping" :starting="props.starting"
+          <button v-if="props.server === 'jp'" type="button" class="secondary" @click="load">刷新日服名单</button>
+          <SwordReadActions v-else :running="props.running" :current="props.current" :stopping="props.stopping" :starting="props.starting"
             @updated="load" @error="loadError = $event" @run-inventory="emit('runInventory')" />
         </template>
       </PanelHeader>
-      <p class="formation-hintline">保存预设不会立刻动游戏；开工时会按预设找到你选定的那振。</p>
+      <p class="formation-hintline">{{ props.server === 'jp' ? '日服预设独立保存；仅作安排，套用部队与自动执行待适配。装备选项仅作计划，不代表已经持有。' : '保存预设不会立刻动游戏；开工时会按预设找到你选定的那振。' }}</p>
 
       <p v-if="loadError" class="formation-error">{{ loadError }}</p>
       <div v-if="loading && !profile" class="formation-empty">正在读取刀剑名册……</div>
@@ -377,7 +380,7 @@ onMounted(() => { load(); loadPresets() })
           <header class="formation-presets-head">
             <div>
               <h3>我的部队预设</h3>
-              <p>常用阵容收在这里，之后从出阵、活动或远征里直接选。编辑预设只改记录，不碰游戏。</p>
+              <p>{{ props.server === 'jp' ? '先把常用阵容记下来。编辑只改记录，不碰游戏；执行入口以后再接。' : '常用阵容收在这里，之后从出阵、活动或远征里直接选。编辑预设只改记录，不碰游戏。' }}</p>
             </div>
             <button
               type="button"
@@ -391,7 +394,7 @@ onMounted(() => { load(); loadPresets() })
           <p v-if="presetsError" class="formation-error" role="alert">{{ presetsError }}</p>
           <p v-else-if="presetsLoading && !presets.length" class="formation-empty">正在翻预设名单……</p>
           <template v-else>
-            <p v-if="!presets.length" class="formation-empty">还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。</p>
+            <p v-if="!presets.length" class="formation-empty">{{ props.server === 'jp' ? '还没有预设编队。先存下常用阵容，整队套用待适配。' : '还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。' }}</p>
             <ul v-else class="formation-preset-list">
               <li v-for="preset in presets" :key="preset.id" class="formation-preset-card">
                 <div class="formation-preset-info">
@@ -424,8 +427,8 @@ onMounted(() => { load(); loadPresets() })
                 </select>
               </label>
             </div>
-            <p class="formation-hintline">从刀帐选择具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。</p>
-            <p v-if="draftSlotCount === 0" class="formation-preset-warn">一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。</p>
+            <p class="formation-hintline">{{ props.server === 'jp' ? '从日服刀帐选择具体一振；刀装和宝物仅记录计划。保存不会调整游戏里的部队。' : '从刀帐选择具体一振。选好后点该位置的「设置装备」，填写刀装和宝物；留空的位置应用时保持原样。' }}</p>
+            <p v-if="draftSlotCount === 0" class="formation-preset-warn">{{ props.server === 'jp' ? '也可以先存一份空预设，之后再补人。' : '一个位置都没指定也行，存是能存，但应用时没有可做的事，会直接停下。' }}</p>
             <ol class="formation-preset-slots">
               <li v-for="no in [1, 2, 3, 4, 5, 6]" :key="no">
                 <button

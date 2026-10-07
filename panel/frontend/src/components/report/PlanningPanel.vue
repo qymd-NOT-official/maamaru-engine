@@ -15,7 +15,8 @@ import GameplayPlanner from './GameplayPlanner.vue'
 import PlanningOverview from './PlanningOverview.vue'
 import DayTimeline from '../DayTimeline.vue'
 
-const props = defineProps<{ recoveryRunId?: string }>()
+const props = defineProps<{ recoveryRunId?: string; server?: string }>()
+const isJp = computed(() => props.server === 'jp')
 const emit = defineEmits<{
   gameplaySettingsSaved: [script: string, params: ScriptParams]
   goalSaved: []
@@ -165,6 +166,10 @@ function goalStatusLabel(goal: PlanningGoalAdvice) {
 }
 
 function goalHeadline(goal: PlanningGoalAdvice) {
+  if (isJp.value && goal.goal_mode === 'deadline_target') return '已记下日期；到期预测待适配'
+  if (isJp.value && goal.status !== 'done' && goal.goal_mode === 'amount_target') {
+    return goal.current == null ? '家底尚未读取' : `还差 ${fmt(Math.max(0, (goal.target || 0) - goal.current))} ${goal.resource}`
+  }
   if (goal.goal_mode === 'deadline_target') {
     return goal.projected == null ? '还缺一些库存记录' : `预计到期有 ${fmt(goal.projected)} ${goal.resource}`
   }
@@ -181,7 +186,7 @@ function goalHeadline(goal: PlanningGoalAdvice) {
 
 function goalProgress(goal: PlanningGoalAdvice) {
   if (goal.current == null || goal.target == null || goal.target <= 0) return 0
-  return Math.min(100, Math.max(0, goal.current / goal.target * 100))
+  return Math.min(100, Math.max(0, goal.current / goal.target * 100))
 }
 
 function fragmentGuide(goal: PlanningGoalAdvice) {
@@ -208,6 +213,7 @@ function floorPace(seconds: number | null | undefined) {
 }
 
 function goalProgressMeta(goal: PlanningGoalAdvice) {
+  if (isJp.value) return goal.goal_mode === 'deadline_target' ? '已记下日期，预测待适配' : ''
   if (goal.status === 'done') return ''
   if (goal.kind === 'fragment') return ''  // 碎片目标的指引全在 FragmentGoalGuide 卡里
   if (goal.status === 'expired') return '已到期'
@@ -227,6 +233,7 @@ function goalProgressMeta(goal: PlanningGoalAdvice) {
 }
 
 function goalAction(goal: PlanningGoalAdvice) {
+  if (isJp.value) return goal.status === 'done' ? '资源目标已达成；游戏执行仍待适配。' : ''
   if (goal.goal_mode === 'stock_target' && goal.status === 'active' && goal.floors_needed != null) {
     if (goal.estimated_seconds != null && goal.remaining_seconds != null && goal.can_finish != null) {
       const margin = durationHours(Math.abs(goal.time_margin_seconds || 0))
@@ -328,6 +335,12 @@ async function gameplayGoalSaved() {
 
 async function load() {
   loading.value = true
+  if (isJp.value) {
+    try { planning.value = await api.planning('jp'); error.value = '' }
+    catch (cause) { error.value = cause instanceof Error ? cause.message : '规划读取失败' }
+    finally { loading.value = false }
+    return
+  }
   try {
     const [planningResult, timelineResult, runsResult, manualResult] = await Promise.allSettled([
       api.planning(), api.eventsTimeline(), api.dataRuns(100), api.manualSessions(1000),
@@ -389,7 +402,7 @@ async function saveGoal() {
         ? { target: Number(form.value.target) }
         : { deadline: form.value.deadline }),
       note: form.value.note,
-    })
+    }, props.server)
     formOpen.value = false
     form.value = { kind: 'resource', goal_mode: 'amount_target', resource: '小判', fragment: '', target: 100000, deadline: '', note: '' }
     await load()
@@ -402,7 +415,7 @@ async function saveGoal() {
 
 async function removeGoal(id: number) {
   try {
-    await api.deletePlanningGoal(id)
+    await api.deletePlanningGoal(id, props.server)
     await load()
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '目标删除失败' }
 }
@@ -416,9 +429,10 @@ onMounted(load)
     <p v-if="error" class="planning-error">{{ error }}</p>
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
-    <DayTimeline :recovery-run-id="props.recoveryRunId" :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
-    <PlanningOverview v-if="planning" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
-    <EventTimeline
+    <p v-if="isJp" class="planning-success">日服目标独立保存。活动日程、玩法试算、自动排班与执行待适配；暂不预测达成日期。</p>
+    <DayTimeline v-if="!isJp" :recovery-run-id="props.recoveryRunId" :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
+    <PlanningOverview v-if="planning && !isJp" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
+    <EventTimeline v-if="!isJp"
       id="event-timeline"
       :timeline="timeline"
       :abacuses="planning?.events || []"
@@ -439,7 +453,8 @@ onMounted(load)
       @open-raid-recommendation="openRaidRecommendation"
     />
 
-    <EventPointsHistory />
+    <EventPointsHistory v-if="!isJp" />
+    <section v-if="isJp && planning" class="planning-form" aria-label="日服规划家底"><h4>最近读取的家底</h4><p v-for="name in goalResources" :key="name">{{ name }}：{{ planning.current?.[name] == null ? '未读取' : fmt(planning.current?.[name]) }}</p></section>
     <header class="planning-toolbar">
       <div><h3>自定目标</h3><span v-if="customGoals.length">{{ customGoals.length }} 个</span></div>
       <button v-if="!formOpen" type="button" class="secondary" @click="openCustomForm">＋ 添加</button>
@@ -447,14 +462,14 @@ onMounted(load)
 
     <form v-if="formOpen" class="planning-form" @submit.prevent="saveGoal">
       <header>
-        <div><h4>自定目标</h4><p>选一个真正想盯住的结果，另一项交给狐之助估算。</p></div>
+        <div><h4>自定目标</h4><p>{{ isJp ? '记下资源目标；日服速度预测待适配。' : '选一个真正想盯住的结果，另一项交给狐之助估算。' }}</p></div>
         <button type="button" class="planning-close" aria-label="关闭目标表单" @click="formOpen = false">×</button>
       </header>
       <div class="planning-form-fields">
         <label>目标类型
           <select v-model="form.kind">
             <option value="resource">攒资源</option>
-            <option value="fragment">集碎片（异去）</option>
+            <option v-if="!isJp" value="fragment">集碎片（异去）</option>
           </select>
         </label>
         <label v-if="form.kind === 'resource'">目标看什么
@@ -492,7 +507,7 @@ onMounted(load)
     <section v-if="customGoals.length" class="planning-goal-list planning-goals-section">
         <article v-for="goal in customGoals" :key="goal.id" class="planning-goal" :class="[goal.status, { 'pace-behind': goal.can_finish === false, 'pace-on-track': goal.can_finish === true }]">
           <header>
-            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ goal.kind === 'fragment' ? '碎片目标 · 异去' : `${goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标'} · ${goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止`}` }}</small></span>
+            <span><b>{{ goal.note || `${goal.resource}目标` }}</b><small>{{ isJp ? (goal.goal_mode === 'amount_target' ? '数量目标 · 日期预测待适配' : `日期目标 · ${goalDeadline(goal)} 截止`) : goal.kind === 'fragment' ? '碎片目标 · 异去' : `${goal.goal_mode === 'stock_target' ? '活动目标' : goal.kind === 'event' ? '活动预算' : goal.goal_mode === 'amount_target' ? '数量目标' : goal.goal_mode === 'deadline_target' ? '日期目标' : '手动目标'} · ${goal.goal_mode === 'amount_target' ? `${goalDeadline(goal)} 预计达成` : `${goalDeadline(goal)} 截止`}` }}</small></span>
             <em>{{ goalStatusLabel(goal) }}</em>
             <button type="button" class="planning-delete" title="删掉这个目标" @click="removeGoal(goal.id)">×</button>
           </header>
@@ -524,7 +539,7 @@ onMounted(load)
 
 
 
-    <GameplayPlanner @goal-saved="gameplayGoalSaved" />
+    <GameplayPlanner v-if="!isJp" @goal-saved="gameplayGoalSaved" />
   </section>
 </template>
 

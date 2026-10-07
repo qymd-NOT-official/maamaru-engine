@@ -1938,16 +1938,18 @@ def _formation_from_body(fid: str, body: dict) -> dict:
 
 
 @app.get("/api/custom-formations")
-async def api_list_custom_formations():
+async def api_list_custom_formations(server: str = ""):
+    _telemetry_store_for(server)
     from touken.custom_formations import load_formations
-    return {"formations": load_formations()}
+    return {"formations": load_formations(server)}
 
 
 @app.post("/api/custom-formations")
-async def api_create_custom_formation(request: Request):
+async def api_create_custom_formation(request: Request, server: str = ""):
+    _telemetry_store_for(server)
     from touken import custom_formations as cf
     body = await request.json()
-    formations = cf.load_formations()
+    formations = cf.load_formations(server)
     try:
         fid = cf.new_formation_id(formations)
     except ValueError as exc:
@@ -1960,15 +1962,16 @@ async def api_create_custom_formation(request: Request):
     record["created_at"] = now
     record["updated_at"] = now
     formations.append(record)
-    cf.save_formations(formations)
+    cf.save_formations(formations, server)
     return {"ok": True, "formation": record}
 
 
 @app.put("/api/custom-formations/{fid}")
-async def api_update_custom_formation(fid: str, request: Request):
+async def api_update_custom_formation(fid: str, request: Request, server: str = ""):
+    _telemetry_store_for(server)
     from touken import custom_formations as cf
     body = await request.json()
-    formations = cf.load_formations()
+    formations = cf.load_formations(server)
     old = cf.find_formation(formations, fid)
     if old is None:
         return JSONResponse({"ok": False, "reason": "找不到这套预设编队"},
@@ -1982,18 +1985,19 @@ async def api_update_custom_formation(fid: str, request: Request):
     record["created_at"] = old.get("created_at", "")
     record["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     formations[formations.index(old)] = record
-    cf.save_formations(formations)
+    cf.save_formations(formations, server)
     return {"ok": True, "formation": record}
 
 
 @app.delete("/api/custom-formations/{fid}")
-async def api_delete_custom_formation(fid: str):
+async def api_delete_custom_formation(fid: str, server: str = ""):
+    _telemetry_store_for(server)
     from touken import custom_formations as cf
-    formations = cf.load_formations()
+    formations = cf.load_formations(server)
     if cf.find_formation(formations, fid) is None:
         return JSONResponse({"ok": False, "reason": "找不到这套预设编队"},
                             status_code=404)
-    cf.save_formations([f for f in formations if f.get("id") != fid])
+    cf.save_formations([f for f in formations if f.get("id") != fid], server)
     return {"ok": True}
 
 
@@ -3252,10 +3256,19 @@ def api_refresh_home_situation(server: str = ""):
 
 
 @app.get("/api/data/honmaru-profile")
-async def api_honmaru_profile():
+async def api_honmaru_profile(server: str = ""):
     """当前本丸共用档案（候选池 + 编队链接层），只读生成，契约见
     docs/telemetry-data.md「当前本丸共用档案」。"""
     from touken.honmaru_profile import get_honmaru_profile
+    if server == 'jp':
+        from touken.sword_archive import build_jp_sword_archive
+        archive = build_jp_sword_archive(_telemetry_store_for(server))
+        entries = [{**row, 'same_team_exclusion_key': row.get('sword_catalog_id')} for row in archive['entries']]
+        return {'schema_version': 1, 'generated_at': time.time(), 'roster': {'teams': []},
+            'candidate_pool': {'done': bool(entries), 'entries': entries,
+                'observed_at': archive.get('observed_at'), 'entry_count': len(entries),
+                'completeness': 'full' if archive.get('roster_complete') else 'partial'}}
+    _telemetry_store_for(server)
     return get_honmaru_profile()
 
 
@@ -3918,9 +3931,13 @@ async def api_events_timeline():
 
 
 @app.get("/api/planning")
-async def api_planning():
+async def api_planning(server: str = ""):
     """攒钱目标 + 按近日净收支速率推算的到期预测。契约见 touken/advisor.py。"""
     from touken import advisor
+    if server == 'jp':
+        from touken.jp_planning import report
+        return report(_telemetry_store_for(server), JP_DATA_DIR / 'state' / advisor.GOALS_FILENAME)
+    _telemetry_store_for(server)
     from touken.telemetry import get_telemetry_store
     try:
         config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
@@ -3961,18 +3978,25 @@ async def api_add_gameplay_budget_goal(request: Request):
 
 
 @app.post("/api/planning/goals")
-async def api_add_planning_goal(request: Request):
+async def api_add_planning_goal(request: Request, server: str = ""):
     body = await request.json()
     from touken import advisor
+    _telemetry_store_for(server)
+    path = (JP_DATA_DIR / 'state' if server == 'jp' else STATUS_DIR) / advisor.GOALS_FILENAME
+    if server == 'jp' and (body.get('kind', 'resource') != 'resource'
+                           or body.get('goal_mode') not in ('amount_target', 'deadline_target')):
+        raise HTTPException(400, '日服目前只支持资源数量或日期目标')
+    if server == 'jp' and path.exists():
+        path.with_suffix('.json.bak').write_bytes(path.read_bytes())
     try:
         if str(body.get("kind") or "") == "fragment":
             goal = advisor.add_fragment_goal(
-                STATUS_DIR / advisor.GOALS_FILENAME,
+                path,
                 fragment=str(body.get("fragment") or ""),
                 target=body.get("target"),
                 note=str(body.get("note") or ""))
             return {"ok": True, "goal": goal}
-        goal = advisor.add_goal(STATUS_DIR / advisor.GOALS_FILENAME,
+        goal = advisor.add_goal(path,
                                 resource=str(body.get("resource") or ""),
                                 target=body.get("target"),
                                 deadline=str(body.get("deadline") or ""),
@@ -3984,9 +4008,13 @@ async def api_add_planning_goal(request: Request):
 
 
 @app.delete("/api/planning/goals/{goal_id}")
-async def api_delete_planning_goal(goal_id: int):
+async def api_delete_planning_goal(goal_id: int, server: str = ""):
     from touken import advisor
-    if not advisor.delete_goal(STATUS_DIR / advisor.GOALS_FILENAME, goal_id):
+    _telemetry_store_for(server)
+    path = (JP_DATA_DIR / 'state' if server == 'jp' else STATUS_DIR) / advisor.GOALS_FILENAME
+    if server == 'jp' and path.exists():
+        path.with_suffix('.json.bak').write_bytes(path.read_bytes())
+    if not advisor.delete_goal(path, goal_id):
         return JSONResponse({"ok": False, "reason": "找不到这个小目标"}, status_code=404)
     return {"ok": True}
 
