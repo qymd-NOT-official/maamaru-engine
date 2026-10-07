@@ -4,7 +4,7 @@ import { api } from '../api'
 import PanelHeader from './PanelHeader.vue'
 import type { TrainingOverviewResponse, TrainingOverviewSword } from '../types'
 
-// 日服刀帐：日服练度快照（抓包入账的 training.captured）只读总览。
+// 日服刀帐：日服练度快照（training.captured）只读总览。
 // 不连游戏、不出自动化入口；数据由 /api/data/training/overview?server=jp
 // 走日服独立账房库，与国服刀帐档案完全分开。
 
@@ -50,13 +50,13 @@ onMounted(async () => {
 
 <template>
   <section class="jp-sword-panel">
-    <PanelHeader variant="page" title="日服刀帐" :subtitle="data ? `快照时间 ${data.captured_at || '—'} · 共 ${data.sword_count} 振` : '抓包入账的练度快照'" />
+    <PanelHeader variant="page" title="日服刀帐" :subtitle="data ? `快照时间 ${data.captured_at || '—'} · 共 ${data.sword_count} 振` : '已同步的练度快照'" />
     <div class="jp-sword-content">
       <p v-if="error" class="jp-sword-error">{{ error }}</p>
       <p v-else-if="loading" class="jp-sword-empty">正在翻日服刀帐……</p>
       <div v-else-if="!data" class="jp-sword-empty-card">
         <h3>还没有日服刀帐快照</h3>
-        <p>玩日服时开着 chrome://net-export 抓包，玩完到仓库页把 JSON 喂进来，这里就会长出刀帐。</p>
+        <p>到仓库点「读取游戏家底」，在打开的日服浏览器里游玩后，这里会自动更新刀帐。</p>
       </div>
       <template v-else>
         <div class="jp-sword-toolbar">

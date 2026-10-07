@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { api } from '../../api'
 import type { DropStatsResponse, ForgeHistoryResponse, ForgeHistoryRecipe } from '../../types'
+const props = defineProps<{ server?: 'cn' | 'jp' }>()
 const days = ref(30), kind = ref<'drops' | 'forge'>('drops')
 const drops = ref<DropStatsResponse>(), forge = ref<ForgeHistoryResponse>()
 const shown = ref(12)
@@ -16,8 +17,8 @@ async function load() {
   const id = ++requestId
   busy.value = true; error.value = ''
   try {
-    if (kind.value === 'drops') { const value = await api.dropStats(days.value); if (id === requestId) drops.value = value }
-    else { const value = await api.forgeHistory(days.value); if (id === requestId) forge.value = value }
+    if (kind.value === 'drops') { const value = await api.dropStats(days.value, props.server); if (id === requestId) drops.value = value }
+    else { const value = await api.forgeHistory(days.value, props.server); if (id === requestId) forge.value = value }
   } catch { if (id === requestId) error.value = '记录暂时没有翻开，请重试。' }
   finally { if (id === requestId) busy.value = false }
 }

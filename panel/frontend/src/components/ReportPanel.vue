@@ -115,6 +115,7 @@ async function checkGameInventory() {
 
 async function readGameInventory() {
   if (gameInventoryBusy.value || props.running || props.ledgerMode) return
+  if (isJp.value) { await startJpListener(); return }
   gameInventoryBusy.value = true
   gameInventoryNotice.value = '正在准备读取，请保持游戏停在本丸。'
   try {
@@ -143,30 +144,23 @@ const viewItems = [
 ]
 // 面板所属服务器由 App 经 prop 传入（启动器国服/日服两个入口决定），账页内不再提供切换。
 const isJp = computed(() => props.server === 'jp')
-const jpNetlogInput = ref<HTMLInputElement | null>(null)
-const jpImportBusy = ref(false)
-const jpImportNotice = ref('')
-
-// ---- 日服自动听包：状态每 5 秒一探，入账数涨了就重拉账 ----
 const jpListener = ref<JpListenerStatus | null>(null)
 const jpListenerBusy = ref(false)
 let jpListenerTimer = 0
-const jpListenerOn = computed(() => jpListener.value?.state === 'listening' || jpListener.value?.state === 'waiting_browser')
 const jpListenerText = computed(() => {
-  const st = jpListener.value
-  if (!st || st.state === 'off') return '听包只听得见从这个按钮打开的日服专用浏览器：点右边开一个（第一次要在里面登一次 DMM），之后就在那个窗口里玩，账自己进。在你平时的浏览器里玩是听不到的。'
-  if (st.state === 'starting') return '正在竖耳朵……'
-  if (st.state === 'waiting_browser') return '在等日服浏览器上线；它没开的话点右边按钮拉一个起来。记得要在专用窗口里玩才算数。'
-  if (st.state === 'error') return `听包翻车：${st.detail}`
-  return `正在听包 · 已入账 ${st.events_written} 条（听到 ${st.transactions} 份报文）。要在专用浏览器窗口里玩才算数。`
+  const state = jpListener.value?.state
+  if (state === 'error') return '日服连接没有完成，请重新读取游戏家底。'
+  if (state === 'starting' || state === 'waiting_browser') return '正在连接日服浏览器……'
+  if (state === 'listening') return '日服已连接，在打开的浏览器里游玩时，家底会自动更新。'
+  return ''
 })
 
 async function refreshJpListener() {
   try {
     const prev = jpListener.value?.events_written ?? 0
     jpListener.value = await api.jpListenerStatus()
-    // 听包新落了账 → 折线和流水跟着刷新
-    if (jpListener.value.events_written > prev) await load()
+    // 新记录入账后，家底、走势和当天记录一起更新。
+    if (jpListener.value.events_written > prev) await refreshRecords()
   } catch { /* 状态探不到不碍事，下一轮再探 */ }
 }
 
@@ -175,37 +169,8 @@ async function startJpListener() {
   try {
     await api.jpListenerStart()
     await refreshJpListener()
-  } catch { /* 状态文案交给下一轮轮询 */ }
+  } catch { gameInventoryNotice.value = '日服浏览器没有打开，请重试。' }
   finally { jpListenerBusy.value = false }
-}
-
-async function stopJpListener() {
-  jpListenerBusy.value = true
-  try {
-    await api.jpListenerStop()
-    await refreshJpListener()
-  } catch { /* 同上 */ }
-  finally { jpListenerBusy.value = false }
-}
-
-function pickJpNetlog() { jpNetlogInput.value?.click() }
-
-async function onJpNetlogPicked(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  jpImportBusy.value = true
-  jpImportNotice.value = ''
-  try {
-    const result = await api.jpNetlogImport(file)
-    const s = result.stats
-    jpImportNotice.value = `入账完成：资源快照 ${s['inventory.captured']} 条、刀帐快照 ${s['training.captured']} 条、锻刀 ${s['forge.collected']} 振` +
-      (s.dedup_snapshots ? `（${s.dedup_snapshots} 条重复快照已略过）` : '')
-    await load()
-  } catch (cause) {
-    jpImportNotice.value = cause instanceof Error ? cause.message : '导入失败'
-  } finally { jpImportBusy.value = false }
 }
 
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
@@ -587,12 +552,6 @@ const ledgerDateRange = computed(() => {
   return `${label(dates[0])}至${label(dates[dates.length - 1])}`
 })
 
-// 日服账房流水：锻刀消耗等已归因条目，新的在前
-const jpFlowEntries = computed(() => [
-  ...(ledger.value?.attributions || []),
-  ...(ledger.value?.unresolved_changes || []),
-].sort((left, right) => right.ts - left.ts).slice(0, 50))
-
 function onChartSelect({ date, key }: { date: string; key: string }) {
   const samePick = selectedDate.value === date && selectedResource.value === key
   if (resourceNames.includes(key)) selectedResource.value = key
@@ -627,9 +586,9 @@ async function loadRecordDay(date: string) {
   try {
     const [start, end] = dayRange(date)
     const [nextEvents, nextRuns, nextLedger] = await Promise.all([
-      api.dataEvents(1000, undefined, start, end),
-      api.dataRuns(100, undefined, start, end),
-      api.resourceLedgerRange(start, end),
+      api.dataEvents(1000, undefined, start, end, props.server),
+      api.dataRuns(100, undefined, start, end, undefined, props.server),
+      api.resourceLedgerRange(start, end, props.server),
     ])
     if (recordDate.value === date) recordLedger.value = nextLedger
     mergeEvents(nextEvents.items)
@@ -1024,10 +983,19 @@ async function importLedgerPreview() {
 
 async function load(nextDays = days.value) {
   if (isJp.value) {
-    // 日服账房只读日服库：家底折线 + 锻刀等流水，国服那一串数据不用拉
+    // 日服仓库读取独立账本，共用家底、走势与记录页面。
     days.value = nextDays; loading.value = true
     try {
-      ledger.value = await api.resourceLedger(nextDays, 'jp')
+      const [nextLedger, nextEvents, nextStock] = await Promise.all([
+        api.resourceLedger(nextDays, 'jp'), api.dataEvents(1000, undefined, undefined, undefined, 'jp'),
+        api.clientInventory('jp'),
+      ])
+      ledger.value = nextLedger
+      events.value = nextEvents.items
+      clientStock.value = nextStock
+      hasMoreEvents.value = nextEvents.has_more
+      eventCursor.value = nextEvents.next_cursor
+      if (!recordDate.value) recordDate.value = latestRecordDate()
       error.value = ''
     } catch (cause) { error.value = cause instanceof Error ? cause.message : '日服账房读取失败' }
     finally { loading.value = false }
@@ -1066,12 +1034,12 @@ async function loadOlder() {
     if (view.value === 'records' && recordDate.value) {
       const [start, end] = dayRange(recordDate.value)
       const requests: Promise<any>[] = []
-      if (recordHasMoreEvents.value) requests.push(api.dataEvents(1000, recordEventCursor.value ?? undefined, start, end).then(next => {
+      if (recordHasMoreEvents.value) requests.push(api.dataEvents(1000, recordEventCursor.value ?? undefined, start, end, props.server).then(next => {
         mergeEvents(next.items)
         recordEventCursor.value = next.next_cursor
         recordHasMoreEvents.value = next.has_more
       }))
-      if (recordHasMoreRuns.value) requests.push(api.dataRuns(100, recordRunCursor.value ?? undefined, start, end).then(next => {
+      if (recordHasMoreRuns.value) requests.push(api.dataRuns(100, recordRunCursor.value ?? undefined, start, end, undefined, props.server).then(next => {
         mergeRuns(next.items)
         recordRunCursor.value = next.next_cursor
         recordHasMoreRuns.value = next.has_more
@@ -1081,7 +1049,7 @@ async function loadOlder() {
     }
     const cutoff = Date.now() / 1000 - days.value * 86400
     const requests: Promise<any>[] = []
-    if (hasMoreEvents.value) requests.push(api.dataEvents(1000, eventCursor.value ?? undefined).then(next => {
+    if (hasMoreEvents.value) requests.push(api.dataEvents(1000, eventCursor.value ?? undefined, undefined, undefined, props.server).then(next => {
       events.value.push(...next.items.filter((item: any) => item.ts >= cutoff))
       eventCursor.value = next.next_cursor
       hasMoreEvents.value = next.has_more && next.items.some((item: any) => item.ts >= cutoff)
@@ -1105,6 +1073,7 @@ onMounted(async () => {
   if (isJp.value) {
     await refreshJpListener()
     jpListenerTimer = window.setInterval(refreshJpListener, 5000)
+    if (view.value === 'records' && recordDate.value) await loadRecordDay(recordDate.value)
     return
   }
   if (!props.ledgerMode) {
@@ -1139,51 +1108,13 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
-      <div v-if="isJp" class="jp-ledger">
-        <section class="jp-import jp-listener" aria-labelledby="jp-listener-title">
-          <header>
-            <div><h3 id="jp-listener-title">自动听包</h3><p>{{ jpListenerText }}</p></div>
-            <div class="ledger-actions">
-              <button v-if="!jpListenerOn" type="button" class="primary" :disabled="jpListenerBusy" @click="startJpListener">{{ jpListenerBusy ? '正在开……' : '打开日服浏览器听包' }}</button>
-              <button v-else type="button" class="secondary" :disabled="jpListenerBusy" @click="stopJpListener">停止听包</button>
-            </div>
-          </header>
-        </section>
-        <section class="jp-import" aria-labelledby="jp-import-title">
-          <header>
-            <div><h3 id="jp-import-title">日服账房</h3><p>玩日服前在浏览器打开 chrome://net-export 点 Start Logging（勾 Include raw bytes），玩完点 Stop 存下 JSON，喂进这里就入账。</p></div>
-            <div class="ledger-actions"><button type="button" class="primary" :disabled="jpImportBusy" @click="pickJpNetlog">{{ jpImportBusy ? '正在入账……' : '导入抓包' }}</button></div>
-          </header>
-          <p v-if="jpImportNotice" class="jp-import-notice">{{ jpImportNotice }}</p>
-          <input ref="jpNetlogInput" type="file" accept=".json,application/json" hidden @change="onJpNetlogPicked">
-        </section>
-        <section class="resource-trend">
-          <header>
-            <SegmentedControl :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
-            <div><h3>{{ days === 1 ? '近 24 小时余额' : '余额走势' }}</h3></div>
-          </header>
-          <p v-if="anomalyInsight" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
-          <ResourceChart :points="balancePoints" :resources="balanceResources" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-        </section>
-        <section class="resource-ledger jp-flow" :class="{ loading }" aria-labelledby="jp-flow-title">
-          <header><div><h3 id="jp-flow-title">账本流水</h3><p>{{ ledgerDateRange }}的收支依据</p></div></header>
-          <ul v-if="jpFlowEntries.length" class="jp-flow-list">
-            <li v-for="entry in jpFlowEntries" :key="entry.id">
-              <time>{{ manualReportTime(entry.ts) }}</time>
-              <span><b>{{ resourceLabel(entry.resource) }} <em :class="{ gain: entry.delta > 0, loss: entry.delta < 0 }">{{ signed(entry.delta) }}</em></b><small>{{ entry.label || categoryLabel(categoryOf(entry.source)) }}</small></span>
-            </li>
-          </ul>
-          <p v-else class="jp-flow-empty">还没有流水。导入抓包后，锻刀这类消耗会记在这里。</p>
-        </section>
-      </div>
-      <template v-if="!isJp">
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="props.ledgerMode && view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
-        <button v-if="!props.ledgerMode && view === 'records'" type="button" class="secondary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button>
+        <button v-if="!props.ledgerMode && view === 'records'" type="button" class="secondary" :title="isJp ? '打开日服浏览器并更新家底' : '进入游戏本丸后，读取游戏记录并盘点资源。'" :disabled="gameInventoryBusy || jpListenerBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy || jpListenerBusy ? '正在读取……' : '读取游戏家底' }}</button>
       </div>
       <template v-if="currentSection === 'report'">
-        <CollectionRecords v-if="view === 'records'" />
+        <CollectionRecords v-if="view === 'records'" :server="props.server" />
       <template v-if="view === 'chart'">
         <section v-if="props.ledgerMode && ledgerOnboarding?.visible" class="ledger-onboarding" aria-labelledby="ledger-onboarding-title">
           <header>
@@ -1197,7 +1128,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           </ol>
           <div v-if="ledgerOnboarding.step === 1 && !props.ledgerMode" class="ledger-onboarding-copy">
             <div><b>让まあ丸先认识你的本丸</b><p>打开模拟器并进入游戏本丸，再点「读取游戏家底」。会读取游戏记录，并翻到锻刀、所持道具画面盘点资源；不会锻刀、出阵或花资源。读不到时可以重试，也可以手动记下家底。</p></div>
-            <div class="ledger-onboarding-actions"><button type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
+            <div class="ledger-onboarding-actions"><button type="button" class="primary" :title="isJp ? '打开日服浏览器并更新家底' : '进入游戏本丸后，读取游戏记录并盘点资源。'" :disabled="gameInventoryBusy || jpListenerBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy || jpListenerBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
           </div>
           <div v-else-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">
             <div><b>先抄一次现在的家底</b><p>打开游戏看一眼资源数字；不确定的项目可以留空，以后随时能改。</p></div>
@@ -1214,13 +1145,14 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         </section>
 
         <section class="resource-ledger resource-overview" :class="{ loading }" aria-labelledby="resource-overview-title">
-          <header><div><h3 id="resource-overview-title">最近记下的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" title="进入游戏本丸后，读取游戏记录并盘点资源。" :disabled="gameInventoryBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
+          <header><div><h3 id="resource-overview-title">最近记下的家底</h3><p>{{ props.ledgerMode ? '最近记下的资源数量' : stockReadAt ? `最近读取于 ${eventTime(stockReadAt)}` : '尚未读取资源' }}</p></div><div class="ledger-actions"><button v-if="!props.ledgerMode" type="button" class="primary" :title="isJp ? '打开日服浏览器并更新家底' : '进入游戏本丸后，读取游戏记录并盘点资源。'" :disabled="gameInventoryBusy || jpListenerBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy || jpListenerBusy ? '正在读取……' : '读取游戏家底' }}</button></div></header>
           <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
+          <p v-if="isJp && jpListenerText" class="inventory-notice" role="status">{{ jpListenerText }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
               <small>{{ resourceLabel(row.name) }}</small>
               <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
-              <small v-if="!props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
+              <small v-if="!isJp && !props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
               <span v-if="props.ledgerMode" class="resource-change">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
               <button v-if="props.ledgerMode && row.goal" type="button" class="resource-goal-link" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
               <small v-if="row.name === '小判' && clientStock?.koban_reserve != null" title="未开箱，不计入收支。">箱内储备 {{ clientStock.koban_reserve.toLocaleString() }}<template v-if="clientStock.resources?.['小判']"> · 合计 {{ (clientStock.resources['小判'].count + clientStock.koban_reserve).toLocaleString() }}</template></small>
@@ -1234,7 +1166,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           </header>
           <p v-if="anomalyInsight" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
           <ResourceChart :points="balancePoints" :resources="balanceResources" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
-          <DayDetail v-if="dayDetail" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="openGapReport" @report-day="openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
+          <DayDetail v-if="dayDetail" :read-only="isJp" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="!isJp && openGapReport($event)" @report-day="!isJp && openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
         </section>
 
       </template>
@@ -1268,7 +1200,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 
 
 
-        <details class="warehouse-fold" :open="props.ledgerMode"><summary>手动补记与账本进出</summary>
+        <details v-if="!isJp" class="warehouse-fold" :open="props.ledgerMode"><summary>手动补记与账本进出</summary>
         <section class="resource-ledger" :class="{ loading }">
           <header><div><h3>账本与手账</h3><p>{{ ledgerDateRange }}的变化依据</p></div><div class="ledger-actions"><button type="button" class="secondary" @click="ledgerTransferOpen = !ledgerTransferOpen">账本进出</button><button v-if="!inventoryFormOpen && !reportMode" type="button" class="secondary" @click="manualActionsOpen = !manualActionsOpen">＋ 手动记账</button></div></header>
           <section v-if="ledgerTransferOpen" class="ledger-transfer" aria-labelledby="ledger-transfer-title">
@@ -1380,7 +1312,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         </section>
         <PlanningPanel :recovery-run-id="props.recoveryRunId" ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" @gameplay-settings-saved="(script, params) => emit('gameplay-settings-saved', script, params)" @open-expedition="emit('open-expedition')" @open-activity="(script, loops) => emit('open-activity', script, loops)" />
       </template>
-      </template>
     </div>
   </section>
 </template>
@@ -1396,21 +1327,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 .ledger-editor-dialog .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-.jp-ledger .jp-import { margin-bottom: 12px; padding: 14px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
-.jp-ledger .jp-import header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.jp-ledger .jp-import h3 { margin: 0; }
-.jp-ledger .jp-import p { margin: 4px 0 0; color: var(--ink-dim); }
-.jp-ledger .jp-import-notice { margin: 10px 0 0; }
-.jp-ledger .resource-trend, .jp-ledger .jp-flow { margin-bottom: 12px; }
-.jp-flow-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.jp-flow-list li { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--paper-line); }
-.jp-flow-list time { color: var(--ink-dim); font-size: 11px; }
-.jp-flow-list span { display: grid; min-width: 0; }
-.jp-flow-list em { font-style: normal; font-variant-numeric: tabular-nums; }
-.jp-flow-list em.gain { color: #47734f; }
-.jp-flow-list em.loss { color: var(--danger); }
-.jp-flow-list small { color: var(--ink-dim); font-size: 11px; }
-.jp-flow-empty { margin: 0; color: var(--ink-dim); font-size: 12px; }
 .report-context-toolbar-range { justify-content: flex-end; }
 .ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .ledger-onboarding > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

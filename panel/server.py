@@ -3327,7 +3327,7 @@ async def api_training_history(serial_id: int, server: str = ""):
 # ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/data/drop-stats")
-async def api_drop_stats(days: int = 30):
+async def api_drop_stats(days: int = 30, server: str = ""):
     """掉落统计：手动 battle.completed + 面板逐圈记录（剔除 not_observed
     圈）合并当分母，sword.obtained 掉落收据当分子，按地图/玩法分组。
     掉率不预算死，前端拿 drops/drop_total 和 battles 自己除；分母口径与
@@ -3335,7 +3335,7 @@ async def api_drop_stats(days: int = 30):
     docs/telemetry-data.md「掉落统计」。days 缺省 30，0=全部。"""
     from touken.drop_stats import build_drop_stats
     from touken.telemetry import get_telemetry_store
-    return build_drop_stats(get_telemetry_store(), days=days)
+    return build_drop_stats(_telemetry_store_for(server), days=days)
 
 
 @app.get("/api/data/training/internal-affairs")
@@ -3353,14 +3353,14 @@ async def api_training_internal_affairs(server: str = ""):
 
 
 @app.get("/api/data/forge-history")
-async def api_forge_history(days: int = 30):
+async def api_forge_history(days: int = 30, server: str = ""):
     """锻刀串链：forge.started ⋈ forge.collected 按炉位+时间序配对，
     附开炉前最近一条近侍观测与配方消耗估计。days 缺省 30，0=全部；
     窗口口径、近侍局限（登录时刻观测，局内换人无法分辨）、cost_est 不含
     委托符/加速符等，见 docs/telemetry-data.md「锻刀串链」。"""
     from touken.forge_history import build_forge_history
     from touken.telemetry import get_telemetry_store
-    return build_forge_history(get_telemetry_store(), days=days)
+    return build_forge_history(_telemetry_store_for(server), days=days)
 
 
 @app.get("/api/data/event-points")
@@ -3403,11 +3403,11 @@ async def api_data_runs(limit: int = 20, script: str = "",
                         before_started_at: float | None = None,
                         from_ts: float | None = None,
                         to_ts: float | None = None,
-                        status: str = ""):
+                        status: str = "", server: str = ""):
     """每轮任务的结构化结算；圈速按相邻完成事件计算，不含盘点时间。"""
     from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
     page_limit = max(1, min(int(limit), 100))
-    items = get_telemetry_store().recent_run_summaries(
+    items = _telemetry_store_for(server).recent_run_summaries(
         limit=page_limit + 1, script=script or None,
         before_started_at=before_started_at, from_ts=from_ts, to_ts=to_ts,
         status=status or None)
@@ -3458,9 +3458,13 @@ async def api_attach_run_inventory(run_id: str):
 
 
 @app.get("/api/data/client-inventory")
-async def api_client_inventory():
+async def api_client_inventory(server: str = ""):
     from touken.telemetry import get_telemetry_store
-    return get_telemetry_store().client_item_inventory()
+    data = _telemetry_store_for(server).client_item_inventory()
+    if server == "jp":
+        for reading in data["resources"].values():
+            reading.pop("source", None)
+    return data
 
 
 @app.get("/api/data/resource-ledger")

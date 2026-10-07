@@ -1,6 +1,6 @@
 import type { TrainingOverviewResponse, TrainingHistoryResponse, InternalAffairsResponse, DropStatsResponse, ForgeHistoryResponse, EventPointsListResponse, EventPointsTimelineResponse, SwordJournalResponse } from './types'
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptInfo, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
-import type { DailyReport, JpNetlogImportResult, JpListenerStatus } from './types'
+import type { DailyReport, JpListenerStatus } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
@@ -25,8 +25,8 @@ export const api = {
   trainingOverview: (server = '') => optionalRecord<TrainingOverviewResponse>(`/api/data/training/overview${server ? `?server=${server}` : ''}`),
   trainingHistory: (id: number, server = '') => optionalRecord<TrainingHistoryResponse>(`/api/data/training/history/${id}${server ? `?server=${server}` : ''}`),
   internalAffairs: (server = '') => optionalRecord<InternalAffairsResponse>(`/api/data/training/internal-affairs${server ? `?server=${server}` : ''}`),
-  dropStats: (days: number) => request<DropStatsResponse>(`/api/data/drop-stats?days=${days}`),
-  forgeHistory: (days: number) => request<ForgeHistoryResponse>(`/api/data/forge-history?days=${days}`),
+  dropStats: (days: number, server = '') => request<DropStatsResponse>(`/api/data/drop-stats?days=${days}&server=${server}`),
+  forgeHistory: (days: number, server = '') => request<ForgeHistoryResponse>(`/api/data/forge-history?days=${days}&server=${server}`),
   eventPointsList: () => request<EventPointsListResponse>('/api/data/event-points'),
   eventPoints: (id: string) => request<EventPointsTimelineResponse>(`/api/data/event-points?event_id=${encodeURIComponent(id)}`),
   swordJournal: (id: number) => request<SwordJournalResponse>(`/api/data/sword-journal/${id}`),
@@ -105,7 +105,7 @@ export const api = {
     body: JSON.stringify({ script, params }),
   }),
   honmaruProfile: () => request<HonmaruFormationProfile>('/api/data/honmaru-profile'),
-  clientInventory: () => request<import('./types').ClientInventory>('/api/data/client-inventory'),
+  clientInventory: (server = '') => request<import('./types').ClientInventory>(`/api/data/client-inventory?server=${server}`),
   customFormations: () => request<{ formations: CustomFormation[] }>('/api/custom-formations'),
   saveCustomFormation: (record: CustomFormationDraft, id?: string) => request<{ ok: boolean; formation: CustomFormation }>(`/api/custom-formations${id ? `/${encodeURIComponent(id)}` : ''}`, {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(record),
@@ -135,7 +135,7 @@ export const api = {
   }),
   revokeSwordAnnotation: (id: number) => request<{ ok: boolean }>(`/api/data/sword-archive/annotations/${id}`, { method: 'DELETE' }),
   resourceLedger: (days = 7, server = '') => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}${server ? `&server=${server}` : ''}`),
-  resourceLedgerRange: (from: number, to: number) => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}`),
+  resourceLedgerRange: (from: number, to: number, server = '') => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}&server=${server}`),
   dailyReport: (date = '', server = '') => {
     const params = new URLSearchParams()
     if (date) params.set('date', date)
@@ -165,9 +165,6 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preview_id: previewId, accept_conflicts: acceptConflicts }),
   }),
-  jpNetlogImport: (file: File) => request<JpNetlogImportResult>(`/api/data/jp-netlog-import?filename=${encodeURIComponent(file.name)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
-  }),
   jpListenerStatus: () => request<JpListenerStatus>('/api/jp-listener/status'),
   jpListenerStart: () => request<JpListenerStatus>('/api/jp-listener/start', { method: 'POST' }),
   jpListenerStop: () => request<{ state: string }>('/api/jp-listener/stop', { method: 'POST' }),
@@ -187,8 +184,8 @@ export const api = {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   deleteManualSession: (id: number) => request<{ ok: boolean }>(`/api/data/manual-sessions/${id}`, { method: 'DELETE' }),
-  dataEvents: (limit = 100, beforeId?: number, fromTs?: number, toTs?: number) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/events?limit=${limit}${beforeId == null ? '' : `&before_id=${beforeId}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
-  dataRuns: (limit = 20, beforeStartedAt?: number, fromTs?: number, toTs?: number, status?: string) => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/runs?limit=${limit}${beforeStartedAt == null ? '' : `&before_started_at=${beforeStartedAt}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
+  dataEvents: (limit = 100, beforeId?: number, fromTs?: number, toTs?: number, server = '') => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/events?server=${server}&limit=${limit}${beforeId == null ? '' : `&before_id=${beforeId}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}`),
+  dataRuns: (limit = 20, beforeStartedAt?: number, fromTs?: number, toTs?: number, status?: string, server = '') => request<{ schema_version: number; items: any[]; has_more: boolean; next_cursor: number | null }>(`/api/data/runs?server=${server}&limit=${limit}${beforeStartedAt == null ? '' : `&before_started_at=${beforeStartedAt}`}${fromTs == null ? '' : `&from_ts=${fromTs}`}${toTs == null ? '' : `&to_ts=${toTs}`}${status ? `&status=${encodeURIComponent(status)}` : ''}`),
   attachRunInventory: (runId: string) => request<{ ok: boolean; run: any }>(`/api/data/runs/${encodeURIComponent(runId)}/attach-inventory`, { method: 'POST' }),
   deleteRun: (runId: string) => request<{ ok: boolean }>(`/api/data/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   humanReports: () => request<{ schema_version: number; items: any[]; inventory_gaps: any[] }>('/api/data/human-reports?limit=500'),

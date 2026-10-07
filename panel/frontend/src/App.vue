@@ -314,7 +314,7 @@ const stagePlace = computed(() => {
 const stageActive = computed(() => !jpMode && !ledgerMode.value && (running.value || Boolean(dashboardRun.value?.active)))
 const stageFlavor = computed(() => jpMode ? '日服本丸' : ledgerMode.value ? '今天只算账' : dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
 const stageSub = computed(() => {
-  if (jpMode) return '不连接游戏 · 抓包入账'
+  if (jpMode) return '独立家底 · 自动更新'
   if (ledgerMode.value) return '不连接游戏 · 手动记录与规划'
   if (!dashboardRun.value?.active) return '庭院无事'
   const label = activityTitle(dashboardRun.value)

@@ -4,6 +4,7 @@ import type { HumanReport, InventoryGap, LedgerAttribution, ManualSession } from
 import { resourceLabel, categoryLabel, dayLabel, eventTime, recordOrigin, runTitle, signed } from './reportModel'
 
 const props = defineProps<{
+  readOnly?: boolean
   date: string
   resource: string
   totalDelta: number | null
@@ -134,10 +135,10 @@ function recordDateLabel(date: string): string {
         <p>{{ gapDelta(gap) }}</p>
         <small>{{ eventTime(gap.started_at) }} → {{ eventTime(gap.ended_at) }} · 看完上面的线索再补</small>
       </div>
-      <button type="button" class="primary" @click="emit('report', gap)">补账</button>
+      <button v-if="!readOnly" type="button" class="primary" @click="emit('report', gap)">补账</button>
     </div>
 
-    <div v-if="!gaps.length && unexplained" class="day-detail-gap">
+    <div v-if="!readOnly && !gaps.length && unexplained" class="day-detail-gap">
       <button type="button" class="primary" @click="emit('report-day')">补账</button>
     </div>
   </section>

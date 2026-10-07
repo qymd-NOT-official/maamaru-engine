@@ -9,6 +9,7 @@ import base64
 import gzip
 import json
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,47 @@ def _seed_jp_training(jp_store):
                         "ranbu_exp": 150}],
         }, ensure_ascii=False)))
     jp_store._conn().commit()
+
+
+def test_warehouse_reads_only_selected_server(jp_store, monkeypatch):
+    from touken import telemetry
+    temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    cn_store = TelemetryStore(Path(temp.name) / "telemetry.db")
+    monkeypatch.setattr(telemetry, "get_telemetry_store", lambda: cn_store)
+    client = _client(jp_store, monkeypatch)
+    try:
+        client.post("/api/data/jp-netlog-import", content=_netlog_bytes(),
+                    headers={"Content-Type": "application/octet-stream"})
+        jp = client.get("/api/data/client-inventory?server=jp").json()
+        assert jp["resources"]["木炭"]["count"] == 100
+        assert jp["resources"]["小判"]["count"] == 5
+        assert "委托符" not in jp["resources"]
+        assert "source" not in jp["resources"]["木炭"]
+        assert client.get("/api/data/client-inventory").json()["resources"] == {}
+        assert client.get("/api/data/events?server=jp").json()["items"]
+        assert client.get("/api/data/events").json()["items"] == []
+        cn_store.start_run("cn-only", "daily")
+        jp_store.start_run("jp-only", "jp_listener")
+        cn_store.finish_run("cn-only", "success")
+        jp_store.finish_run("jp-only", "success")
+        assert [row["run_id"] for row in client.get(
+            "/api/data/runs?server=jp").json()["items"]] == ["jp-only"]
+        assert [row["run_id"] for row in client.get(
+            "/api/data/runs").json()["items"]] == ["cn-only"]
+        for store, slot in ((cn_store, 1), (jp_store, 2)):
+            store._conn().execute(
+                "INSERT INTO events(ts, run_id, script, event_type, payload) "
+                "VALUES (?, NULL, 'fixture', 'forge.started', ?)",
+                (time.time(), json.dumps({"slot_no": slot})))
+            store._conn().commit()
+        assert client.get("/api/data/forge-history?server=jp").json()["forges"][0]["slot_no"] == 2
+        assert client.get("/api/data/forge-history").json()["forges"][0]["slot_no"] == 1
+        for endpoint in ("runs", "drop-stats", "forge-history"):
+            response = client.get(f"/api/data/{endpoint}?server=jp")
+            assert response.status_code == 200
+    finally:
+        cn_store.close()
+        temp.cleanup()
 
 
 def test_training_overview_follows_server(jp_store, monkeypatch):
