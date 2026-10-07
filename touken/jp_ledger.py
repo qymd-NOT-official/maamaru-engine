@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""日服抓包落账：把抓来的事务（netlog 文件解析 / CDP 实时听包）写进
+"""日服数据同步：把连接记录转换为独立账房事件，写进
 TelemetryStore，事件格式与国服账房一致（inventory.captured /
 training.captured / forge.collected / resource.change），下游日报、
 账房零改动直接可读。
@@ -7,7 +7,7 @@ training.captured / forge.collected / resource.change），下游日报、
 落账原则：
 
 - 时间戳一律取报文里的服务器时间 ``now``（日服为 JST，UTC+9），
-  不用导入时刻——补导昨天的抓包，账也记在昨天。
+  不用导入时刻——同步昨天的记录，账也记在昨天。
 - 只记实锤：资源快照、刀帐快照、锻刀开炉消耗（来自开炉请求体配方）、
   锻刀领取结果。推断不出来的收支不合成、不猜账。
 - 连续重复的快照去重（同一份资源/刀帐被多个接口反复携带是常态）。
@@ -47,15 +47,7 @@ def _display_time(ts: float) -> str:
 
 def _resource_snapshot(payload: dict, card: dict) -> dict | None:
     """响应里的 resource 子表 → 中文键资源快照；没有返回 None。"""
-    raw = payload.get("resource")
-    if not isinstance(raw, dict):
-        return None
-    snap = {
-        card["resource_keys"].get(k, k): v
-        for k, v in raw.items()
-        if isinstance(v, (int, float)) and k in card["resource_keys"]
-    }
-    return snap or None
+    return jp_import.resource_reading(payload, card)
 
 
 def _roster_fingerprint(roster: list[dict]) -> tuple:
@@ -78,8 +70,7 @@ class JpLedgerSession:
     """可持续喂的事务入账会话。
 
     去重状态（上次资源快照键 / 上次刀帐指纹）挂在会话上跨批次保持：
-    手动整包导入（netlog 文件）一次喂完，CDP 实时听包来一条喂一条，
-    两种喂法共用，重复快照都不会刷账。
+    文件更新和实时连接共用，重复快照都不会刷账。
     """
 
     def __init__(self, store, script: str = "jp_netlog"):
@@ -123,7 +114,8 @@ class JpLedgerSession:
             if key != self._last_resource:
                 _record(self.store, ts, "inventory.captured", {
                     "captured_at": _display_time(ts),
-                    "source": self.script, "resources": snap}, self.script)
+                    "source": self.script, "resources": snap,
+                    "resource_schema": 2}, self.script)
                 stats["inventory.captured"] += 1
                 self._last_resource = key
             else:
@@ -192,7 +184,7 @@ class JpLedgerSession:
 
 def import_transactions(store, transactions: list[Transaction],
                         script: str = "jp_netlog") -> dict:
-    """把一次抓包的事务落进账房，返回各类事件的写入统计。"""
+    """把一次数据更新落进账房，返回各类事件的写入统计。"""
     return JpLedgerSession(store, script).feed_all(transactions)
 
 

@@ -1,11 +1,11 @@
 {
   "_meta": {
     "description": "刀剑乱舞日服（网页版）客户端-服务器端点对照卡：路径 -> 含义/数据类别。供 netlog 导入适配层分类使用。",
-    "source": "2026-10-07 实抓核对（Chrome net-export，build 347）",
+    "source": "2026-10-07 日服记录核对（build 347）",
     "notes": [
       "除 battle/battle 外响应均为明文 JSON；battle/battle 响应为 {\"data\": hex} 密文，encrypted 标记 true",
       "每个响应携带新的链式令牌 t，重放/主动请求不属于本工具范围（只读导入）",
-      "资源键映射：charcoal=木炭 steel=玉钢 coolant=冷却材 file=砥石 bill=小判；item 内的依赖札/手伝い札等待核对",
+      "资源：charcoal=木炭 steel=玉钢 coolant=冷却材 file=砥石 bill=委托符；currency.money=小判，point+point_free=甲州金；item 的 consumable_id=8 为加速符。",
       "sword_id 即刀帐番号，直接复用 sword_db（touken/data/swords.json）查名"
     ]
   },
@@ -53,6 +53,6 @@
     "steel": "玉钢",
     "coolant": "冷却材",
     "file": "砥石",
-    "bill": "小判"
+    "bill": "委托符"
   }
 }

@@ -139,8 +139,8 @@ def test_warehouse_reads_only_selected_server(jp_store, monkeypatch):
                     headers={"Content-Type": "application/octet-stream"})
         jp = client.get("/api/data/client-inventory?server=jp").json()
         assert jp["resources"]["木炭"]["count"] == 100
-        assert jp["resources"]["小判"]["count"] == 5
-        assert "委托符" not in jp["resources"]
+        assert jp["resources"]["委托符"]["count"] == 5
+        assert "小判" not in jp["resources"]
         assert "source" not in jp["resources"]["木炭"]
         assert client.get("/api/data/client-inventory").json()["resources"] == {}
         assert client.get("/api/data/events?server=jp").json()["items"]

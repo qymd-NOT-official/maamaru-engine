@@ -47,8 +47,49 @@ def _sword_name(sword_id: int) -> str | None:
     return entry.get("name_zh") or entry.get("name")
 
 
+def _count(value) -> int | None:
+    if isinstance(value, str) and value.isdigit():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return int(value) if value >= 0 and float(value).is_integer() else None
+
+
+def resource_reading(payload: dict, card: dict | None = None) -> dict | None:
+    """独立的日服余额对应；稀疏响应缺项不补零，奖励列表不是库存。"""
+    card = card or load_card()
+    reading = {}
+    raw = payload.get("resource")
+    if isinstance(raw, dict):
+        for key, name in card["resource_keys"].items():
+            value = _count(raw.get(key))
+            if value is not None:
+                reading[name] = value
+    currency = payload.get("currency")
+    if isinstance(currency, dict):
+        money = _count(currency.get("money"))
+        if money is not None:
+            reading["小判"] = money
+        paid, free = _count(currency.get("point")), _count(currency.get("point_free"))
+        # 两部分都读到才确认合计；不能把缺失的部分当零。
+        if paid is not None and free is not None:
+            reading["甲州金"] = paid + free
+    items = payload.get("item")
+    if isinstance(items, dict):
+        for entry in items.values():
+            if isinstance(entry, dict) and str(entry.get("consumable_id")) == "8":
+                value = _count(entry.get("num"))
+                if value is not None:
+                    reading["加速符"] = value
+    if str(payload.get("assist_item_id")) == "8":
+        value = _count(payload.get("assist_item_num"))
+        if value is not None:
+            reading["加速符"] = value
+    return reading or None
+
+
 def summarize(transactions: list[Transaction]) -> dict:
-    """把一次抓包的事务列表汇总成结构化摘要。
+    """把一次数据更新汇总成结构化摘要。
 
     返回键：
     - kinds: 各数据类别出现次数（按数据卡 kind 聚合）
@@ -79,13 +120,9 @@ def summarize(transactions: list[Transaction]) -> dict:
         payload = tx.response_json()
         if not isinstance(payload, dict):
             continue
-        if kind in ("home", "account") and isinstance(
-                payload.get("resource"), dict):
-            resource = {
-                card["resource_keys"].get(k, k): v
-                for k, v in payload["resource"].items()
-                if isinstance(v, (int, float))
-            }
+        reading = resource_reading(payload, card)
+        if reading:
+            resource = {**(resource or {}), **reading}
         if kind == "swords" and isinstance(payload.get("sword"), dict):
             roster = payload["sword"]
             inner = roster.get("sword") if isinstance(

@@ -64,7 +64,7 @@ def test_inventory_snapshot_lands_with_server_time(store):
     assert abs(row["ts"] - NOW_EPOCH) < 1  # 用服务器时间，不用导入时刻
     payload = json.loads(row["payload"])
     assert payload["resources"]["木炭"] == 100
-    assert payload["resources"]["小判"] == 5
+    assert payload["resources"]["委托符"] == 5
     assert "max_resource" not in payload["resources"]  # 非资源键不进快照
 
 

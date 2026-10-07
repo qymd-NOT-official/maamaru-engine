@@ -1150,9 +1150,10 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <p v-if="isJp && jpListenerText" class="inventory-notice" role="status">{{ jpListenerText }}</p>
           <div class="resource-ledger-grid">
             <article v-for="row in resourceRows" :key="row.name" :class="{ gain: row.delta != null && row.delta > 0, loss: row.delta != null && row.delta < 0 }">
-              <small>{{ resourceLabel(row.name) }}</small>
+              <small>{{ isJp && row.name === '加速符' ? '加速符' : resourceLabel(row.name) }}</small>
               <strong :title="clientStock?.resources?.[row.name] ? `${eventTime(clientStock.resources[row.name].observed_at)} 读取` : ''">{{ props.ledgerMode ? row.current == null ? '未记录' : row.current.toLocaleString() : clientStock?.resources?.[row.name]?.count.toLocaleString() ?? '未读取' }}</strong>
               <small v-if="!isJp && !props.ledgerMode && clientStock?.resources?.[row.name]?.source === 'screen'">画面盘点 · {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
+              <small v-if="isJp && clientStock?.resources?.[row.name]">读取于 {{ eventTime(clientStock.resources[row.name].observed_at) }}</small>
               <span v-if="props.ledgerMode" class="resource-change">{{ rangeLabel }} {{ row.delta == null ? '变化未记录' : signed(row.delta) }}</span>
               <button v-if="props.ledgerMode && row.goal" type="button" class="resource-goal-link" @click="openPlanning"><span>{{ goalSummary(row.goal) }}</span><em>{{ goalMeta(row.goal) }} →</em></button>
               <small v-if="row.name === '小判' && clientStock?.koban_reserve != null" title="未开箱，不计入收支。">箱内储备 {{ clientStock.koban_reserve.toLocaleString() }}<template v-if="clientStock.resources?.['小判']"> · 合计 {{ (clientStock.resources['小判'].count + clientStock.koban_reserve).toLocaleString() }}</template></small>

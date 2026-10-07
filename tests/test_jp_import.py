@@ -48,7 +48,7 @@ def test_summarize_counts_and_translates_resources():
     assert summary["unknown_paths"] == {"/brand/new_endpoint": 1}
     res = summary["resource"]
     assert res["木炭"] == 100 and res["玉钢"] == 50
-    assert res["冷却材"] == 30 and res["砥石"] == 20 and res["小判"] == 5
+    assert res["冷却材"] == 30 and res["砥石"] == 20 and res["委托符"] == 5
     assert "recovered_at" not in res  # 非数值字段不进资源快照
 
 

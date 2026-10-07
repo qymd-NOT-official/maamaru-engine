@@ -2095,7 +2095,14 @@ def get_jp_telemetry_store() -> TelemetryStore:
     if _jp_store is None:
         with _lock:
             if _jp_store is None:
-                _jp_store = TelemetryStore(JP_DATA_DIR / "telemetry.db")
+                candidate = TelemetryStore(JP_DATA_DIR / "telemetry.db")
+                from .jp_resource_repair import repair_legacy_resources
+                try:
+                    repair_legacy_resources(candidate)
+                except Exception:
+                    candidate.close()
+                    raise
+                _jp_store = candidate
     return _jp_store
 
 
