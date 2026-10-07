@@ -78,3 +78,29 @@ def test_listener_ingest_counts(store):
     ).fetchall()
     assert len(rows) == 2
     assert json.loads(rows[-1]["payload"])["resources"]["木炭"] == 300
+
+
+def test_attach_dedup_and_session_reuse():
+    """_attach：同一目标不重复挂靠（双挂会收双份事件，锻刀消耗这类
+    不去重的账会记双份）；自动通知带来 session 的直接用，不再 attach。"""
+    listener = jp_listener.JpListener(launch=False)
+    calls = []
+
+    class FakeSock:
+        def call(self, method, params=None, session_id=None):
+            calls.append((method, params, session_id))
+            if method == "Target.attachToTarget":
+                return {"sessionId": f"sess-{params['targetId']}"}
+            return {}
+
+    known: dict[str, str] = {}
+    listener._attach(FakeSock(), known, "t1", "page")
+    listener._attach(FakeSock(), known, "t1", "page")       # 重复：跳过
+    listener._attach(FakeSock(), known, "t2", "iframe",
+                     session_id="sess-auto")                  # 现成 session 直接用
+    listener._attach(FakeSock(), known, "t3", "service_worker")  # 类型不对
+    assert known == {"t1": "sess-t1", "t2": "sess-auto"}
+    attaches = [c for c in calls if c[0] == "Target.attachToTarget"]
+    assert len(attaches) == 1
+    enables = [c for c in calls if c[0] == "Network.enable"]
+    assert len(enables) == 2

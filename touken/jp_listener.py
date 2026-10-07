@@ -180,6 +180,7 @@ class JpListener:
             "last_capture_at": None,
             "transactions": 0,
             "events_written": 0,
+            "sessions": 0,
         }
         self._ledger: jp_ledger.JpLedgerSession | None = None
         self._sock: _CdpSocket | None = None
@@ -251,47 +252,79 @@ class JpListener:
             raise ConnectionError("调试口没有 webSocketDebuggerUrl")
         sock = _CdpSocket(ws_url)
         self._sock = sock
+        known: dict[str, str] = {}  # targetId -> sessionId，防重复挂靠
         try:
-            # 扁平模式自动挂靠现有和将来的目标（含跨域 iframe 拆出来的 OOPIF），
-            # 不然游戏本体 iframe 的流量看不见。
+            # 扁平模式自动挂靠将来的目标（含跨域 iframe 拆出来的 OOPIF），
+            # 不然游戏本体 iframe 的流量看不见。自动通知实测会漏「后出生的
+            # iframe」，所以 _event_loop 里另有每 10 秒一轮的主动扫清单兜底。
             sock.call("Target.setAutoAttach", {
                 "autoAttach": True, "waitForDebuggerOnStart": False,
                 "flatten": True})
-            targets = sock.call("Target.getTargets").get("targetInfos", [])
-            for info in targets:
-                if info.get("type") in ("page", "iframe"):
-                    result = sock.call("Target.attachToTarget",
-                                       {"targetId": info["targetId"],
-                                        "flatten": True})
-                    sock.call("Network.enable",
-                              session_id=result.get("sessionId"))
-            self._set(state="listening", detail="正在听包，玩就行")
-            self._event_loop(sock)
+            for info in sock.call("Target.getTargets").get("targetInfos", []):
+                self._attach(sock, known, info.get("targetId"),
+                             info.get("type"))
+            self._set(state="listening", detail="正在听包，玩就行",
+                      sessions=len(known))
+            self._event_loop(sock, known)
         finally:
             self._sock = None
             sock.close()
 
-    def _event_loop(self, sock: _CdpSocket) -> None:
+    def _attach(self, sock: _CdpSocket, known: dict, target_id: str | None,
+                target_type: str | None,
+                session_id: str | None = None) -> None:
+        """挂上一个目标并开 Network 订阅；已挂过或类型不对则跳过。
+
+        session_id 已知的（自动挂靠通知带来的）直接用，不再 attachToTarget
+        ——同一目标挂两次会收到双份事件，锻刀消耗这类不去重的账会记双份。"""
+        if not target_id or target_id in known:
+            return
+        if target_type not in ("page", "iframe"):
+            return
+        try:
+            if session_id is None:
+                result = sock.call("Target.attachToTarget",
+                                   {"targetId": target_id, "flatten": True})
+                session_id = result.get("sessionId")
+            sock.call("Network.enable", session_id=session_id)
+            known[target_id] = session_id
+            self._set(sessions=len(known))
+        except (RuntimeError, TimeoutError):
+            pass  # 单个目标挂不上不掀桌子，下轮扫描再试
+
+    def _event_loop(self, sock: _CdpSocket, known: dict) -> None:
         card = jp_import.load_card()
         # requestId -> (url, method, path, request_body)；只记命中数据卡的
         pending: dict[str, tuple] = {}
+        last_sweep = time.monotonic()
         while not self._stop.is_set():
             msg = sock.backlog.pop(0) if sock.backlog else sock.recv()
             if msg is None:
+                # 收信空闲时主动扫一遍目标清单：自动挂靠通知漏掉的目标
+                # （实测漏过后出生的游戏 iframe）在这里补上。
+                if time.monotonic() - last_sweep > 10:
+                    last_sweep = time.monotonic()
+                    targets = sock.call("Target.getTargets").get(
+                        "targetInfos", [])
+                    for info in targets:
+                        self._attach(sock, known, info.get("targetId"),
+                                     info.get("type"))
                 continue
             method = msg.get("method", "")
             params = msg.get("params", {})
             session_id = msg.get("sessionId")
             if method == "Target.attachedToTarget":
                 info = params.get("targetInfo", {})
-                if info.get("type") in ("page", "iframe"):
-                    try:
-                        sock.call("Network.enable",
-                                  session_id=params.get("sessionId"))
-                    except (RuntimeError, TimeoutError):
-                        continue  # 单个目标开不了监听不掀桌子
+                self._attach(sock, known, info.get("targetId"),
+                             info.get("type"),
+                             session_id=params.get("sessionId"))
                 continue
             if method == "Target.detachedFromTarget":
+                gone = params.get("sessionId")
+                for tid, sid in list(known.items()):
+                    if sid == gone:
+                        del known[tid]
+                self._set(sessions=len(known))
                 continue
             if method == "Network.requestWillBeSent":
                 request = params.get("request", {})
@@ -373,6 +406,7 @@ def listener_status() -> dict:
     with _listener_lock:
         if _listener is None:
             return {"state": "off", "transactions": 0, "events_written": 0,
+                    "sessions": 0,
                     "started_at": None, "last_capture_at": None,
                     "detail": "", "browser_alive": debug_port_alive()}
         status = _listener.status()

@@ -314,6 +314,8 @@ export interface JpListenerStatus {
   events_written: number
   /** 调试口活着（浏览器开着） */
   browser_alive?: boolean
+  /** 当前挂上 Network 订阅的目标数（页面+iframe）；游戏 iframe 挂不上时这里能看出少了一只耳朵 */
+  sessions?: number
 }
 
 export interface LedgerOnboarding {
