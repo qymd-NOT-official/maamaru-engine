@@ -134,7 +134,7 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }),
   revokeSwordAnnotation: (id: number) => request<{ ok: boolean }>(`/api/data/sword-archive/annotations/${id}`, { method: 'DELETE' }),
-  resourceLedger: (days = 7) => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}`),
+  resourceLedger: (days = 7, server = '') => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}${server ? `&server=${server}` : ''}`),
   resourceLedgerRange: (from: number, to: number) => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}`),
   dailyReport: (date = '', server = '') => {
     const params = new URLSearchParams()

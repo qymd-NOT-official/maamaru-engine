@@ -6,7 +6,6 @@ import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
-import DailyReport from './report/DailyReport.vue'
 import CollectionRecords from './report/CollectionRecords.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
@@ -153,13 +152,13 @@ const serverItems = [
 const jpNetlogInput = ref<HTMLInputElement | null>(null)
 const jpImportBusy = ref(false)
 const jpImportNotice = ref('')
-const jpReportKey = ref(0)
 
 function switchServer(next: 'cn' | 'jp') {
   if (next === server.value) return
   server.value = next
-  if (next === 'jp') jpReportKey.value++
-  else load()
+  ledger.value = null
+  selectedDate.value = ''
+  void load()
 }
 
 function pickJpNetlog() { jpNetlogInput.value?.click() }
@@ -176,7 +175,7 @@ async function onJpNetlogPicked(event: Event) {
     const s = result.stats
     jpImportNotice.value = `入账完成：资源快照 ${s['inventory.captured']} 条、刀帐快照 ${s['training.captured']} 条、锻刀 ${s['forge.collected']} 振` +
       (s.dedup_snapshots ? `（${s.dedup_snapshots} 条重复快照已略过）` : '')
-    jpReportKey.value++
+    await load()
   } catch (cause) {
     jpImportNotice.value = cause instanceof Error ? cause.message : '导入失败'
   } finally { jpImportBusy.value = false }
@@ -560,6 +559,12 @@ const ledgerDateRange = computed(() => {
   }
   return `${label(dates[0])}至${label(dates[dates.length - 1])}`
 })
+
+// 日服账房流水：锻刀消耗等已归因条目，新的在前
+const jpFlowEntries = computed(() => [
+  ...(ledger.value?.attributions || []),
+  ...(ledger.value?.unresolved_changes || []),
+].sort((left, right) => right.ts - left.ts).slice(0, 50))
 
 function onChartSelect({ date, key }: { date: string; key: string }) {
   const samePick = selectedDate.value === date && selectedResource.value === key
@@ -991,7 +996,16 @@ async function importLedgerPreview() {
 // ---- 数据加载 ----
 
 async function load(nextDays = days.value) {
-  if (isJp.value) return  // 日服账房只读日服库，国服这一串数据不用拉
+  if (isJp.value) {
+    // 日服账房只读日服库：家底折线 + 锻刀等流水，国服那一串数据不用拉
+    days.value = nextDays; loading.value = true
+    try {
+      ledger.value = await api.resourceLedger(nextDays, 'jp')
+      error.value = ''
+    } catch (cause) { error.value = cause instanceof Error ? cause.message : '日服账房读取失败' }
+    finally { loading.value = false }
+    return
+  }
   days.value = nextDays; loading.value = true
   try {
     const rangeStartedAt = Date.now() / 1000 - nextDays * 86400
@@ -1061,7 +1075,7 @@ async function refreshRecords() {
 }
 onMounted(async () => {
   await load()
-  if (!props.ledgerMode) {
+  if (!props.ledgerMode && !isJp.value) {
     const state = await api.scripts().catch(() => null)
     if (state?.running && state.current === 'game_inventory') {
       gameInventoryRunId.value = state.run_id || null
@@ -1103,7 +1117,24 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <p v-if="jpImportNotice" class="jp-import-notice">{{ jpImportNotice }}</p>
           <input ref="jpNetlogInput" type="file" accept=".json,application/json" hidden @change="onJpNetlogPicked">
         </section>
-        <DailyReport :key="jpReportKey" server="jp" />
+        <section class="resource-trend">
+          <header>
+            <SegmentedControl :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
+            <div><h3>{{ days === 1 ? '近 24 小时余额' : '余额走势' }}</h3></div>
+          </header>
+          <p v-if="anomalyInsight" class="trend-callout">🦊 {{ anomalyInsight.detail }}</p>
+          <ResourceChart :points="balancePoints" :resources="balanceResources" :selected-date="selectedDate" :loading="loading" @select="onChartSelect" />
+        </section>
+        <section class="resource-ledger jp-flow" :class="{ loading }" aria-labelledby="jp-flow-title">
+          <header><div><h3 id="jp-flow-title">账本流水</h3><p>{{ ledgerDateRange }}的收支依据</p></div></header>
+          <ul v-if="jpFlowEntries.length" class="jp-flow-list">
+            <li v-for="entry in jpFlowEntries" :key="entry.id">
+              <time>{{ manualReportTime(entry.ts) }}</time>
+              <span><b>{{ resourceLabel(entry.resource) }} <em :class="{ gain: entry.delta > 0, loss: entry.delta < 0 }">{{ signed(entry.delta) }}</em></b><small>{{ entry.label || categoryLabel(categoryOf(entry.source)) }}</small></span>
+            </li>
+          </ul>
+          <p v-else class="jp-flow-empty">还没有流水。导入抓包后，锻刀这类消耗会记在这里。</p>
+        </section>
       </div>
       <template v-if="!isJp">
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
@@ -1330,7 +1361,16 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 .jp-ledger .jp-import h3 { margin: 0; }
 .jp-ledger .jp-import p { margin: 4px 0 0; color: var(--ink-dim); }
 .jp-ledger .jp-import-notice { margin: 10px 0 0; }
-.daily-report { margin-bottom: 12px; }
+.jp-ledger .resource-trend, .jp-ledger .jp-flow { margin-bottom: 12px; }
+.jp-flow-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.jp-flow-list li { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--paper-line); }
+.jp-flow-list time { color: var(--ink-dim); font-size: 11px; }
+.jp-flow-list span { display: grid; min-width: 0; }
+.jp-flow-list em { font-style: normal; font-variant-numeric: tabular-nums; }
+.jp-flow-list em.gain { color: #47734f; }
+.jp-flow-list em.loss { color: var(--danger); }
+.jp-flow-list small { color: var(--ink-dim); font-size: 11px; }
+.jp-flow-empty { margin: 0; color: var(--ink-dim); font-size: 12px; }
 .report-context-toolbar-range { justify-content: flex-end; }
 .ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 12px; }
 .ledger-onboarding > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
