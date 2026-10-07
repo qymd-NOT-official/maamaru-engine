@@ -1161,7 +1161,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             </article>
           </div>
         </section>
-        <StockInventory v-if="!props.ledgerMode" :stock="clientStock" />
         <section class="resource-trend">
           <header>
             <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />
@@ -1172,6 +1171,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
           <DayDetail v-if="dayDetail" :read-only="isJp" v-bind="dayDetail" :highlight-category="highlightCategory" @close="selectedDate = ''; highlightCategory = ''" @report="!isJp && openGapReport($event)" @report-day="!isJp && openDayClaim(dayDetail.date, dayDetail.resource, dayDetail.unexplained)" @open-records="selectRecordDate" />
         </section>
 
+        <StockInventory v-if="!props.ledgerMode" :stock="clientStock" />
       </template>
       <template v-if="props.ledgerMode && view === 'chart' || !props.ledgerMode && view === 'records'">
         <p v-if="!props.ledgerMode && gameInventoryNotice" class="inventory-notice" role="status">{{ gameInventoryNotice }}</p>
