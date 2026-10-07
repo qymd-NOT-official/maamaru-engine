@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -3120,6 +3121,14 @@ async def api_save_bot_config(request: Request):
 # ── API：结构化运行数据 ──
 
 
+def _telemetry_store_for(server: str = ""):
+    """按服务器选账房库：jp = 日服独立库，其余一律国服主库。"""
+    from touken.telemetry import get_jp_telemetry_store, get_telemetry_store
+    if str(server or "").strip().lower() == "jp":
+        return get_jp_telemetry_store()
+    return get_telemetry_store()
+
+
 @app.get("/api/data/summary")
 async def api_data_summary(days: int = 30):
     """稳定机器数据总览；前端与智能建议共用，契约由 schema_version 标识。"""
@@ -3146,11 +3155,11 @@ async def api_data_summary(days: int = 30):
 async def api_data_events(limit: int = 100, event_type: str = "",
                           script: str = "", before_id: int | None = None,
                           from_ts: float | None = None,
-                          to_ts: float | None = None):
+                          to_ts: float | None = None, server: str = ""):
     """结构化玩法事件；payload 只含机器字段，不依赖中文日志文案。"""
-    from touken.telemetry import get_telemetry_store, TELEMETRY_SCHEMA_VERSION
+    from touken.telemetry import TELEMETRY_SCHEMA_VERSION
     page_limit = max(1, min(int(limit), 1000))
-    items = get_telemetry_store().recent_events(
+    items = _telemetry_store_for(server).recent_events(
         limit=page_limit + 1, event_type=event_type or None, script=script or None,
         before_id=before_id, from_ts=from_ts, to_ts=to_ts)
     has_more = len(items) > page_limit
@@ -3458,35 +3467,35 @@ async def api_client_inventory():
 @app.get("/api/data/resource-ledger")
 async def api_data_resource_ledger(days: int = 7,
                                    from_ts: float | None = Query(None, alias="from"),
-                                   to: float | None = None):
+                                   to: float | None = None, server: str = ""):
     """资源总账：窗口内八资源的观察链/归因/缺口，聚合全部在服务端完成。
 
     from/to（Unix 秒）优先于 days；days 默认 7。契约见 docs/telemetry-data.md。
     """
-    from touken.telemetry import get_telemetry_store
     to_ts = float(to) if to else time.time()
     start = float(from_ts) if from_ts is not None \
         else to_ts - max(1, min(int(days), 365)) * 86400
-    return get_telemetry_store().resource_ledger(start, to_ts)
+    return _telemetry_store_for(server).resource_ledger(start, to_ts)
 
 
 @app.get("/api/daily_report")
-async def api_daily_report(date: str = ""):
+async def api_daily_report(date: str = "", server: str = ""):
     """日报：一天的收支 / 掉落 / 练度 / 目标进度 / 出勤，全部服务端聚合。
 
     date 缺省=今天（Asia/Shanghai），格式 YYYY-MM-DD。契约见 touken/daily_report.py。
+    server=jp 时读日服独立账房库。
     """
     from datetime import date as date_type
 
     from touken import daily_report
-    from touken.telemetry import get_telemetry_store
     day = str(date or "").strip()
     if day:
         try:
             date_type.fromisoformat(day)
         except ValueError:
             return JSONResponse({"error": "日期格式得是 YYYY-MM-DD"}, status_code=400)
-    return daily_report.build_daily_report(get_telemetry_store(), day or None)
+    return daily_report.build_daily_report(
+        _telemetry_store_for(server), day or None)
 
 
 @app.get("/api/data/ledger-onboarding")
@@ -3576,6 +3585,53 @@ async def api_ledger_import_apply(request: Request):
     except (OSError, TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=409)
     return {"ok": True, **result}
+
+
+@app.post("/api/data/jp-netlog-import")
+async def api_jp_netlog_import(request: Request, filename: str = ""):
+    """导入日服抓包（chrome://net-export 导出的 JSON）：解析后落日服账房。
+
+    只读导入、纯追加：已落过的抓包重复导入会产生重复快照，
+    由落账层去重兜底（内容不变的连续快照不重复记）。
+    """
+    from touken import jp_import, jp_ledger, netlog
+    from touken.telemetry import get_jp_telemetry_store
+    body = await request.body()
+    if not body:
+        return JSONResponse({"ok": False, "reason": "文件是空的"},
+                            status_code=400)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                "wb", suffix=".json", prefix="jp-netlog-",
+                delete=False) as fh:
+            fh.write(body)
+            tmp_path = fh.name
+        transactions = netlog.parse_transactions(
+            tmp_path, host_filter="touken-ranbu.jp")
+    except (OSError, ValueError) as exc:
+        return JSONResponse(
+            {"ok": False,
+             "reason": f"这份文件读不出来：{exc}。得是 chrome://net-export "
+                       f"导出的 JSON（勾了 Include raw bytes）"},
+            status_code=400)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+    if not transactions:
+        return JSONResponse(
+            {"ok": False,
+             "reason": "里面没找到日服游戏的报文。确认抓包时玩了游戏、"
+                       "且导出时勾了 Include raw bytes"},
+            status_code=400)
+    stats = jp_ledger.import_transactions(
+        get_jp_telemetry_store(), transactions)
+    summary = jp_import.summarize(transactions)
+    return {"ok": True, "stats": stats, "summary": summary,
+            "transactions": len(transactions)}
 
 
 @app.post("/api/data/manual-inventory")

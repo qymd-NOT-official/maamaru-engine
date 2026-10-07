@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .runtime_paths import LOG_DIR
+from .runtime_paths import JP_DATA_DIR, LOG_DIR
 
 
 TELEMETRY_SCHEMA_VERSION = 15
@@ -2075,6 +2075,7 @@ class TelemetryStore:
 
 
 _store: TelemetryStore | None = None
+_jp_store: TelemetryStore | None = None
 _lock = threading.Lock()
 
 
@@ -2085,6 +2086,16 @@ def get_telemetry_store() -> TelemetryStore:
             if _store is None:
                 _store = TelemetryStore()
     return _store
+
+
+def get_jp_telemetry_store() -> TelemetryStore:
+    """日服账房库：独立文件（jp/telemetry.db），与国服互不可见。"""
+    global _jp_store
+    if _jp_store is None:
+        with _lock:
+            if _jp_store is None:
+                _jp_store = TelemetryStore(JP_DATA_DIR / "telemetry.db")
+    return _jp_store
 
 
 def record_event(event_type: str, payload: dict | None = None) -> int | None:

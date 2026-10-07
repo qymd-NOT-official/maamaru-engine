@@ -5,6 +5,7 @@ import type { DailyReport, DailyReportGoal } from '../../types'
 import { dayLabel, eventTime, resourceLabel, resourceNames, runStatusLabel, scriptNames, shanghaiDate, shiftShanghaiDate, signed } from './reportModel'
 
 const emit = defineEmits<{ 'open-planning': [] }>()
+const props = defineProps<{ server?: string }>()
 
 // '' 表示今天；翻页只在上海时区的日历日之间走
 const date = ref('')
@@ -30,7 +31,7 @@ async function load() {
   const id = ++requestId
   loading.value = true
   try {
-    const nextReport = await api.dailyReport(date.value)
+    const nextReport = await api.dailyReport(date.value, props.server || '')
     if (id !== requestId) return
     report.value = nextReport
     error.value = ''

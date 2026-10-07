@@ -277,6 +277,30 @@ export interface LedgerImportPreview {
   issues: Array<{ row: number; ignored: boolean; reason: string }>
 }
 
+// ---- 日服抓包导入 /api/data/jp-netlog-import ----
+
+export interface JpNetlogImportResult {
+  ok: boolean
+  transactions: number
+  stats: {
+    'inventory.captured': number
+    'training.captured': number
+    'forge.started': number
+    'forge.collected': number
+    'resource.change': number
+    skipped_encrypted: number
+    skipped_no_now: number
+    dedup_snapshots: number
+  }
+  summary: {
+    kinds: Record<string, number>
+    unknown_paths: Record<string, number>
+    encrypted_battles: number
+    resource: Record<string, number> | null
+    swords: { count: number; sample: string[] }
+  }
+}
+
 export interface LedgerOnboarding {
   schema_version: number
   visible: boolean

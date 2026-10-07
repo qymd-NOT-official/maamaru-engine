@@ -95,6 +95,8 @@ DEBUG_DIR = DATA_ROOT / "debug"
 BACKUP_DIR = DATA_ROOT / "backups"
 UPDATES_DIR = DATA_ROOT / "updates"
 USER_PROFILES_DIR = DATA_ROOT / "profiles" / "overrides"
+# 日服账号的独立数据根（账房库、状态、配置都收在这里，与国服互不可见）
+JP_DATA_DIR = DATA_ROOT / "jp"
 
 # Kept as an API alias while callers move to the clearer STATE_DIR name.
 STATUS_DIR = STATE_DIR

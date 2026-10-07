@@ -6,6 +6,7 @@ import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
 import ResourceChart from './report/ResourceChart.vue'
 import DayDetail from './report/DayDetail.vue'
+import DailyReport from './report/DailyReport.vue'
 import CollectionRecords from './report/CollectionRecords.vue'
 import ReportRecords from './report/ReportRecords.vue'
 import PlanningPanel from './report/PlanningPanel.vue'
@@ -141,6 +142,46 @@ const viewItems = [
   { value: 'chart', label: '家底' },
   { value: 'records', label: '全部记录' },
 ]
+// 国服/日服账房切换；启动器的「日服」入口经 URL ?server=jp 落到这里
+const server = ref<'cn' | 'jp'>(
+  new URLSearchParams(window.location.search).get('server') === 'jp' ? 'jp' : 'cn')
+const isJp = computed(() => server.value === 'jp')
+const serverItems = [
+  { value: 'cn', label: '国服' },
+  { value: 'jp', label: '日服' },
+]
+const jpNetlogInput = ref<HTMLInputElement | null>(null)
+const jpImportBusy = ref(false)
+const jpImportNotice = ref('')
+const jpReportKey = ref(0)
+
+function switchServer(next: 'cn' | 'jp') {
+  if (next === server.value) return
+  server.value = next
+  if (next === 'jp') jpReportKey.value++
+  else load()
+}
+
+function pickJpNetlog() { jpNetlogInput.value?.click() }
+
+async function onJpNetlogPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  jpImportBusy.value = true
+  jpImportNotice.value = ''
+  try {
+    const result = await api.jpNetlogImport(file)
+    const s = result.stats
+    jpImportNotice.value = `入账完成：资源快照 ${s['inventory.captured']} 条、刀帐快照 ${s['training.captured']} 条、锻刀 ${s['forge.collected']} 振` +
+      (s.dedup_snapshots ? `（${s.dedup_snapshots} 条重复快照已略过）` : '')
+    jpReportKey.value++
+  } catch (cause) {
+    jpImportNotice.value = cause instanceof Error ? cause.message : '导入失败'
+  } finally { jpImportBusy.value = false }
+}
+
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
 
 // ---- 库存总账 ----
@@ -950,6 +991,7 @@ async function importLedgerPreview() {
 // ---- 数据加载 ----
 
 async function load(nextDays = days.value) {
+  if (isJp.value) return  // 日服账房只读日服库，国服这一串数据不用拉
   days.value = nextDays; loading.value = true
   try {
     const rangeStartedAt = Date.now() / 1000 - nextDays * 86400
@@ -1044,13 +1086,26 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
   <section class="report-panel">
     <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源家底与记录' : '账目和接下来的打算'">
       <template #actions>
-        <div v-if="!props.pageSection" class="report-toolbar-actions">
-          <SegmentedControl class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
+        <div class="report-toolbar-actions">
+          <SegmentedControl class="report-server-switch" :model-value="server" :items="serverItems" label="服务器" @update:model-value="switchServer($event as 'cn' | 'jp')" />
+          <SegmentedControl v-if="!props.pageSection" class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
         </div>
       </template>
     </PanelHeader>
     <div class="report-content">
       <p v-if="error" class="report-error">{{ error }}</p>
+      <div v-if="isJp" class="jp-ledger">
+        <section class="jp-import" aria-labelledby="jp-import-title">
+          <header>
+            <div><h3 id="jp-import-title">日服账房</h3><p>玩日服前在浏览器打开 chrome://net-export 点 Start Logging（勾 Include raw bytes），玩完点 Stop 存下 JSON，喂进这里就入账。</p></div>
+            <div class="ledger-actions"><button type="button" class="primary" :disabled="jpImportBusy" @click="pickJpNetlog">{{ jpImportBusy ? '正在入账……' : '导入抓包' }}</button></div>
+          </header>
+          <p v-if="jpImportNotice" class="jp-import-notice">{{ jpImportNotice }}</p>
+          <input ref="jpNetlogInput" type="file" accept=".json,application/json" hidden @change="onJpNetlogPicked">
+        </section>
+        <DailyReport :key="jpReportKey" server="jp" />
+      </div>
+      <template v-if="!isJp">
       <div v-if="currentSection === 'report'" class="report-context-toolbar">
         <SegmentedControl class="report-view-switch" :model-value="view" :items="viewItems" label="本丸账页" @update:model-value="switchView($event as 'chart' | 'records')" />
         <SegmentedControl v-if="props.ledgerMode && view === 'chart'" class="report-range-switch" :model-value="days" :items="rangeItems" label="统计时间范围" @update:model-value="load(Number($event))" />
@@ -1254,6 +1309,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
         </section>
         <PlanningPanel :recovery-run-id="props.recoveryRunId" ref="planningPanelRef" @goal-saved="finishLedgerOnboarding" @gameplay-settings-saved="(script, params) => emit('gameplay-settings-saved', script, params)" @open-expedition="emit('open-expedition')" @open-activity="(script, loops) => emit('open-activity', script, loops)" />
       </template>
+      </template>
     </div>
   </section>
 </template>
@@ -1269,6 +1325,11 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
 .ledger-editor-dialog .multi-resource-entry { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .report-context-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.jp-ledger .jp-import { margin-bottom: 12px; padding: 14px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
+.jp-ledger .jp-import header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.jp-ledger .jp-import h3 { margin: 0; }
+.jp-ledger .jp-import p { margin: 4px 0 0; color: var(--ink-dim); }
+.jp-ledger .jp-import-notice { margin: 10px 0 0; }
 .daily-report { margin-bottom: 12px; }
 .report-context-toolbar-range { justify-content: flex-end; }
 .ledger-onboarding { display: grid; gap: 13px; padding: 16px 18px; background: linear-gradient(130deg, color-mix(in srgb, var(--fox-gold-pale) 62%, var(--paper-card)), var(--paper-card) 72%); border: 1px solid var(--fox-gold); border-radius: 12px; }
