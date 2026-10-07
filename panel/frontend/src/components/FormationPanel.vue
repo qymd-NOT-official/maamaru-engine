@@ -10,7 +10,6 @@ import {
   candidateFormLabel,
   candidateName,
   presetCandidatePickable,
-  presetLabel,
   presetSlotCount,
   presetSlotSummary,
   validatePresetDraft,
@@ -139,6 +138,20 @@ const presetQuery = ref('')
 const presetSaving = ref(false)
 const presetMessage = ref('')
 const presetFailed = ref(false)
+const savedDraft = ref('')
+const draftFingerprint = computed(() => JSON.stringify({ name: draftName.value, team: draftTeam.value, slots: draftSlots.value }))
+const draftDirty = computed(() => editorOpen.value && savedDraft.value !== draftFingerprint.value)
+const pendingAction = ref<'switch' | 'close' | ''>('')
+const pendingPreset = ref<CustomFormation | undefined>()
+
+function discardDraft() {
+  const action = pendingAction.value
+  const preset = pendingPreset.value
+  pendingAction.value = ''
+  savedDraft.value = draftFingerprint.value
+  if (action === 'switch') openPresetEditor(preset)
+  else if (action === 'close') closePresetEditor()
+}
 
 const draftSlotCount = computed(() => presetSlotCount({ slots: draftSlots.value }))
 const draftError = computed(() => validatePresetDraft({
@@ -165,6 +178,7 @@ async function loadPresets() {
   try {
     const body = await api.customFormations(props.server)
     presets.value = body.formations || []
+    if (!editorOpen.value && presets.value.length) openPresetEditor(presets.value[0])
   } catch (cause) {
     presetsError.value = cause instanceof Error ? cause.message : '预设名单没有翻开'
   } finally {
@@ -173,6 +187,13 @@ async function loadPresets() {
 }
 
 function openPresetEditor(preset?: CustomFormation) {
+  if (presetSaving.value) return
+  if (editorOpen.value && preset?.id === editingId.value) return
+  if (draftDirty.value) {
+    pendingPreset.value = preset
+    pendingAction.value = 'switch'
+    return
+  }
   if (preset) {
     editingId.value = preset.id
     draftName.value = preset.name
@@ -190,11 +211,18 @@ function openPresetEditor(preset?: CustomFormation) {
   presetMessage.value = ''
   presetFailed.value = false
   editorOpen.value = true
+  pendingAction.value = ''
+  savedDraft.value = draftFingerprint.value
 }
 
 function closePresetEditor() {
   if (presetSaving.value) return
+  if (draftDirty.value) {
+    pendingAction.value = 'close'
+    return
+  }
   editorOpen.value = false
+  pendingAction.value = ''
   pickerSlot.value = null
   equipmentSlot.value = null
 }
@@ -329,8 +357,12 @@ async function savePreset() {
     )
     if (!body.ok) throw new Error('没有保存成功，请重试')
     emit('notify', `预设「${body.formation.name}」已收好`)
-    editorOpen.value = false
+    editingId.value = body.formation.id
+    pendingAction.value = ''
+    savedDraft.value = draftFingerprint.value
     pickerSlot.value = null
+    equipmentSlot.value = null
+    presetMessage.value = '已保存'
     await loadPresets()
   } catch (cause) {
     presetMessage.value = cause instanceof Error ? cause.message : '保存失败，请重试'
@@ -347,7 +379,11 @@ async function removePreset(preset: CustomFormation) {
     const body = await api.deleteCustomFormation(preset.id, props.server)
     if (!body.ok) throw new Error('没有删除成功，请重试')
     presets.value = presets.value.filter(item => item.id !== preset.id)
-    if (editingId.value === preset.id) closePresetEditor()
+    if (editingId.value === preset.id) {
+      editorOpen.value = false
+      pendingAction.value = ''
+      if (presets.value.length) openPresetEditor(presets.value[0])
+    }
     emit('notify', `已删除预设「${preset.name}」`)
   } catch (cause) {
     emit('notify', cause instanceof Error ? cause.message : '删除失败，请重试')
@@ -377,6 +413,7 @@ onMounted(() => { load(); loadPresets() })
       <div v-if="loading && !profile" class="formation-empty">正在读取刀剑名册……</div>
       <template v-else>
         <section class="formation-presets">
+          <aside class="formation-preset-sidebar" aria-label="我的部队预设">
           <header class="formation-presets-head">
             <div>
               <h3>我的部队预设</h3>
@@ -396,23 +433,26 @@ onMounted(() => { load(); loadPresets() })
           <template v-else>
             <p v-if="!presets.length" class="formation-empty">{{ props.server === 'jp' ? '还没有预设编队。先存下常用阵容，整队套用待适配。' : '还没有预设编队。把常用的阵容存下来，下次整套换上，不用一格一格点。' }}</p>
             <ul v-else class="formation-preset-list">
-              <li v-for="preset in presets" :key="preset.id" class="formation-preset-card">
-                <div class="formation-preset-info">
-                  <b>{{ presetLabel(preset) }}</b>
+              <li v-for="preset in presets" :key="preset.id" class="formation-preset-card" :class="{ selected: editorOpen && editingId === preset.id }">
+                <button type="button" class="formation-preset-info" :aria-pressed="editorOpen && editingId === preset.id" :disabled="presetSaving" @click="openPresetEditor(preset)">
+                  <b>{{ preset.name }}</b>
                   <span class="formation-badges">
-                    <i>已指定 {{ presetSlotCount(preset) }}/6 槽</i>
-                    <i v-if="!presetSlotCount(preset)" class="formation-gap">全是空位，应用时会直接停下</i>
+                    <i>{{ TEAM_LABELS[preset.target_team - 1] }} · {{ presetSlotCount(preset) }}/6 位</i>
                   </span>
-                </div>
+                </button>
                 <div class="formation-preset-tools">
-                  <button type="button" class="secondary" :disabled="presetSaving" @click="openPresetEditor(preset)">编辑</button>
-                  <button type="button" class="danger" :disabled="presetSaving" @click="removePreset(preset)">删除</button>
+                  <button type="button" class="danger" :aria-label="`删除预设「${preset.name}」`" :disabled="presetSaving" @click="removePreset(preset)">删除</button>
                 </div>
               </li>
             </ul>
             <p v-if="presets.length >= MAX_PRESETS" class="formation-hintline">最多存 5 套预设；想存新的，先删掉一套不用的。</p>
           </template>
-
+          </aside>
+          <section class="formation-preset-detail" aria-label="调整部队预设">
+          <div v-if="pendingAction" class="formation-preset-warn" role="alertdialog" aria-label="未保存的预设修改">
+            <p>这套预设还有修改没保存。要放下修改吗？</p>
+            <div class="formation-discard-actions"><button type="button" class="secondary" @click="pendingAction = ''">继续编辑</button><button type="button" class="secondary" @click="discardDraft">放下修改</button></div>
+          </div>
           <div v-if="editorOpen" class="formation-preset-editor">
             <h4>{{ editingId ? '编辑预设' : '新建预设' }}</h4>
             <div class="formation-preset-form">
@@ -562,11 +602,14 @@ onMounted(() => { load(); loadPresets() })
 
             <p v-if="presetMessage" class="formation-preset-message" :class="{ failed: presetFailed }" :role="presetFailed ? 'alert' : 'status'">{{ presetMessage }}</p>
             <div class="formation-preset-actions">
+              <span class="formation-save-state">{{ draftDirty ? '有修改尚未保存' : editingId ? '✓ 已保存' : '新预设' }}</span>
               <button type="button" class="primary" :disabled="presetSaving || Boolean(draftError)" @click="savePreset">{{ presetSaving ? '正在收好……' : '保存预设' }}</button>
               <button type="button" class="secondary" :disabled="presetSaving" @click="closePresetEditor">取消</button>
             </div>
             <p v-if="draftError" class="formation-hintline">{{ draftError }}</p>
           </div>
+          <div v-else class="formation-detail-empty"><h3>安排一套常用阵容</h3><p>从左边选一套预设，或新建一套，再在这里调整刀剑和装备。</p></div>
+          </section>
         </section>
       </template>
     </PaperCard>
@@ -601,20 +644,28 @@ onMounted(() => { load(); loadPresets() })
 .formation-error, .formation-empty { display: grid; gap: 3px; margin: 16px 18px; padding: 18px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; font-size: 13px; }
 .formation-error { color: #9f3d28; }
 /* 预设编队管理区：列表 + 就地展开的编辑器，视觉零件与选人区同源。 */
-.formation-presets { padding: 18px; }
+.formation-presets { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 480px; }
+.formation-preset-sidebar { padding: 22px 16px; background: color-mix(in srgb, var(--paper) 80%, var(--fox-gold-pale)); border-right: 1px solid var(--paper-line); min-width: 0; }
+.formation-preset-detail { padding: 24px; min-width: 0; }
+.formation-detail-empty { padding: 60px 20px; text-align: center; color: var(--ink-dim); }
+.formation-detail-empty h3 { color: var(--ink); }
+.formation-preset-sidebar .formation-empty { margin: 16px 0; padding: 12px; }
 .formation-presets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .formation-presets-head h3 { margin: 0; font-size: 14px; }
 .formation-presets-head p { max-width: 560px; margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
 .formation-presets-head button { min-height: 32px; padding: 5px 14px; font-size: 12px; }
 .formation-preset-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
-.formation-preset-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--paper); border: 1px solid var(--paper-line); border-radius: 9px; }
-.formation-preset-info { display: grid; gap: 5px; min-width: 0; }
+.formation-preset-card { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid transparent; border-radius: 9px; }
+.formation-preset-card.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }
+.formation-preset-info { display: grid; gap: 7px; min-width: 0; flex: 1; text-align: left; padding: 12px 8px; color: var(--ink); border: 0; background: transparent; cursor: pointer; }
+.formation-preset-info:focus-visible { outline: 2px solid var(--fox-gold); outline-offset: 2px; }
 .formation-preset-info b { font-size: 13px; overflow-wrap: anywhere; }
 .formation-preset-info .formation-badges { justify-content: flex-start; }
 .formation-preset-tools { display: flex; flex: 0 0 auto; gap: 6px; }
-.formation-preset-tools button { min-height: 30px; padding: 5px 13px; font-size: 12px; }
-.formation-preset-editor { margin-top: 14px; padding: 13px; background: color-mix(in srgb, var(--paper-card) 62%, var(--paper)); border: 1px dashed var(--paper-line); border-radius: 10px; }
-.formation-preset-editor h4 { margin: 0 0 10px; font-size: 13px; }
+.formation-preset-tools button { min-height: 30px; padding: 5px 6px; font-size: 11px; color: var(--ink-dim); background: transparent; border-color: transparent; box-shadow: none; }
+.formation-preset-tools button:hover { color: #8f3524; border-color: var(--paper-line); }
+.formation-preset-editor { padding: 24px; background: var(--paper-card); border: 1px solid var(--paper-line); box-shadow: 6px 6px 0 var(--paper-line); }
+.formation-preset-editor h4 { margin: 0 0 20px; padding-bottom: 14px; border-bottom: 1px solid var(--paper-line); font-size: 20px; }
 .formation-preset-editor .formation-hintline { margin: 8px 0 0; }
 .formation-presets > .formation-hintline { margin: 10px 0 0; }
 .formation-preset-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
@@ -643,13 +694,21 @@ onMounted(() => { load(); loadPresets() })
 .formation-ranked-choice .formation-candidate { width: auto; height: 100%; border-top: 0; border-left: 1px solid var(--paper-line); white-space: nowrap; }
 .formation-preset-message { margin: 10px 0 0; font-size: 12px; color: #2f5527; }
 .formation-preset-message.failed { color: #8f3524; }
-.formation-preset-actions { display: flex; gap: 8px; margin-top: 12px; }
+.formation-preset-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--paper-line); }
+.formation-save-state { flex: 1; color: var(--ink-dim); font-size: 12px; }
+.formation-discard-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .formation-preset-actions button { min-height: 34px; padding: 6px 18px; font-size: 12px; }
 @media (max-width: 900px) {
   .formation-workspace { display: flex; flex-direction: column; overflow: visible; }
+  .formation-presets { grid-template-columns: 1fr; }
+  .formation-preset-sidebar { border-right: 0; border-bottom: 1px solid var(--paper-line); }
+  .formation-preset-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .formation-preset-detail { padding: 18px; }
 }
 @media (max-width: 620px) {
-  .formation-presets { padding: 14px; }
+  .formation-preset-detail { padding: 14px; }
+  .formation-preset-editor { padding: 16px; }
+  .formation-preset-list { grid-template-columns: 1fr; }
   .formation-candidate { align-items: flex-start; flex-direction: column; gap: 4px; }
   .formation-badges { justify-content: flex-start; }
   .formation-preset-card { align-items: flex-start; flex-direction: column; }
