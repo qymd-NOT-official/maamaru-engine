@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
-import PanelHeader from './PanelHeader.vue'
-import SwordReadActions from './SwordReadActions.vue'
-import PaperCard from './PaperCard.vue'
 import type { CustomFormation, CustomFormationSlotEntry, FormationCandidate, HonmaruFormationProfile } from '../types'
 import {
   candidateEvidenceGaps,
@@ -82,21 +79,6 @@ const candidateGroups = computed<CandidateGroup[]>(() => {
 })
 
 
-const profileSummary = computed(() => {
-  if (!profile.value) return ''
-  if (!poolDone.value) return '请先更新刀帐，再选择具体一振'
-  const skipped = pool.value?.skipped_newer_snapshots?.length || 0
-  if (props.server === 'jp' && pool.value?.completeness !== 'full') return `目前读到 ${entries.value.length} 振；进入游戏「结成」更新完整名单后再核对`
-  const base = `刀帐候选 ${pool.value?.entry_count ?? entries.value.length} 振 · 档案时间 ${pool.value?.observed_at ? fmtTime(pool.value.observed_at) : '—'}`
-  return skipped ? `${base} · 之后还有 ${skipped} 次盘点没认全，以这份为准` : base
-})
-
-function fmtTime(value: number) {
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
-    timeZone: 'Asia/Shanghai',
-  }).format(new Date(value * 1000))
-}
 
 async function load() {
   loading.value = true
@@ -395,19 +377,7 @@ onMounted(() => { load(); loadPresets() })
 
 <template>
   <section class="formation-panel">
-    <PaperCard variant="task" tag="section" class="formation-workspace">
-      <PanelHeader
-        title="部队预设"
-        :subtitle="profileSummary || '选好要用的刀，出阵或远征时再整队套用'"
-        variant="embedded"
-      >
-        <template #actions>
-          <button v-if="props.server === 'jp'" type="button" class="secondary" @click="load">刷新日服名单</button>
-          <SwordReadActions v-else :running="props.running" :current="props.current" :stopping="props.stopping" :starting="props.starting"
-            @updated="load" @error="loadError = $event" @run-inventory="emit('runInventory')" />
-        </template>
-      </PanelHeader>
-      <p class="formation-hintline">{{ props.server === 'jp' ? '日服预设独立保存；仅作安排，套用部队与自动执行待适配。装备选项仅作计划，不代表已经持有。' : '保存预设不会立刻动游戏；开工时会按预设找到你选定的那振。' }}</p>
+    <section class="formation-workspace">
 
       <p v-if="loadError" class="formation-error">{{ loadError }}</p>
       <div v-if="loading && !profile" class="formation-empty">正在读取刀剑名册……</div>
@@ -417,7 +387,6 @@ onMounted(() => { load(); loadPresets() })
           <header class="formation-presets-head">
             <div>
               <h3>我的部队预设</h3>
-              <p>{{ props.server === 'jp' ? '先把常用阵容记下来。编辑只改记录，不碰游戏；执行入口以后再接。' : '常用阵容收在这里，之后从出阵、活动或远征里直接选。编辑预设只改记录，不碰游戏。' }}</p>
             </div>
             <button
               type="button"
@@ -612,7 +581,7 @@ onMounted(() => { load(); loadPresets() })
           </section>
         </section>
       </template>
-    </PaperCard>
+    </section>
   </section>
 </template>
 
@@ -644,16 +613,16 @@ onMounted(() => { load(); loadPresets() })
 .formation-error, .formation-empty { display: grid; gap: 3px; margin: 16px 18px; padding: 18px; color: var(--ink-dim); background: var(--paper-card); border: 1px dashed var(--paper-line); border-radius: 10px; font-size: 13px; }
 .formation-error { color: #9f3d28; }
 /* 预设编队管理区：列表 + 就地展开的编辑器，视觉零件与选人区同源。 */
-.formation-presets { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 480px; }
+.formation-presets { display: grid; grid-template-columns: 286px minmax(0, 1fr); min-height: 560px; }
 .formation-preset-sidebar { padding: 22px 16px; background: color-mix(in srgb, var(--paper) 80%, var(--fox-gold-pale)); border-right: 1px solid var(--paper-line); min-width: 0; }
-.formation-preset-detail { padding: 24px; min-width: 0; }
+.formation-preset-detail { padding: 38px; min-width: 0; }
 .formation-detail-empty { padding: 60px 20px; text-align: center; color: var(--ink-dim); }
 .formation-detail-empty h3 { color: var(--ink); }
 .formation-preset-sidebar .formation-empty { margin: 16px 0; padding: 12px; }
-.formation-presets-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.formation-presets-head { display: grid; gap: 20px; }
 .formation-presets-head h3 { margin: 0; font-size: 14px; }
 .formation-presets-head p { max-width: 560px; margin: 4px 0 0; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
-.formation-presets-head button { min-height: 32px; padding: 5px 14px; font-size: 12px; }
+.formation-presets-head button { width: 100%; min-height: 44px; padding: 9px 14px; text-align: left; background: transparent; border-style: dashed; font-size: 14px; }
 .formation-preset-list { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
 .formation-preset-card { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid transparent; border-radius: 9px; }
 .formation-preset-card.selected { background: var(--paper-card); border-color: var(--paper-line); box-shadow: inset 3px 0 var(--fox-gold); }

@@ -618,6 +618,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .system-panel .system-form textarea { min-height: 150px; }
 .system-panel .system-nav button { font-size: 14px; }
 .chat-page, .system-page, .report-page, .workflow-page { padding: 0; }
+.archive-page:has(.formation-panel) { padding: 0; }
 .chat-page > .maamaru-surface > .chat-panel,
 .system-page > .maamaru-surface > .system-panel,
 .workflow-page > .maamaru-surface > .workflow-panel { border: 0; border-radius: 0; box-shadow: none; }
