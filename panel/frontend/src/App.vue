@@ -23,7 +23,13 @@ import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
 import SwordArchivePanel from './components/SwordArchivePanel.vue'
+import JpSwordPanel from './components/JpSwordPanel.vue'
+import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
+
+// 日服入口（启动器带 ?server=jp 打开）：整面板只留仓库/刀剑两个页签，
+// 国服自动化（功能、规划、设置、排班警告、任务轮询）一概不出现；切服回启动器换入口。
+const jpMode = appServer === 'jp'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
@@ -296,6 +302,7 @@ const dailyPumpkinTargets = computed({
 })
 
 const stagePlace = computed(() => {
+  if (jpMode) return '日服账房'
   if (ledgerMode.value) return '本丸账房'
   if (!dashboardRun.value?.active) return '本丸庭院'
   const script = String(dashboardRun.value.script || '')
@@ -304,9 +311,10 @@ const stagePlace = computed(() => {
   if (/(出阵|合战|异去|演练|远征|联队|南瓜|刷花|换队长|派遣|花牌|秘宝)/.test(step) || ['raid', 'pumpkin', 'sortie', 'yosari', 'sakura', 'practice', 'expedition', 'dispatch', 'osaka', 'hanafuda'].includes(script)) return '出阵之路'
   return '本丸庭院'
 })
-const stageActive = computed(() => !ledgerMode.value && (running.value || Boolean(dashboardRun.value?.active)))
-const stageFlavor = computed(() => ledgerMode.value ? '今天只算账' : dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
+const stageActive = computed(() => !jpMode && !ledgerMode.value && (running.value || Boolean(dashboardRun.value?.active)))
+const stageFlavor = computed(() => jpMode ? '日服本丸' : ledgerMode.value ? '今天只算账' : dashboardRun.value?.active ? (dashboardRun.value.flavor || '正在本丸干活🔧') : '本丸待命')
 const stageSub = computed(() => {
+  if (jpMode) return '不连接游戏 · 抓包入账'
   if (ledgerMode.value) return '不连接游戏 · 手动记录与规划'
   if (!dashboardRun.value?.active) return '庭院无事'
   const label = activityTitle(dashboardRun.value)
@@ -345,6 +353,16 @@ function migrateParams(script: string, value: ScriptParams): ScriptParams {
 async function load() {
   loading.value = true
   try {
+    // 日服入口：不读国服脚本/模式，只取主题，落点在仓库页。
+    if (jpMode) {
+      const saved = await api.settings()
+      theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
+      applyTheme()
+      tab.value = 'report'
+      scripts.value = {}
+      params.value = {}
+      return
+    }
     const mode = await api.appMode()
     ledgerMode.value = mode.mode === 'ledger'
     if (ledgerMode.value) {
@@ -541,7 +559,7 @@ onMounted(async () => {
   detectLauncherBridge()
   window.addEventListener('pywebviewready', detectLauncherBridge)
   await load()
-  if (!ledgerMode.value) {
+  if (!jpMode && !ledgerMode.value) {
     await pollStatus()
     pollTimer = window.setInterval(pollStatus, 2000)
     window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning)
@@ -568,7 +586,7 @@ watch(tab, value => {
 <template>
   <div class="shell" :class="{ 'stage-collapsed': stageCollapsed, 'ledger-mode': ledgerMode, 'workshop-open': workshopActive }">
     <section class="honmaru-stage" :class="{ working: stageActive }" aria-label="狐之助工作现场">
-      <div class="stage-brand"><strong>まあ丸</strong><small>{{ ledgerMode ? '纯净本丸账房' : '本丸管家' }}</small></div>
+      <div class="stage-brand"><strong>まあ丸</strong><small>{{ jpMode ? '日服本丸' : ledgerMode ? '纯净本丸账房' : '本丸管家' }}</small></div>
       <StageActors :active="stageActive" />
       <div class="stage-status">
         <small>{{ stagePlace }}</small>
@@ -579,6 +597,10 @@ watch(tab, value => {
     <header class="topbar">
       <nav class="topnav">
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
+        <template v-else-if="jpMode">
+          <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
+          <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
+        </template>
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
@@ -589,11 +611,11 @@ watch(tab, value => {
         </template>
       </nav>
       <div class="top-status">
-        <i :class="{ running: stageActive }"></i><span>{{ ledgerMode ? '纯净模式' : stageActive ? '执务中' : '待命中' }}</span>
-        <NotificationCenter v-if="!ledgerMode" @open-entry="openIncidentEntry" />
+        <i :class="{ running: stageActive }"></i><span>{{ jpMode ? '日服模式' : ledgerMode ? '纯净模式' : stageActive ? '执务中' : '待命中' }}</span>
+        <NotificationCenter v-if="!ledgerMode && !jpMode" @open-entry="openIncidentEntry" />
         <button v-if="launcherAvailable" class="launcher-return" type="button" title="返回启动器，不会停止正在运行的任务" :disabled="returningToLauncher" @click="returnToLauncher">{{ returningToLauncher ? '正在返回…' : '返回启动器' }}</button>
         <button class="theme-button" :title="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" :aria-label="theme === 'washi' ? '切换像素主题' : '切换和纸主题'" @click="toggleTheme"></button>
-        <a v-if="!ledgerMode" href="/legacy">旧版备用</a>
+        <a v-if="!ledgerMode && !jpMode" href="/legacy">旧版备用</a>
       </div>
     </header>
     <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
@@ -605,7 +627,7 @@ watch(tab, value => {
         <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
       </div>
     </nav>
-    <nav v-if="!ledgerMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
+    <nav v-if="!ledgerMode && !jpMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
       <div class="workshop-title"><strong>刀剑</strong><small>看看刀帐，调调部队</small></div>
       <div class="workshop-tabs">
         <button type="button" :class="{ active: swordView === 'archive' }" @click="swordView = 'archive'">刀帐</button>
@@ -760,8 +782,8 @@ watch(tab, value => {
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><JpSwordPanel v-if="jpMode" /><SwordArchivePanel v-else-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>
@@ -769,7 +791,7 @@ watch(tab, value => {
     <MaamaruFrame v-if="!loading && devToolsEnabled && (tab === 'devtools' || devtoolsMounted)" v-show="tab === 'devtools'" variant="single" page-class="single-layout devtools-page" @scroll="onStageScroll"><DevToolsPanel /></MaamaruFrame>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->
     <MaamaruFrame v-if="!loading && (tab === 'workflow' || workflowDraft)" v-show="tab === 'workflow'" variant="single" page-class="single-layout workflow-page" @scroll="onStageScroll"><WorkflowPanel ref="workflowPanel" v-model:draft="workflowDraft" :daily-entry="dailyEntry" :preset-jump="presetJump" :active="tab === 'workflow'" :running="running" :current="current" :stopping="stopping" :busy="startingWorkflow" :running-workflow="runningWorkflow" @started="workflowStarted" @saved="workflowSaved" @stop="stop" @office="tab = 'office'" /><p v-if="message" class="toast" @click="message = ''">{{ message }}</p></MaamaruFrame>
-    <div v-if="!ledgerMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
+    <div v-if="!ledgerMode && !jpMode && schedulerWarning" class="scheduler-warning"><strong>远征即将接管游戏</strong><span>{{ schedulerWarning }}</span><button @click="pauseScheduler">先别动游戏</button></div>
     <SwordListDrawer
       :open="advancedDrawer === 'pumpkin'"
       title="南瓜目标名单"

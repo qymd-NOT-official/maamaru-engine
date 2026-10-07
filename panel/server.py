@@ -3295,27 +3295,26 @@ async def api_revoke_sword_annotation(annotation_id: int):
 
 
 @app.get("/api/data/training/overview")
-async def api_training_overview():
+async def api_training_overview(server: str = ""):
     """练度总览：最新 training.captured 快照逐振列出 level/exp/乱舞，
     附到下一级乱舞还差的习合值与估算振数（need_swords_est 按公告口径
     100 习合值/振估算，未实测）。没有快照 404。契约见
-    docs/telemetry-data.md「练度档案（training）」。"""
-    from touken.telemetry import get_telemetry_store
+    docs/telemetry-data.md「练度档案（training）」。
+    server=jp 时读日服独立账房库。"""
     from touken.training_view import build_training_overview
-    result = build_training_overview(get_telemetry_store())
+    result = build_training_overview(_telemetry_store_for(server))
     if result is None:
         raise HTTPException(404, "还没有练度快照，先让收账跑一轮。")
     return result
 
 
 @app.get("/api/data/training/history/{serial_id}")
-async def api_training_history(serial_id: int):
+async def api_training_history(serial_id: int, server: str = ""):
     """单振刀的练度快照链时间线（training.captured，时间升序），附
     first_max_level_observed_at（链上首次观测到 level=99，不是首次达成）。
-    该编号没有快照记录 404。"""
-    from touken.telemetry import get_telemetry_store
+    该编号没有快照记录 404。server=jp 时读日服独立账房库。"""
     from touken.training_view import build_training_history
-    result = build_training_history(get_telemetry_store(), serial_id)
+    result = build_training_history(_telemetry_store_for(server), serial_id)
     if result is None:
         raise HTTPException(404, f"编号 {serial_id} 还没有练度快照记录。")
     return result
@@ -3340,14 +3339,14 @@ async def api_drop_stats(days: int = 30):
 
 
 @app.get("/api/data/training/internal-affairs")
-async def api_training_internal_affairs():
+async def api_training_internal_affairs(server: str = ""):
     """内番养成视图：最新练度快照在册的每振刀，列内番已喂的生存/侦察
     数值与平台期启发式结论（plateau_k=3，连续 K 条快照不增长；上限表
     未校准，true 只是「连续多次收账没再涨」，可能喂满也可能没喂）。
-    没有快照 404。契约见 docs/telemetry-data.md「内番养成视图」。"""
-    from touken.telemetry import get_telemetry_store
+    没有快照 404。契约见 docs/telemetry-data.md「内番养成视图」。
+    server=jp 时读日服独立账房库。"""
     from touken.training_view import build_internal_affairs
-    result = build_internal_affairs(get_telemetry_store())
+    result = build_internal_affairs(_telemetry_store_for(server))
     if result is None:
         raise HTTPException(404, "还没有练度快照，先让收账跑一轮。")
     return result

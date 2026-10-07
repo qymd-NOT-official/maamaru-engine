@@ -18,7 +18,7 @@ const emit = defineEmits<{
   'open-expedition': []
   'open-activity': [script: 'hanafuda' | 'raid', loops: number]
 }>()
-const props = defineProps<{ recoveryRunId?: string; initialSection?: 'report' | 'records' | 'planning'; pageSection?: 'report' | 'planning'; ledgerMode?: boolean; running?: boolean }>()
+const props = defineProps<{ recoveryRunId?: string; initialSection?: 'report' | 'records' | 'planning'; pageSection?: 'report' | 'planning'; ledgerMode?: boolean; running?: boolean; server?: 'cn' | 'jp' }>()
 
 const days = ref(7)
 const honmaruTab = ref<'report' | 'planning'>(props.initialSection === 'planning' ? 'planning' : 'report')
@@ -141,25 +141,11 @@ const viewItems = [
   { value: 'chart', label: '家底' },
   { value: 'records', label: '全部记录' },
 ]
-// 国服/日服账房切换；启动器的「日服」入口经 URL ?server=jp 落到这里
-const server = ref<'cn' | 'jp'>(
-  new URLSearchParams(window.location.search).get('server') === 'jp' ? 'jp' : 'cn')
-const isJp = computed(() => server.value === 'jp')
-const serverItems = [
-  { value: 'cn', label: '国服' },
-  { value: 'jp', label: '日服' },
-]
+// 面板所属服务器由 App 经 prop 传入（启动器国服/日服两个入口决定），账页内不再提供切换。
+const isJp = computed(() => props.server === 'jp')
 const jpNetlogInput = ref<HTMLInputElement | null>(null)
 const jpImportBusy = ref(false)
 const jpImportNotice = ref('')
-
-function switchServer(next: 'cn' | 'jp') {
-  if (next === server.value) return
-  server.value = next
-  ledger.value = null
-  selectedDate.value = ''
-  void load()
-}
 
 function pickJpNetlog() { jpNetlogInput.value?.click() }
 
@@ -1101,7 +1087,6 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
     <PanelHeader variant="page" :title="props.pageSection === 'planning' ? '规划' : props.pageSection === 'report' ? '仓库' : '本丸账'" :subtitle="props.pageSection === 'planning' ? '目标与接下来的安排' : props.pageSection === 'report' ? '资源家底与记录' : '账目和接下来的打算'">
       <template #actions>
         <div class="report-toolbar-actions">
-          <SegmentedControl class="report-server-switch" :model-value="server" :items="serverItems" label="服务器" @update:model-value="switchServer($event as 'cn' | 'jp')" />
           <SegmentedControl v-if="!props.pageSection" class="report-honmaru-switch" :model-value="honmaruTab" :items="honmaruItems" label="本丸页签" @update:model-value="honmaruTab = $event as 'report' | 'planning'" />
         </div>
       </template>

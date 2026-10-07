@@ -22,9 +22,9 @@ async function optionalRecord<T>(url: string): Promise<T | null> {
 }
 
 export const api = {
-  trainingOverview: () => optionalRecord<TrainingOverviewResponse>('/api/data/training/overview'),
-  trainingHistory: (id: number) => optionalRecord<TrainingHistoryResponse>(`/api/data/training/history/${id}`),
-  internalAffairs: () => optionalRecord<InternalAffairsResponse>('/api/data/training/internal-affairs'),
+  trainingOverview: (server = '') => optionalRecord<TrainingOverviewResponse>(`/api/data/training/overview${server ? `?server=${server}` : ''}`),
+  trainingHistory: (id: number, server = '') => optionalRecord<TrainingHistoryResponse>(`/api/data/training/history/${id}${server ? `?server=${server}` : ''}`),
+  internalAffairs: (server = '') => optionalRecord<InternalAffairsResponse>(`/api/data/training/internal-affairs${server ? `?server=${server}` : ''}`),
   dropStats: (days: number) => request<DropStatsResponse>(`/api/data/drop-stats?days=${days}`),
   forgeHistory: (days: number) => request<ForgeHistoryResponse>(`/api/data/forge-history?days=${days}`),
   eventPointsList: () => request<EventPointsListResponse>('/api/data/event-points'),

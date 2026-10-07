@@ -112,3 +112,40 @@ def test_cn_report_unaffected_by_jp_import(jp_store, monkeypatch):
     finally:
         cn_store.close()
         temp.cleanup()
+
+
+def _seed_jp_training(jp_store):
+    jp_store._conn().execute(
+        "INSERT INTO events(ts, run_id, script, event_type, payload) "
+        "VALUES (?, NULL, 'jp_netlog', 'training.captured', ?)",
+        (1790000000.0, json.dumps({
+            "captured_at": "2026-10-07 12:00:00",
+            "swords": [{"serial_id": 123, "sword_id": 3, "level": 50,
+                        "exp": 123456, "ranbu_level": 2,
+                        "ranbu_exp": 150}],
+        }, ensure_ascii=False)))
+    jp_store._conn().commit()
+
+
+def test_training_overview_follows_server(jp_store, monkeypatch):
+    """练度总览按 server 分流：日服库的快照只在 server=jp 时出现。"""
+    temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+    cn_store = TelemetryStore(Path(temp.name) / "telemetry.db")
+    from touken import telemetry
+    monkeypatch.setattr(
+        telemetry, "get_telemetry_store", lambda: cn_store)
+    client = _client(jp_store, monkeypatch)
+    try:
+        _seed_jp_training(jp_store)
+        jp = client.get("/api/data/training/overview?server=jp")
+        assert jp.status_code == 200
+        body = jp.json()
+        assert body["sword_count"] == 1
+        assert body["swords"][0]["serial_id"] == 123
+        assert body["swords"][0]["level"] == 50
+        # 默认（国服）库没有这条快照；日服数据漏不进国服视图
+        cn = client.get("/api/data/training/overview")
+        assert cn.status_code == 404
+    finally:
+        cn_store.close()
+        temp.cleanup()

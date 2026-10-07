@@ -98,7 +98,7 @@ main{width:min(1120px,calc(100% - 44px));margin:0 auto;padding:14px 0 12px}
 <div id="runbar" class="runbar">
 <div class="run-track"><span class="run-fox"></span></div>
 <div class="progress-row"><div class="launch-details"><div id="status" class="status"><span id="stateMark" class="mark">…</span><b id="stateTitle">正在整理启动环境</b><span id="stateCopy">稍等一下，狐之助正在确认程序、面板与模拟器。</span></div>
-<div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="startJp" class="start ledger" onclick="startApp('jp')" disabled>日服账房</button><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
+<div class="bar"><div id="barFill" class="bar-fill"></div></div><div id="launchProgress" class="launch-progress"><span>整理环境</span><span>启动面板</span><span>打开本丸</span></div></div><div class="start-actions"><button id="startJp" class="start ledger" onclick="startApp('jp')" disabled>日服本丸</button><button id="start" class="start" onclick="startApp('automation')" disabled>正在检查…</button></div></div>
 </div>
 </main>
 <script>
@@ -269,7 +269,7 @@ class Api:
             threading.Thread(target=open_panel, daemon=True).start()
             return {
                 "ok": True,
-                "message": ("日服账房已启动" if jp_mode else
+                "message": ("日服本丸已启动" if jp_mode else
                             "纯净账房已启动" if ledger_mode else "まあ丸已启动"),
             }
         except Exception as exc:
