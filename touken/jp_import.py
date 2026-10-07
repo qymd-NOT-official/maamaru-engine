@@ -112,7 +112,8 @@ def summarize(transactions: list[Transaction]) -> dict:
 def sword_roster(payload: dict) -> list[dict]:
     """从 party/list、organization/index 等响应提取全刀帐名录。
 
-    每振返回 sword_id/番号、中文名、等级、乱舞等级、习合值、疲劳。
+    字段对齐账房 training.captured 快照格式：serial_id/sword_id/
+    level/exp/ranbu_level/ranbu_exp/七项内番加成，另附中文名和疲劳。
     """
     roster = payload.get("sword")
     if not isinstance(roster, dict):
@@ -120,10 +121,11 @@ def sword_roster(payload: dict) -> list[dict]:
     inner = roster.get("sword") if isinstance(roster.get("sword"), dict) \
         else roster
     out = []
-    for entry in inner.values():
+    for key, entry in inner.items():
         if not isinstance(entry, dict) or "sword_id" not in entry:
             continue
-        out.append({
+        record = {
+            "serial_id": entry.get("serial_id") or _int_or_none(key),
             "sword_id": entry["sword_id"],
             "name": _sword_name(entry["sword_id"]),
             "level": entry.get("level"),
@@ -131,6 +133,16 @@ def sword_roster(payload: dict) -> list[dict]:
             "ranbu_level": entry.get("ranbu_level"),
             "ranbu_exp": entry.get("ranbu_exp"),
             "fatigue": entry.get("fatigue"),
-        })
-    out.sort(key=lambda r: r["sword_id"])
+        }
+        for stat in ("hp", "atk", "def", "mobile", "back", "scout", "hide"):
+            record[f"{stat}_up"] = entry.get(f"{stat}_up", 0)
+        out.append(record)
+    out.sort(key=lambda r: (r["sword_id"], r["serial_id"] or 0))
     return out
+
+
+def _int_or_none(text) -> int | None:
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None

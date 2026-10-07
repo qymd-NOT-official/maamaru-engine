@@ -33,7 +33,8 @@ _METHODS = (b"GET ", b"POST ", b"PUT ", b"DELETE ", b"HEAD ", b"PATCH ")
 @dataclass
 class Transaction:
     """一次 HTTP 往返。request_line 形如 'POST /path?x=1 HTTP/1.1'，
-    可能为 None（响应在而请求帧未捕获，例如连接复用边界）。"""
+    可能为 None（响应在而请求帧未捕获，例如连接复用边界）。
+    request_body 为 POST 原始请求体（表单/JSON 原文），无则 None。"""
 
     url: str
     method: str
@@ -41,6 +42,7 @@ class Transaction:
     request_line: str | None
     response_body: bytes
     ts: float = 0.0
+    request_body: bytes | None = None
 
     def response_json(self) -> dict | list | None:
         """响应体按 JSON 解析；非 JSON（图片/wasm 等）返回 None。"""
@@ -71,6 +73,7 @@ class _Pending:
     path: str
     line: str
     ts: float
+    body: bytes | None = None
 
 
 def parse_transactions(path: PathLike,
@@ -124,9 +127,14 @@ def parse_transactions(path: PathLike,
                     "utf-8", errors="replace")
                 break
         method, req_path = parts[0], parts[1]
+        body = None
+        if b"\r\n\r\n" in raw:
+            tail = raw.split(b"\r\n\r\n", 1)[1]
+            body = tail or None
         key = (method, f"{host}{req_path}")
         pending.setdefault(key, []).append(
-            _Pending(method, req_path, head, float(ev.get("time", 0))))
+            _Pending(method, req_path, head, float(ev.get("time", 0)),
+                     body))
 
     body_parts: dict[int, list[bytes]] = {}
     order: list[int] = []
@@ -173,6 +181,7 @@ def parse_transactions(path: PathLike,
             request_line=req.line if req else None,
             response_body=blob,
             ts=req.ts if req else 0.0,
+            request_body=req.body if req else None,
         ))
     out.sort(key=lambda tx: tx.ts)
     return out
