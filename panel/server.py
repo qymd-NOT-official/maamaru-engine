@@ -3676,6 +3676,35 @@ def api_jp_browser_probe():
     return status()
 
 
+@app.get('/api/jp-click-probe')
+def api_jp_click_probe():
+    from touken.jp_click_probe import status
+    return status()
+
+
+@app.post('/api/jp-click-probe/{action}')
+async def api_jp_click_probe_action(action: str, request: Request):
+    import asyncio
+    from touken import jp_click_probe as probe
+    try:
+        if action == 'prepare':
+            return await asyncio.to_thread(probe.prepare)
+        if action == 'cancel':
+            return probe.cancel()
+        if action == 'start':
+            body = await request.json()
+            return probe.start(body.get('x'), body.get('y'))
+        raise HTTPException(404, '没有这个测试操作')
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(400, '浏览器未连接或画面读取失败，请打开日服游戏后重试') from error
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(400, '浏览器画面读取超时或连接失败；请恢复游戏窗口后重新获取截图') from error
+
+
 @app.post('/api/jp-browser-probe')
 def api_start_jp_browser_probe():
     from touken.jp_browser_probe import start

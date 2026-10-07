@@ -166,6 +166,7 @@ export const api = {
     body: JSON.stringify({ preview_id: previewId, accept_conflicts: acceptConflicts }),
   }),
   jpListenerStatus: () => request<JpListenerStatus>('/api/jp-listener/status'),
+  jpClickProbe: (action?: 'prepare' | 'start' | 'cancel', point?: { x: number; y: number }) => request<{ state?: string; image?: string; detail?: string; click_sent?: boolean; picture_changed?: boolean }>(`/api/jp-click-probe${action ? `/${action}` : ''}`, action ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(point || {}) } : undefined),
   jpBrowserProbe: (start = false) => request<{ state: string; successful_frames?: number; failed_frames?: number; changed_frames?: number; near_black_frames?: number; last_error?: string }>('/api/jp-browser-probe', start ? { method: 'POST' } : undefined),
   jpListenerStart: () => request<JpListenerStatus>('/api/jp-listener/start', { method: 'POST' }),
   jpListenerStop: () => request<{ state: string }>('/api/jp-listener/stop', { method: 'POST' }),
