@@ -14,6 +14,14 @@ const isJp = computed(() => props.server === 'jp')
 const selected = ref<'broadcast' | 'appearance' | 'emulator' | 'connection'>(isJp.value ? 'appearance' : 'broadcast')
 const loaded = ref(false)
 const connecting = ref(false)
+const probe = ref<Awaited<ReturnType<typeof api.jpBrowserProbe>> | null>(null)
+const probeBusy = ref(false)
+async function browserProbe(start = false) {
+  probeBusy.value = true
+  try { probe.value = await api.jpBrowserProbe(start) }
+  catch (error) { message.value = error instanceof Error ? error.message : '诊断未能连接' }
+  finally { probeBusy.value = false }
+}
 const bot = ref<any>(null)
 const emu = ref<any>(null)
 const ready = computed(() => loaded.value && (isJp.value || !!(bot.value && emu.value)))
@@ -96,7 +104,13 @@ const qqBroadcastEnabled = computed({
       <div class="system-form" :class="`${selected}-form`">
         <template v-if="selected === 'appearance'"><h3>景趣</h3><label>舞台景趣<PixelControl v-model="scenery" as="select" @update:model-value="value => applyScenery(String(value))"><option v-for="option in sceneryOptions" :key="option.value" :value="option.value">{{ option.label }}</option><option value="random">随机景趣</option></PixelControl></label><p>选择后立刻预览，点「保存设置」记住选择。随机景趣每次打开面板选一张，使用期间保持不变。</p><h3>舞台小人</h3><label>刀剑男士<PixelControl :model-value="companion" as="select" @update:model-value="value => applyCompanion(String(value))"><option v-for="option in companionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></PixelControl></label><p>选择后立刻上岗，点「保存设置」记住选择。小狐狸会继续陪着他。</p><h3>庭院背景色</h3><div class="swatch-row"><button v-for="preset in backdropPresets" :key="preset.value" type="button" class="swatch" :class="{ active: backdrop === preset.value }" :style="{ background: preset.value }" :title="preset.name" :aria-label="preset.name" @click="pickBackdrop(preset.value)"></button><label class="swatch-custom"><input v-model="backdrop" type="color" @input="pickBackdrop(backdrop)" />自定义</label></div><p>点色块立刻试穿，点「保存设置」让它记住。和纸、像素两个主题共用这块背景。</p></template>
         <template v-else-if="selected === 'emulator'"><h3>模拟器</h3><label>ADB 地址<PixelControl v-model="emu.adb_address" :placeholder="emu.default_address" /></label><p>留空表示自动探测；手动填写后脚本会固定连接这个地址。MuMu 多开时端口是 16384 + 32 × 实例号（例如二号实例是 16416）。改动在下次运行脚本时生效。</p></template>
-        <template v-else-if="selected === 'connection'"><h3>日服连接</h3><p>打开日服浏览器，进入游戏后自动更新家底、刀账与本丸近况。这里只更新数据，不会替你出阵或消耗资源。</p><button class="primary" :disabled="connecting" @click="connect">{{ connecting ? '连接中…' : '打开日服浏览器' }}</button></template>
+        <template v-else-if="selected === 'connection'"><h3>日服连接</h3><p>打开日服浏览器，进入游戏后自动更新家底、刀账与本丸近况。这里只更新数据，不会替你出阵或消耗资源。</p><button class="primary" :disabled="connecting" @click="connect">{{ connecting ? '连接中…' : '打开日服浏览器' }}</button>
+          <h3>熄屏画面诊断</h3><p>先进入游戏本丸，再开始诊断。接电后放开鼠标键盘，让屏幕按你的设置自行关闭，约 7 分钟后回来查看结果。期间不点击游戏、不改电源设置、不保存截图。</p>
+          <button class="secondary" :disabled="probeBusy || probe?.state === 'running'" @click="browserProbe(true)">开始画面诊断</button>
+          <button class="secondary" :disabled="probeBusy" @click="browserProbe(false)">查看诊断结果</button>
+          <p v-if="probe" role="status">{{ probe.state === 'running' ? '诊断进行中' : probe.state === 'done' ? '诊断已结束' : '尚未开始' }} · 成功截图 {{ probe.successful_frames ?? 0 }} 次 · 失败 {{ probe.failed_frames ?? 0 }} 次 · 画面变化 {{ probe.changed_frames ?? 0 }} 次 · 近黑画面 {{ probe.near_black_frames ?? 0 }} 次</p>
+          <p v-if="probe?.last_error">{{ probe.last_error }}</p><p>静止画面不等于卡死，画面变化也不代表操作成功。此诊断不检测屏幕是否真的关闭、不测试点击或拖动，不能单独证明熄屏自动化可用。</p>
+        </template>
         <template v-else><h3>运行播报</h3>
           <label class="check-label"><input v-model="qqBroadcastEnabled" type="checkbox" />QQ 播报</label>
           <div v-if="qqBroadcastEnabled" class="broadcast-channel-settings"><QQStatus /><label>协议端<PixelControl v-model="bot.qq.provider" as="select"><option value="napcat">NapCat</option><option value="snowluma">SnowLuma</option><option value="custom">其他 OneBot 实现</option></PixelControl></label><label>消息接口<PixelControl v-model="bot.qq.snowluma_http" /></label><label>管理页<PixelControl v-model="bot.qq.snowluma_gui_http" /></label><label>接收播报的 QQ<PixelControl :model-value="(bot.qq.admin_qq || []).join(', ')" @update:model-value="bot.qq.admin_qq = $event" /></label><p>QQ 配置修改后需要重启まあ丸。</p></div>

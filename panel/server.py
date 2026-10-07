@@ -3670,6 +3670,18 @@ async def api_jp_listener_status():
     return jp_listener.listener_status()
 
 
+@app.get('/api/jp-browser-probe')
+def api_jp_browser_probe():
+    from touken.jp_browser_probe import status
+    return status()
+
+
+@app.post('/api/jp-browser-probe')
+def api_start_jp_browser_probe():
+    from touken.jp_browser_probe import start
+    return start()
+
+
 @app.post("/api/jp-listener/start")
 async def api_jp_listener_start():
     """开始听包：日服浏览器没在跑就用专用配置档拉一个起来。

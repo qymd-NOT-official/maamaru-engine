@@ -166,6 +166,7 @@ export const api = {
     body: JSON.stringify({ preview_id: previewId, accept_conflicts: acceptConflicts }),
   }),
   jpListenerStatus: () => request<JpListenerStatus>('/api/jp-listener/status'),
+  jpBrowserProbe: (start = false) => request<{ state: string; successful_frames?: number; failed_frames?: number; changed_frames?: number; near_black_frames?: number; last_error?: string }>('/api/jp-browser-probe', start ? { method: 'POST' } : undefined),
   jpListenerStart: () => request<JpListenerStatus>('/api/jp-listener/start', { method: 'POST' }),
   jpListenerStop: () => request<{ state: string }>('/api/jp-listener/stop', { method: 'POST' }),
   manualInventory: (limit = 200) => request<{ schema_version: number; items: ManualInventory[] }>(`/api/data/manual-inventory?limit=${limit}`),
