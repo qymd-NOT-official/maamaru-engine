@@ -9,7 +9,8 @@ import HonmaruClock from './HonmaruClock.vue'
 import { homeMoments, remainingTime } from './homeClockModel'
 import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
-const props = defineProps<{ activity: any; busy: boolean }>()
+const props = defineProps<{ activity: any; busy: boolean; server?: string }>()
+const isJp = computed(() => props.server === 'jp')
 const emit = defineEmits<{ office: []; report: []; records: []; planning: []; resumeRaid: [runId: string] }>()
 const emptyProfile = (): HonmaruProfile => ({ honmaru_name: '', saniwa_name: '', province: '', attendant: '', motto: '', joined_on: '', avatar: '' })
 const profile = ref<HonmaruProfile>(emptyProfile())
@@ -23,7 +24,13 @@ const dayPlan = ref<DayTimeline | null>(null)
 const interruptedRaids = computed(() => dayPlan.value?.conductor.blocks.filter(block => block.recovery && block.run_id) || [])
 let dayPlanTimer: number | undefined
 async function refreshDayPlan() {
-  try { dayPlan.value = await api.dayTimeline() } catch { /* keep the last known arrangement */ }
+  try {
+    if (isJp.value) {
+      loadErrors.value = await loadSummaries()
+      return
+    }
+    dayPlan.value = await api.dayTimeline()
+  } catch { /* keep the last known arrangement */ }
 }
 const journalEvents = ref<any[]>([])
 const swordDepartures = ref<any[]>([])
@@ -63,7 +70,7 @@ const welcome = computed(() => profile.value.saniwa_name ? `${profile.value.sani
 const active = computed(() => props.busy || props.activity?.active)
 const currentActivityTitle = computed(() => activityTitle(props.activity))
 const currentActivityStep = computed(() => activityStep(props.activity))
-const homeName = computed(() => profile.value.honmaru_name || '我的本丸')
+const homeName = computed(() => profile.value.honmaru_name || (isJp.value ? '日服本丸' : '我的本丸'))
 const entries = computed(() => {
   const personal = notes.value.map(note => ({ key: `note-${note.id}`, ts: note.created_at, note, run: null as any, post: null as JournalPost | null }))
   const work = filter.value === 'notes' ? [] : runs.value.map(run => ({ key: `run-${run.run_id}`, ts: Number(run.ended_at || run.started_at), note: null as HonmaruNote | null, run, post: null as JournalPost | null }))
@@ -113,7 +120,11 @@ async function syncSituation() {
   syncingSituation.value = true
   situationError.value = ''
   try {
-    situation.value = (await api.refreshHonmaruSituation()).situation
+    if (isJp.value) {
+      await api.jpListenerStart()
+      notice.value = '日服浏览器已打开，进入本丸后会自动更新近况。'
+    }
+    situation.value = (await api.refreshHonmaruSituation(props.server)).situation
     loadErrors.value = await loadSummaries()
   }
   catch (error) { situationError.value = errorMessage(error) }
@@ -176,7 +187,7 @@ function errorMessage(error: unknown) { return error instanceof Error ? error.me
 const executingToday = ref(false)
 const todayExecutionMessage = ref('')
 async function executeToday() {
-  if (executingToday.value) return
+  if (isJp.value || executingToday.value) return
   executingToday.value = true
   todayExecutionMessage.value = ''
   try {
@@ -191,13 +202,25 @@ async function executeToday() {
 }
 
 async function loadHome() {
-  const data = await api.honmaruHome()
+  const data = await api.honmaruHome(props.server)
   profile.value = { ...emptyProfile(), ...data.profile }
   notes.value = data.notes
   homeReady.value = true
 }
 async function loadSummaries() {
-  const jobs = [
+  const jobs = isJp.value ? [
+    { label: '近期记录', run: async () => { runs.value = (await api.dataRuns(12, undefined, undefined, undefined, undefined, 'jp')).items } },
+    { label: '本丸收获', run: async () => {
+      const from = Date.parse(`${today.value}T00:00:00+08:00`) / 1000
+      journalEvents.value = (await api.dataEvents(1000, undefined, from - 6 * 86400, from + 86400, 'jp')).items
+    } },
+    { label: '刀剑整理', run: async () => { swordDepartures.value = (await api.swordArchive('jp')).sword_departures || [] } },
+    { label: '家底', run: async () => {
+      const stock = await api.clientInventory('jp')
+      inventory.value = { resources: Object.fromEntries(Object.entries(stock.resources).map(([name, reading]) => [name, reading.count])) }
+    } },
+    { label: '游戏近况', run: async () => { situation.value = (await api.honmaruSituation('jp')).situation } },
+  ] : [
     { label: '近期记录', run: async () => { runs.value = (await api.dataRuns(12)).items } },
     { label: '规划', run: async () => { planning.value = await api.planning() } },
     { label: '今日安排', run: async () => { dayPlan.value = await api.dayTimeline() } },
@@ -253,7 +276,7 @@ async function saveProfile() {
   savingProfile.value = true
   formError.value = ''
   try {
-    profile.value = (await api.saveHonmaruProfile(draft.value)).profile
+    profile.value = (await api.saveHonmaruProfile(draft.value, props.server)).profile
     editingProfile.value = false
     notice.value = '档案收好了。'
   } catch (error) { formError.value = errorMessage(error) }
@@ -270,7 +293,7 @@ async function saveNote() {
   savingNote.value = true
   formError.value = ''
   try {
-    const { note } = await api.saveHonmaruNote(noteBody.value, noteId.value)
+    const { note } = await api.saveHonmaruNote(noteBody.value, noteId.value, props.server)
     const index = notes.value.findIndex(item => item.id === note.id)
     if (index >= 0) notes.value[index] = note
     else notes.value.unshift(note)
@@ -300,6 +323,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
       <dl class="profile-facts">
         <div><dt>审神者</dt><dd>{{ profile.saniwa_name || '还没留名' }}</dd></div>
         <div><dt>属国</dt><dd>{{ profile.province || '待填写' }}</dd></div>
+        <div><dt>近侍</dt><dd :title="situation?.secretary.observed_at ? situationTime(situation.secretary.observed_at) : ''">{{ situation?.secretary.name || profile.attendant || '待同步' }}</dd></div>
         <div><dt>就任日</dt><dd>{{ profile.joined_on?.replaceAll('-', '.') || '待填写' }}</dd></div>
       </dl>
       <button type="button" class="home-text-button profile-edit" :disabled="!homeReady" @click="editProfile">{{ profile.saniwa_name ? '整理我的档案' : '写下我的档案' }} <span aria-hidden="true">↗</span></button>
@@ -307,7 +331,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
 
     <section class="honmaru-journal" aria-label="本丸动态">
       <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
-      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><div class="home-office-actions"><button v-if="!active" type="button" class="home-primary" :disabled="executingToday || !dayPlan?.conductor.available" @click="executeToday">{{ executingToday ? '正在接班…' : '一键执行今日安排' }}</button><button v-if="active" type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div></div>
+      <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : isJp ? '日服本丸 · 数据自动更新' : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><div class="home-office-actions"><button v-if="!active && !isJp" type="button" class="home-primary" :disabled="executingToday || !dayPlan?.conductor.available" @click="executeToday">{{ executingToday ? '正在接班…' : '一键执行今日安排' }}</button><button v-if="active" type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div></div>
       <div v-for="block in interruptedRaids" :key="block.run_id" class="home-raid-reminder" role="status">
         <span>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</span>
         <button type="button" class="home-text-button" @click="emit('resumeRaid', block.run_id!)">去继续 →</button>
@@ -328,15 +352,16 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     </section>
 
     <aside class="honmaru-keepsakes" aria-label="小报与账房">
-      <HonmaruClock :timeline="dayPlan" :now="now" @open="emit('planning')" />
+      <HonmaruClock :timeline="dayPlan" :now="now" :situation="isJp ? situation : null" :read-only="isJp" @open="isJp ? emit('report') : emit('planning')" />
       <PaperCard variant="dashboard" class="home-brief" aria-label="本丸近况">
         <header class="brief-meta"><span>狐之助小报</span><button type="button" class="home-text-button" :disabled="syncingSituation || active" @click="syncSituation">{{ syncingSituation ? '读取中…' : '同步近况' }}</button></header>
         <p v-if="situationError" class="home-load-error" role="alert">{{ situationError }}</p>
-        <p v-if="!situation" class="home-muted">进入本丸后，同步近况。</p>
+        <p v-if="isJp && situation" class="home-muted">近况读取于 {{ situation.parties_observed_at || situation.secretary.observed_at || '时间待确认' }}</p>
+        <p v-if="!situation" class="home-muted">{{ isJp ? '打开日服浏览器，进入本丸后更新近况。' : '进入本丸后，同步近况。' }}</p>
         <div v-else-if="situationMoments.length" class="situation-moments">
           <div v-for="moment in situationMoments" :key="moment.key" class="situation-moment" :title="`${gameTime(moment.time)} · ${situationTime(moment.observedAt)}`"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ remainingTime(moment.time, now) }}</span></div>
         </div>
-        <p v-else class="home-muted">暂无远征、锻刀或手入倒计时。</p>
+        <p v-else class="home-muted">已同步记录中没有远征、锻刀或手入倒计时。</p>
       </PaperCard>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>
@@ -344,14 +369,14 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
           <h2><span aria-hidden="true">⚑</span> {{ nearestEvent.name }}</h2>
           <dl class="planning-rows"><div><dt>{{ eventMomentLabel(nearestEvent) }}</dt><dd><span class="pencil-mark">{{ eventMoment(nearestEvent) }}</span></dd></div><div><dt>预算</dt><dd :class="{ 'budget-ready': nearestEvent.budget?.sufficient === true }">{{ eventBudget(nearestEvent) }}</dd></div><div v-if="nearestEvent.budget?.tama_current != null"><dt>{{ nearestEvent.budget.currency || '活动点数' }}</dt><dd>{{ fmt(nearestEvent.budget.tama_current) }}{{ nearestEvent.budget.tama_target != null ? ` / ${fmt(nearestEvent.budget.tama_target)}` : '' }}</dd></div><div v-if="activityPlan"><dt>今天完成</dt><dd>{{ activityPlan.completed_today }} 圈</dd></div><div v-if="activityPlan"><dt>接下来建议</dt><dd>{{ activityPlan.target_runs }} 圈</dd></div></dl>
         </template>
-        <template v-else><h2><span aria-hidden="true">⚑</span> 暂无近期活动</h2><p class="planning-note">有新日程时，会在这里提醒你。</p></template>
-        <button type="button" class="home-text-button" @click="emit('planning')">去规划查看 →</button>
+        <template v-else><h2><span aria-hidden="true">⚑</span> {{ isJp ? '日服活动日程待同步' : '暂无近期活动' }}</h2><p class="planning-note">{{ isJp ? '这里只展示日服日程，不套用国服活动安排。' : '有新日程时，会在这里提醒你。' }}</p></template>
+        <button type="button" class="home-text-button" @click="isJp ? emit('report') : emit('planning')">{{ isJp ? '去账房查看 →' : '去规划查看 →' }}</button>
       </section>
       <section class="home-planning-card home-finances">
         <h2>家底</h2>
         <p class="finance-lead">小判 <strong>{{ fmt(recentKoban) }}</strong></p>
         <dl class="finance-resources"><div v-for="name in ['木炭', '玉钢', '冷却材', '砥石']" :key="name"><dt>{{ name }}</dt><dd>{{ resource(name) }}</dd></div></dl>
-        <details class="finance-details"><summary>资源与预留</summary><dl><div v-for="name in resourceNames.filter(name => !['小判', '木炭', '玉钢', '冷却材', '砥石'].includes(name))" :key="name"><dt>{{ name === '加速符' ? '加速符·极' : name }}</dt><dd>{{ resource(name) }}</dd></div></dl><p v-if="kobanWatch?.reserved" class="planning-note">预留 {{ fmt(kobanWatch.reserved) }} 小判 · 可安排 {{ fmt(kobanWatch.available) }}</p><p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀可锻 {{ fmt(resourceWatch.forge_capacity) }} 炉</p></details>
+        <details class="finance-details"><summary>资源与预留</summary><dl><div v-for="name in resourceNames.filter(name => !['小判', '木炭', '玉钢', '冷却材', '砥石'].includes(name))" :key="name"><dt>{{ name === '加速符' && !isJp ? '加速符·极' : name }}</dt><dd>{{ resource(name) }}</dd></div></dl><p v-if="kobanWatch?.reserved" class="planning-note">预留 {{ fmt(kobanWatch.reserved) }} 小判 · 可安排 {{ fmt(kobanWatch.available) }}</p><p v-if="resourceWatch?.forge_capacity != null" class="finance-forge">普通锻刀可锻 {{ fmt(resourceWatch.forge_capacity) }} 炉</p></details>
         <div class="finance-links"><button type="button" class="home-text-button" @click="emit('report')">去账房 →</button></div>
       </section>
     </aside>

@@ -30,13 +30,13 @@ export const api = {
   eventPointsList: () => request<EventPointsListResponse>('/api/data/event-points'),
   eventPoints: (id: string) => request<EventPointsTimelineResponse>(`/api/data/event-points?event_id=${encodeURIComponent(id)}`),
   swordJournal: (id: number, server = '') => optionalRecord<SwordJournalResponse>(`/api/data/sword-journal/${id}?server=${server}`),
-  honmaruHome: () => request<HonmaruHomeData>('/api/honmaru-home'),
-  honmaruSituation: () => request<{ situation: HonmaruSituation | null }>('/api/honmaru-home/situation'),
-  refreshHonmaruSituation: () => request<{ situation: HonmaruSituation }>('/api/honmaru-home/situation/refresh', { method: 'POST' }),
-  saveHonmaruProfile: (profile: HonmaruProfile) => request<{ profile: HonmaruProfile }>('/api/honmaru-home/profile', {
+  honmaruHome: (server = '') => request<HonmaruHomeData>(`/api/honmaru-home?server=${server}`),
+  honmaruSituation: (server = '') => request<{ situation: HonmaruSituation | null }>(`/api/honmaru-home/situation?server=${server}`),
+  refreshHonmaruSituation: (server = '') => request<{ situation: HonmaruSituation | null }>(`/api/honmaru-home/situation/refresh?server=${server}`, { method: 'POST' }),
+  saveHonmaruProfile: (profile: HonmaruProfile, server = '') => request<{ profile: HonmaruProfile }>(`/api/honmaru-home/profile?server=${server}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile),
   }),
-  saveHonmaruNote: (body: string, id?: string) => request<{ note: HonmaruNote }>(`/api/honmaru-home/notes${id ? `/${encodeURIComponent(id)}` : ''}`, {
+  saveHonmaruNote: (body: string, id?: string, server = '') => request<{ note: HonmaruNote }>(`/api/honmaru-home/notes${id ? `/${encodeURIComponent(id)}` : ''}?server=${server}`, {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
   }),
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),

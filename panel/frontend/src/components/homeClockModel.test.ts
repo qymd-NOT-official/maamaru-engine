@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type { DayTimeline, HonmaruSituation } from '../types'
-import { clockSegments, homeMoments, remainingTime } from './homeClockModel'
+import { clockSegments, homeMoments, remainingTime, situationSegments } from './homeClockModel'
 
 const now = Date.parse('2026-10-03T23:00:00+08:00')
 describe('home countdowns and clock', () => {
+  it('draws JP observed remaining time without importing a task plan or completed timers', () => {
+    const state = { parties: [{ party_no: 2, finished_at: '2026-10-04 01:00:00' }],
+      kiwame_return: [], forge_slots: [{ slot_no: 1, finished_at: '2026-10-03 22:00:00' }],
+      duty: { finished_at: '2026-10-04 02:00:00' } } as unknown as HonmaruSituation
+    expect(situationSegments(state, now)).toEqual([
+      { key: 'party-2', start: 1380, duration: 120, lane: 'outer', tone: 'expedition', label: '二队远征归来' },
+      { key: 'duty', start: 1380, duration: 180, lane: 'inner', tone: 'task', label: '内番完成' },
+    ])
+    expect(situationSegments(null, now)).toEqual([])
+  })
   it('keeps every valid timer with readable names and does not claim collection', () => {
     const state = { parties: [{ party_no: 5, finished_at: '2026-10-04 01:00:00' }],
       kiwame_return: [], forge_slots: [{ slot_no: 3, finished_at: '2026-10-03 22:00:00' }],

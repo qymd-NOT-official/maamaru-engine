@@ -352,12 +352,12 @@ function migrateParams(script: string, value: ScriptParams): ScriptParams {
 async function load() {
   loading.value = true
   try {
-    // 日服入口：不读国服脚本/模式，只取主题，落点在仓库页。
+    // 日服入口：不读国服脚本/模式，只取主题，落点在我的本丸。
     if (jpMode) {
       const saved = await api.settings()
       theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
       applyTheme()
-      tab.value = 'report'
+      tab.value = 'home'
       scripts.value = {}
       params.value = {}
       return
@@ -368,7 +368,7 @@ async function load() {
       const saved = await api.settings()
       theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
       applyTheme()
-      tab.value = 'report'
+      tab.value = 'home'
       scripts.value = {}
       params.value = {}
       return
@@ -597,6 +597,7 @@ watch(tab, value => {
       <nav class="topnav">
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else-if="jpMode">
+          <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
         </template>
@@ -704,7 +705,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :activity="dashboardRun" :busy="running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" @resume-raid="openRaidRecovery" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :server="appServer" :activity="jpMode ? null : dashboardRun" :busy="jpMode ? false : running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" @resume-raid="openRaidRecovery" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">

@@ -33,7 +33,7 @@ from touken.diagnostics import (
     build_diagnostic_bundle, create_diagnostic_bundle, reveal_file_in_explorer,
 )
 from touken.runtime_paths import (
-    BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, DEBUG_DIR, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR,
+    BACKUP_DIR, BUNDLE_ROOT, CONFIG_PATH, DEBUG_DIR, LOG_DIR, PANEL_CONFIG_PATH, RESOURCE_DIR, STATUS_DIR, JP_DATA_DIR,
     ensure_runtime_data,
 )
 
@@ -60,7 +60,7 @@ _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 # ── App ──
 app = FastAPI(title="まあ丸 近侍面板")
-app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json"))
+app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json", JP_DATA_DIR / "state" / "honmaru_home.json"))
 app.include_router(create_template_lab_router())
 app.include_router(create_flow_lab_router())
 _server_mode = threading.local()
@@ -3186,7 +3186,12 @@ async def api_latest_sword_inventory():
 
 
 @app.get("/api/honmaru-home/situation")
-def api_home_situation():
+def api_home_situation(server: str = ""):
+    if server not in ("", "cn", "jp"):
+        raise HTTPException(400, "本丸来源不正确。")
+    if server == "jp":
+        from touken.jp_home import current_situation
+        return {"situation": current_situation(_telemetry_store_for(server))}
     path = STATUS_DIR / "youzu_home_situation.json"
     if not path.exists():
         return {"situation": None}
@@ -3214,7 +3219,11 @@ def api_journal_avatar(sword_id: int):
 
 
 @app.post("/api/honmaru-home/situation/refresh")
-def api_refresh_home_situation():
+def api_refresh_home_situation(server: str = ""):
+    if server not in ("", "cn", "jp"):
+        raise HTTPException(400, "本丸来源不正确。")
+    if server == "jp":
+        return api_home_situation(server)
     from touken import youzu_log
     if get_runner().is_running:
         raise HTTPException(409, "执务进行中，收工后再同步近况。")

@@ -23,6 +23,17 @@ export function remainingTime(time: string, now: number) {
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+export function situationSegments(state: HonmaruSituation | null, now: number) {
+  const day = new Date(now).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+  const start = Date.parse(`${day}T00:00:00+08:00`)
+  return homeMoments(state, now).filter(moment => !moment.done).map(moment => ({
+    key: moment.key, start: (now - start) / 60000,
+    duration: Math.min(1440, (gameStamp(moment.time) - now) / 60000),
+    lane: moment.key.startsWith('party-') ? 'outer' : 'inner',
+    tone: moment.key.startsWith('party-') ? 'expedition' : 'task', label: moment.label,
+  }))
+}
+
 export function clockSegments(data: DayTimeline | null, now: number) {
   if (!data) return []
   const minutes = (stamp: number) => (stamp - data.day_start) / 60

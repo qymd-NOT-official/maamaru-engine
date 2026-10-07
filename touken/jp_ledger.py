@@ -121,6 +121,12 @@ class JpLedgerSession:
             else:
                 stats["dedup_snapshots"] += 1
 
+        from .jp_home import home_observation
+        if jp_import.endpoint_path(tx.path or tx.url) in ("/login/start", "/home/index"):
+            observation = home_observation(payload)
+            if observation:
+                _record(self.store, ts, "home.observed", observation, self.script)
+
         path = jp_import.endpoint_path(tx.path or tx.url)
         roster = jp_import.sword_roster(payload)
         # 已核对的所持列表决定成员；其他画面的读数只更新单振状态。

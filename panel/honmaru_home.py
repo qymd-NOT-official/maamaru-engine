@@ -98,9 +98,17 @@ class HomeStore:
             return note
 
 
-def create_home_router(path: Path):
+def create_home_router(path: Path, jp_path: Path | None = None):
     router = APIRouter(prefix="/api/honmaru-home")
     store = HomeStore(path)
+    jp_store = HomeStore(jp_path) if jp_path is not None else None
+
+    def selected(server):
+        if server in ("", "cn"):
+            return store
+        if server == "jp" and jp_store is not None:
+            return jp_store
+        raise HTTPException(400, "本丸来源不正确。")
 
     def call(action, *args):
         try:
@@ -113,21 +121,21 @@ def create_home_router(path: Path):
             raise HTTPException(500, "本丸档案暂时无法保存，请检查数据目录。") from exc
 
     @router.get("")
-    def read_home():
-        return call(store.read)
+    def read_home(server: str = ""):
+        return call(selected(server).read)
 
     @router.put("/profile")
-    async def save_profile(request: Request):
-        return {"profile": call(store.save_profile, await request.json())}
+    async def save_profile(request: Request, server: str = ""):
+        return {"profile": call(selected(server).save_profile, await request.json())}
 
     @router.post("/notes")
-    async def add_note(request: Request):
+    async def add_note(request: Request, server: str = ""):
         body = await request.json()
-        return {"note": call(store.save_note, body.get("body") if isinstance(body, dict) else None)}
+        return {"note": call(selected(server).save_note, body.get("body") if isinstance(body, dict) else None)}
 
     @router.put("/notes/{note_id}")
-    async def edit_note(note_id: str, request: Request):
+    async def edit_note(note_id: str, request: Request, server: str = ""):
         body = await request.json()
-        return {"note": call(store.save_note, body.get("body") if isinstance(body, dict) else None, note_id)}
+        return {"note": call(selected(server).save_note, body.get("body") if isinstance(body, dict) else None, note_id)}
 
     return router
