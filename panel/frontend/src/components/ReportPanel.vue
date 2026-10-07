@@ -154,11 +154,11 @@ let jpListenerTimer = 0
 const jpListenerOn = computed(() => jpListener.value?.state === 'listening' || jpListener.value?.state === 'waiting_browser')
 const jpListenerText = computed(() => {
   const st = jpListener.value
-  if (!st || st.state === 'off') return '点右边按钮开一个日服专用浏览器（第一次要在里面登一次 DMM），之后你玩你的，账自己进。'
+  if (!st || st.state === 'off') return '听包只听得见从这个按钮打开的日服专用浏览器：点右边开一个（第一次要在里面登一次 DMM），之后就在那个窗口里玩，账自己进。在你平时的浏览器里玩是听不到的。'
   if (st.state === 'starting') return '正在竖耳朵……'
-  if (st.state === 'waiting_browser') return '在等日服浏览器上线；它没开的话点右边按钮拉一个起来。'
+  if (st.state === 'waiting_browser') return '在等日服浏览器上线；它没开的话点右边按钮拉一个起来。记得要在专用窗口里玩才算数。'
   if (st.state === 'error') return `听包翻车：${st.detail}`
-  return `正在听包 · 已入账 ${st.events_written} 条（听到 ${st.transactions} 份报文）`
+  return `正在听包 · 已入账 ${st.events_written} 条（听到 ${st.transactions} 份报文）。要在专用浏览器窗口里玩才算数。`
 })
 
 async function refreshJpListener() {
