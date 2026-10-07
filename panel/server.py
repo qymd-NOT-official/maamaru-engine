@@ -3473,6 +3473,8 @@ async def api_client_inventory(server: str = ""):
     from touken.telemetry import get_telemetry_store
     data = _telemetry_store_for(server).client_item_inventory()
     if server == "jp":
+        from touken.jp_items import inventory
+        data['items'] = inventory(_telemetry_store_for(server))
         for reading in data["resources"].values():
             reading.pop("source", None)
     return data

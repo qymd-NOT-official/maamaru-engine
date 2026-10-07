@@ -157,7 +157,7 @@ export interface ClientAsset {
   artifact_serial_id2?: string | number
 }
 export interface ClientInventory {
-  items: Record<string, { count: number; observed_at: number }>
+  items: Record<string, { count: number; observed_at: number; item_id?: string; expires_at?: string }>
   resources: Record<string, { count: number; observed_at: number; source?: 'screen' }>
   koban_reserve: number | null
   assets: { equip?: ClientAsset[]; artifact?: ClientAsset[]; sword?: ClientAsset[]; observed_at: number } | null

@@ -84,6 +84,7 @@ class JpLedgerSession:
                       "dedup_snapshots": 0}
         self._last_resource: tuple | None = None
         self._last_roster_fp: tuple | None = None
+        self._last_items = None
 
     def feed_all(self, transactions: list[Transaction]) -> dict:
         for tx in sorted(transactions, key=lambda t: t.ts):
@@ -109,6 +110,13 @@ class JpLedgerSession:
             return
 
         snap = _resource_snapshot(payload, card)
+        from .jp_items import item_reading
+        items = item_reading(payload)
+        if items:
+            fingerprint = json.dumps(items, sort_keys=True)
+            if fingerprint != self._last_items:
+                _record(self.store, ts, 'items.observed', {'items': items}, self.script)
+                self._last_items = fingerprint
         if snap is not None:
             key = tuple(sorted(snap.items()))
             if key != self._last_resource:

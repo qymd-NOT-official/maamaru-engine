@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StockInventory from './report/StockInventory.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { HumanReport, InventoryGap, JpListenerStatus, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger, ScriptParams } from '../types'
@@ -1160,6 +1161,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             </article>
           </div>
         </section>
+        <StockInventory v-if="!props.ledgerMode" :stock="clientStock" />
         <section class="resource-trend">
           <header>
             <SegmentedControl v-if="!props.ledgerMode" :model-value="days" :items="rangeItems" label="趋势统计时间范围" @update:model-value="load(Number($event))" />

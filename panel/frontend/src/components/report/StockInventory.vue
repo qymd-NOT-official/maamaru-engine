@@ -29,7 +29,7 @@ const groups = computed(() => {
   const items = Object.entries(props.stock?.items || {}).filter(([, v]) => v.count > 0)
   const charmNames = ['御守', '御守·极', '御守·桃']
   return [
-    { title: '道具', rows: items.filter(([n]) => !charmNames.includes(n)).map(([name, v]) => ({ name, count: v.count, detail: [eventTime(v.observed_at)] })), known: !!props.stock && Object.keys(props.stock.items).length > 0 },
+    { title: '道具', rows: items.filter(([n]) => !charmNames.includes(n)).map(([name, v]) => ({ name, count: v.count, detail: [eventTime(v.observed_at), ...(v.expires_at ? [`期限 ${v.expires_at}`] : [])] })), known: !!props.stock && Object.keys(props.stock.items).length > 0 },
     { title: '刀装', rows: equipment((assets?.equip || []).filter(r => r.kind === 'troop')), known: !!assets?.equip },
     { title: '马匹', rows: equipment((assets?.equip || []).filter(r => r.kind === 'horse')), known: !!assets?.equip },
     { title: '宝物', rows: equipment(assets?.artifact || [], true), known: !!assets?.artifact },
