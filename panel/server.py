@@ -4136,21 +4136,33 @@ async def api_save_chat_config(request: Request):
 _SETTINGS_FILE = STATUS_DIR / "panel_settings.json"
 
 
-def _load_panel_settings() -> dict:
+def _panel_settings_path(server: str = ""):
+    if server in ("", "cn"):
+        return _SETTINGS_FILE
+    if server == "jp":
+        return JP_DATA_DIR / "state" / "panel_settings.json"
+    raise HTTPException(400, "没有这个本丸")
+
+
+def _load_panel_settings(server: str = "") -> dict:
+    path = _panel_settings_path(server)
     try:
-        if _SETTINGS_FILE.exists():
-            return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
 
 
-def _save_panel_settings(data: dict):
-    _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+def _save_panel_settings(data: dict, server: str = ""):
+    path = _panel_settings_path(server)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if server == "jp" and path.exists():
+        path.with_suffix(path.suffix + ".bak").write_bytes(path.read_bytes())
     data["_saved_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    temporary = _SETTINGS_FILE.with_suffix(_SETTINGS_FILE.suffix + ".tmp")
+    temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(_SETTINGS_FILE)
+    temporary.replace(path)
 
 
 @app.get("/api/gameplay-settings/{script}")
@@ -4181,16 +4193,20 @@ async def api_save_gameplay_settings(script: str, request: Request):
 
 
 @app.get("/api/saved-settings")
-async def api_get_saved_settings():
+async def api_get_saved_settings(server: str = ""):
     """获取服务器端保存的面板设置（所有脚本的参数记忆）"""
-    return _load_panel_settings()
+    return _load_panel_settings(server)
 
 
 @app.post("/api/saved-settings")
-async def api_save_settings(request: Request):
+async def api_save_settings(request: Request, server: str = ""):
     """保存面板设置到服务器端（合并式：脚本参数、主题各存各的，互不覆盖）"""
     body = await request.json()
-    existing = _load_panel_settings()
+    existing = _load_panel_settings(server)
+    if not isinstance(body, dict):
+        raise HTTPException(400, "设置格式不正确")
+    if server == "jp" and set(body) - {"theme", "scenery", "companion", "backdrop"}:
+        raise HTTPException(400, "日服暂不支持自动执行设置")
     existing.pop("_saved_at", None)
     # body 格式: {"params": {"daily": {...}, ...}, "theme": "pixel"}
     params = body.get("params")
@@ -4209,7 +4225,7 @@ async def api_save_settings(request: Request):
     backdrop = body.get("backdrop")
     if isinstance(backdrop, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", backdrop):
         existing["backdrop"] = backdrop.lower()
-    _save_panel_settings(existing)
+    _save_panel_settings(existing, server)
     return {"ok": True}
 
 

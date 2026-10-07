@@ -26,8 +26,7 @@ import SwordArchivePanel from './components/SwordArchivePanel.vue'
 import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
-// 日服入口（启动器带 ?server=jp 打开）：整面板只留仓库/刀剑两个页签，
-// 国服自动化（功能、规划、设置、排班警告、任务轮询）一概不出现；切服回启动器换入口。
+// 日服入口共用首页、仓库、刀剑和外观设置；不启用国服自动执行。
 const jpMode = appServer === 'jp'
 
 const scripts = ref<Record<string, ScriptInfo>>({})
@@ -354,9 +353,12 @@ async function load() {
   try {
     // 日服入口：不读国服脚本/模式，只取主题，落点在我的本丸。
     if (jpMode) {
-      const saved = await api.settings()
+      const saved = await api.settings('jp')
       theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
       applyTheme()
+      applyBackdrop(saved.backdrop)
+      applyScenery(saved.scenery)
+      applyCompanion(saved.companion)
       tab.value = 'home'
       scripts.value = {}
       params.value = {}
@@ -411,7 +413,7 @@ function applyBackdrop(color?: string) {
   if (color && /^#[0-9a-fA-F]{6}$/.test(color)) document.body.style.setProperty('--space-backdrop', color)
   else document.body.style.removeProperty('--space-backdrop')
 }
-async function toggleTheme() { theme.value = theme.value === 'washi' ? 'pixel' : 'washi'; applyTheme(); await api.saveTheme(theme.value) }
+async function toggleTheme() { theme.value = theme.value === 'washi' ? 'pixel' : 'washi'; applyTheme(); await api.saveTheme(theme.value, appServer) }
 type LauncherWindow = Window & { pywebview?: { api?: { return_to_launcher?: () => Promise<{ ok: boolean; message?: string }> } } }
 function detectLauncherBridge() {
   launcherAvailable.value = typeof (window as LauncherWindow).pywebview?.api?.return_to_launcher === 'function'
@@ -600,6 +602,7 @@ watch(tab, value => {
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
+          <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">设置</button>
         </template>
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
@@ -786,7 +789,7 @@ watch(tab, value => {
     <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="jpMode || swordView === 'archive'" :server="jpMode ? 'jp' : ''" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
-    <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>
+    <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel :server="appServer" @scroll="onStageScroll" /></MaamaruFrame>
     <!-- 开发工具（模板/流程工坊）：框选、命名都是未保存草稿，切走后保留组件，回来继续。 -->
     <MaamaruFrame v-if="!loading && devToolsEnabled && (tab === 'devtools' || devtoolsMounted)" v-show="tab === 'devtools'" variant="single" page-class="single-layout devtools-page" @scroll="onStageScroll"><DevToolsPanel /></MaamaruFrame>
     <!-- Keep the editor mounted after first use, including in-flight saves and scroll position. -->

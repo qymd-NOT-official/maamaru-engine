@@ -6,6 +6,7 @@ import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
 import HonmaruClock from './HonmaruClock.vue'
+import HonmaruStatus from './HonmaruStatus.vue'
 import { homeMoments, remainingTime } from './homeClockModel'
 import { activityTitle, activityStep, eventTime, runTitle, runStatusLabel, shanghaiDate, signed } from './report/reportModel'
 
@@ -362,6 +363,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
           <div v-for="moment in situationMoments" :key="moment.key" class="situation-moment" :title="`${gameTime(moment.time)} · ${situationTime(moment.observedAt)}`"><strong>{{ moment.label }}</strong><span :class="{ 'moment-done': moment.done }">{{ remainingTime(moment.time, now) }}</span></div>
         </div>
         <p v-else class="home-muted">已同步记录中没有远征、锻刀或手入倒计时。</p>
+        <HonmaruStatus v-if="isJp" :situation="situation" :now="now" />
       </PaperCard>
       <section class="home-planning-card home-event-card">
         <p class="home-eyebrow">近期活动</p>

@@ -81,11 +81,11 @@ export const api = {
   setDayConductor: (enabled: boolean, workflowId?: string) => request<{ conductor: DayTimeline['conductor'] }>('/api/day-conductor', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, workflow_id: workflowId }),
   }),
-  settings: () => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string; scenery?: string; companion?: string }>('/api/saved-settings'),
-  saveCompanion: (companion: string) => request<{ ok: boolean }>('/api/saved-settings', {
+  settings: (server = '') => request<{ params?: Record<string, ScriptParams>; theme?: string; backdrop?: string; scenery?: string; companion?: string }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`),
+  saveCompanion: (companion: string, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companion }),
   }),
-  saveScenery: (scenery: string) => request<{ ok: boolean }>('/api/saved-settings', {
+  saveScenery: (scenery: string, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenery }),
   }),
   saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
@@ -93,10 +93,10 @@ export const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ params }),
   }),
-  saveTheme: (theme: string) => request<{ ok: boolean }>('/api/saved-settings', {
+  saveTheme: (theme: string, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme }),
   }),
-  saveBackdrop: (backdrop: string) => request<{ ok: boolean }>('/api/saved-settings', {
+  saveBackdrop: (backdrop: string, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backdrop }),
   }),
   run: (script: string, params: ScriptParams) => request<{ ok: boolean; run_id?: string; workflow?: WorkflowIdentity | null }>('/api/scripts/run', {
