@@ -905,7 +905,7 @@ export interface SwordArchiveEntry {
   acquisition?: { label: string; location?: string; mailbox_id?: string; origin_message?: string; inbox_at?: string; received_at?: string } | null
   observation_id: string
   serial_id?: number | null
-  data_source?: 'youzu_log' | 'ocr'
+  data_source?: 'youzu_log' | 'ocr' | 'jp'
   observed_at?: number | null
   survival?: number | null
   survival_max?: number | null
@@ -966,7 +966,8 @@ export interface SwordArchiveSummary {
 
 export interface SwordArchiveResponse {
   done: boolean
-  data_source?: 'youzu_log' | 'ocr'
+  data_source?: 'youzu_log' | 'ocr' | 'jp'
+  roster_complete?: boolean
   reason: string | null
   observed_at: number | null
   snapshot_id: number | null

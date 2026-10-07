@@ -35,6 +35,7 @@ import {
 // entry.human?.watch 全程点属性访问，别解构——和 vue 的 watch API 撞名。
 
 const props = defineProps<{
+  server?: string
   running: boolean
   current: string | null
   stopping: boolean
@@ -96,7 +97,7 @@ const attentionGroups = computed(() => groupAttentionItems(attention.value))
 interface RowSource { kind: 'machine' | 'human' | 'overridden'; text: string; origin: string | null }
 function rowSourceOf(entry: SwordArchiveEntry): RowSource {
   const source = archiveFormSource(entry)
-  if (source.kind === 'machine') return { kind: 'machine', text: entry.data_source === 'youzu_log' ? '游戏记录' : '盘点识别', origin: null }
+  if (source.kind === 'machine') return { kind: 'machine', text: entry.data_source === 'youzu_log' || entry.data_source === 'jp' ? '游戏记录' : '盘点识别', origin: null }
   if (source.kind === 'human') return { kind: 'human', text: '你确认过', origin: null }
   return { kind: 'overridden', text: '你改判的', origin: `原识别：${source.machineText}` }
 }
@@ -119,7 +120,7 @@ const overviewSubtitle = computed(() => {
   if (!data.value) return '整本刀帐 + 你亲手记下的标注'
   const parts = [`档案时间 ${data.value.observed_at ? fmtTime(data.value.observed_at) : '—'}`]
   if (data.value.snapshot_id != null) parts.push(`第 ${data.value.snapshot_id} 号盘点`)
-  if (data.value.data_source === 'youzu_log') parts.push('游戏所持名单')
+  if (data.value.data_source === 'youzu_log' || data.value.data_source === 'jp') parts.push('游戏所持名单')
   return parts.join(' · ')
 })
 
@@ -144,7 +145,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    data.value = await api.swordArchive()
+    data.value = await api.swordArchive(props.server)
     if (archiveView.value === 'attention' && !data.value.attention.length) archiveView.value = 'all'
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '刀帐档案没有翻开'
@@ -162,7 +163,7 @@ async function annotate(body: SwordAnnotationBody): Promise<boolean> {
   saving.value = true
   error.value = ''
   try {
-    await api.saveSwordAnnotation(body)
+    await api.saveSwordAnnotation(body, props.server)
     await load()
     return true
   } catch (cause) {
@@ -198,7 +199,7 @@ async function revokeEntry(entry: SwordArchiveEntry) {
   saving.value = true
   error.value = ''
   try {
-    await api.revokeSwordAnnotation(human.id)
+    await api.revokeSwordAnnotation(human.id, props.server)
     await load()
   } catch (cause) {
     error.value = cause instanceof Error ? `这次没能撤销：${cause.message}` : '这次没能撤销，请重试'
@@ -219,7 +220,7 @@ async function revokeOldAnnotation(item: SwordArchiveAttentionItem) {
   saving.value = true
   error.value = ''
   try {
-    await api.revokeSwordAnnotation(item.annotation_id)
+    await api.revokeSwordAnnotation(item.annotation_id, props.server)
     await load()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '旧标注未能撤销'
@@ -263,7 +264,7 @@ onMounted(load)
     <PaperCard variant="task" tag="section" class="archive-heading">
       <PanelHeader title="刀帐档案" :subtitle="overviewSubtitle" variant="embedded">
         <template #actions>
-          <SwordReadActions :running="running" :current="current" :stopping="stopping" :starting="starting"
+          <SwordReadActions :server="server" :running="running" :current="current" :stopping="stopping" :starting="starting"
             @updated="load" @error="error = $event" @run-inventory="emit('runInventory')" />
         </template>
       </PanelHeader>
@@ -273,6 +274,7 @@ onMounted(load)
         <div><small>要练的刀</small><b>{{ summary.keepers }} 振</b></div>
         <div><small>待核对</small><b>{{ summary.attention_count }} 条</b></div>
       </div>
+      <p v-if="server === 'jp' && done && data?.roster_complete === false" class="archive-notice">已恢复目前读到的刀剑记录；进入「结成」更新完整名单后，可确认当前所持数量。</p>
       <p v-if="!done && data" class="archive-notice">
         {{ data.reason || '还没有所持刀剑名单' }}。进入本丸后点“更新刀帐”。
       </p>
@@ -310,14 +312,14 @@ onMounted(load)
                 <span class="archive-number"><small>等级</small><b>Lv.{{ entry.level ?? '—' }}</b><i v-if="entry.human?.level != null" class="archive-confirmed archive-level-tag" title="你填写的等级">你填的</i></span>
                 <span class="archive-number"><small>累计经验</small><b>{{ entry.exp == null ? '—' : entry.exp.toLocaleString() }}</b></span>
                 <span class="archive-number"><small>乱舞</small><b>Lv.{{ entry.tou_level ?? '—' }}</b><small v-if="entry.ranbu_exp != null">{{ entry.ranbu_exp.toLocaleString() }} 习合值</small></span>
-                <span class="archive-birthday"><small>显现</small>{{ entry.kiwame_date || '—' }}</span>
+                <span class="archive-birthday"><small>显现</small>{{ entry.kiwame_date || (server === 'jp' ? '待更新' : '—') }}</span>
               </div>
               <div v-if="expandedEntryId === entry.observation_id" class="archive-entry-actions">
                 <i class="archive-source" :class="sourceById.get(entry.observation_id)?.kind">{{ sourceById.get(entry.observation_id)?.text }}</i>
                 <small v-if="sourceById.get(entry.observation_id)?.origin" class="archive-source-origin">{{ sourceById.get(entry.observation_id)?.origin }}</small>
                 <i v-for="hint in entry.hints" :key="hint" class="archive-hint">{{ hint }}</i>
                 <span v-if="entry.acquisition" :title="entry.acquisition.origin_message">获得：{{ entry.acquisition.label }}{{ entry.acquisition.location ? ` · ${entry.acquisition.location}` : '' }}{{ entry.acquisition.mailbox_id ? ' · 收件箱领取' : '' }}</span>
-                <span v-if="entry.data_source === 'youzu_log'">生存 {{ entry.survival ?? '—' }}/{{ entry.survival_max ?? '—' }} · 疲劳 {{ entry.fatigue ?? '—' }} · {{ entry.locked == null ? '保护状态未知' : entry.locked ? '已保护' : '未保护' }}</span>
+                <span v-if="entry.data_source === 'youzu_log' || entry.data_source === 'jp'">生存 {{ entry.survival ?? '—' }}/{{ entry.survival_max ?? '—' }} · 疲劳 {{ entry.fatigue ?? '—' }} · {{ entry.locked == null ? '保护状态未知' : entry.locked ? '已保护' : '未保护' }}</span>
                 <span class="archive-form-confirm" role="group" aria-label="改判形态">
                   <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'kiwame')">是极</button>
                   <button type="button" class="secondary" :disabled="saving" @click="confirmEntryForm(entry, 'normal')">是普通</button>
@@ -327,7 +329,7 @@ onMounted(load)
                 <button type="button" class="archive-pill keeper" :class="{ active: entry.human?.keeper }" :aria-pressed="Boolean(entry.human?.keeper)" :disabled="saving" title="点了就是要练的刀，再点取消" @click="toggleKeeper(entry)">{{ entry.human?.keeper ? '要练 ✓' : '要练' }}</button>
                 <button v-if="entry.human" type="button" class="archive-revoke" :disabled="saving" title="撤销亲手标注，回到机器盘点的识别结果" @click="revokeEntry(entry)">撤销</button>
               </div>
-              <SwordGrowth v-if="entry.serial_id" :key="entry.serial_id" :serial-id="entry.serial_id" />
+              <SwordGrowth v-if="entry.serial_id" :key="entry.serial_id"  :server="server" :serial-id="entry.serial_id" />
               <small v-if="entry.human?.stale" class="archive-stale-note">同名同日有多振，标记挂在这一组上，不保证选中具体哪一振</small>
             </li>
           </template>

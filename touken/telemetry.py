@@ -1062,8 +1062,9 @@ class TelemetryStore:
         kiwame_date = str(kiwame_date or "").strip()
         if not sword_catalog_id:
             raise ValueError("刀剑目录 id 不能为空")
-        if not kiwame_date:
+        if not kiwame_date and serial_id is None:
             raise ValueError("显现日期不能为空")
+        # 有独立编号时不依赖日期区分同名多振；未同步日期保持空缺。
         if form_confirmed not in (None, "kiwame", "normal"):
             raise ValueError("形态确认只能是 kiwame 或 normal")
         if level_at_mark is not None:

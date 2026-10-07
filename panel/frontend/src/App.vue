@@ -23,7 +23,6 @@ import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
 import SwordArchivePanel from './components/SwordArchivePanel.vue'
-import JpSwordPanel from './components/JpSwordPanel.vue'
 import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
@@ -783,7 +782,7 @@ watch(tab, value => {
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><JpSwordPanel v-if="jpMode" /><SwordArchivePanel v-else-if="swordView === 'archive'" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="jpMode || swordView === 'archive'" :server="jpMode ? 'jp' : ''" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->
     <MaamaruFrame v-if="!loading && (tab === 'system' || systemMounted)" v-show="tab === 'system'" variant="single" page-class="single-layout system-page" @scroll="onStageScroll"><SystemPanel @scroll="onStageScroll" /></MaamaruFrame>

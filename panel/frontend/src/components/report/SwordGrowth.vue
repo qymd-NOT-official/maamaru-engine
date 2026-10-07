@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { api } from '../../api'
 import type { TrainingHistoryResponse, TrainingOverviewSword, InternalAffairsSword, SwordJournalResponse, SwordJournalEntry, SwordJournalObtainedDetail } from '../../types'
-const props = defineProps<{ serialId: number }>()
+const props = defineProps<{ serialId: number; server?: string }>()
 const history = ref<TrainingHistoryResponse>()
 const training = ref<TrainingOverviewSword>()
 const affairs = ref<InternalAffairsSword>()
@@ -21,12 +21,12 @@ async function load(event: Event) {
   if (!(event.target as HTMLDetailsElement).open || loaded.value || busy.value) return
   busy.value = true
   error.value = ''
-  const results = await Promise.allSettled([api.trainingHistory(props.serialId), api.trainingOverview(), api.internalAffairs(), api.swordJournal(props.serialId)])
+  const results = await Promise.allSettled([api.trainingHistory(props.serialId, props.server), api.trainingOverview(props.server), api.internalAffairs(props.server), api.swordJournal(props.serialId, props.server)])
   const [h, t, a, j] = results
   if (h.status === 'fulfilled') history.value = h.value ?? undefined
   if (t.status === 'fulfilled') training.value = t.value?.swords.find(s => s.serial_id === props.serialId)
   if (a.status === 'fulfilled') affairs.value = a.value?.swords.find(s => s.serial_id === props.serialId)
-  if (j.status === 'fulfilled') journal.value = j.value
+  if (j.status === 'fulfilled') journal.value = j.value ?? undefined
   if (results.some(r => r.status === 'rejected')) error.value = '部分记录没有翻开，请重试。'
   loaded.value = !error.value
   busy.value = false

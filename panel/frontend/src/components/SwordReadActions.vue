@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '../api'
 
-const props = defineProps<{ running: boolean; current: string | null; stopping: boolean; starting: boolean }>()
+const props = defineProps<{ server?: string; running: boolean; current: string | null; stopping: boolean; starting: boolean }>()
 const emit = defineEmits<{ updated: []; error: [message: string]; runInventory: [] }>()
 const syncing = ref(false)
 const busy = computed(() => props.running || props.stopping || props.starting || syncing.value)
@@ -13,7 +13,8 @@ async function update() {
   syncing.value = true
   emit('error', '')
   try {
-    await api.refreshHonmaruSituation()
+    if (props.server === 'jp') await api.jpListenerStart()
+    else await api.refreshHonmaruSituation()
     emit('updated')
   } catch (cause) {
     emit('error', cause instanceof Error ? cause.message : '没能读到游戏名单')
@@ -29,8 +30,8 @@ watch(() => props.running, (running, previous) => {
 
 <template>
   <div class="sword-read-actions">
-    <button type="button" class="primary" :disabled="busy" title="进入游戏本丸后，读取游戏所持名单。" @click="update">{{ syncing ? '正在更新……' : '更新刀帐' }}</button>
-    <details>
+    <button type="button" class="primary" :disabled="busy" :title="server === 'jp' ? '打开日服浏览器，进入结成后更新所持名单。' : '进入游戏本丸后，读取游戏所持名单。'" @click="update">{{ syncing ? '正在更新……' : '更新刀帐' }}</button>
+    <details v-if="server !== 'jp'">
       <summary>更多</summary>
       <button type="button" class="secondary" :disabled="busy" title="操作游戏，逐页截图识别所持刀剑；读不全时保留原档案。" @click="emit('runInventory')">{{ inventoryLabel }}</button>
     </details>

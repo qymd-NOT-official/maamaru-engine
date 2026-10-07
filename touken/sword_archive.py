@@ -123,7 +123,7 @@ def _build_hints(entries: list) -> dict:
     return hints
 
 
-def build_sword_archive(store) -> dict:
+def build_sword_archive(store, profile=None) -> dict:
     """生成刀帐档案；候选池会把能唯一对应的旧标注绑定到游戏编号。
 
     机器形态结论直接复用 honmaru_profile 的完整管线（盘点落盘事实 +
@@ -132,7 +132,7 @@ def build_sword_archive(store) -> dict:
     _apply_human_confirmations）；本层负责挂 human 字段、stale/duplicate
     判定、attention 清单与同名提示。
     """
-    profile = build_honmaru_profile(store)
+    profile = build_honmaru_profile(store) if profile is None else profile
     pool = profile.get("candidate_pool") or {}
     if not pool.get("done"):
         return {"done": False, "reason": pool.get("reason"),
@@ -261,6 +261,7 @@ def build_sword_archive(store) -> dict:
         if serial is not None:
             # OCR 没有游戏独立编号，未匹配不代表这振已经离开本丸。
             absent = ((pool.get("source") or {}).get("kind") == "youzu_log"
+                      or ((pool.get("source") or {}).get("kind") == "jp" and pool.get("roster_complete"))
                       or str(serial) in departures)
         else:
             absent = (ann.get("sword_catalog_id") and ann.get("kiwame_date")
@@ -292,6 +293,41 @@ def build_sword_archive(store) -> dict:
             "summary": summary, "entries": out_entries, "attention": attention,
             "historical_annotations": historical_annotations,
             "sword_departures": sword_departures}
+
+
+def build_jp_sword_archive(store) -> dict:
+    """日服独立名单转为共用刀帐契约，标注仍按独立编号合并。"""
+    from .training_view import _training_events, current_training_roster
+    from .honmaru_profile import _apply_human_confirmations
+    from . import sword_db
+    from .youzu_log import _sword_name
+    current = current_training_roster(_training_events(store))
+    entries = []
+    payload = current["payload"] if current else {}
+    for raw in payload.get("swords") or []:
+        serial = raw.get("serial_id")
+        if not serial:
+            continue
+        found = sword_db.find_game_sword(raw.get("sword_id") or 0)
+        catalog, info, form = found if found else (None, {}, "unknown")
+        entries.append({
+            **raw, "observation_id": f"jp:{serial}", "data_source": "jp",
+            "sword_catalog_id": catalog or f"jp_{raw.get('sword_id') or serial}",
+            "name_zh": _sword_name(raw.get("sword_id"), sword_db),
+            "tou_level": raw.get("ranbu_level"), "kiwame_date": None,
+            "form_status": form, "machine_form_status": form,
+            "form_evidence": ["游戏刀帐番号"] if found else [],
+            "unknown_fields": ["level"] if raw.get("level") is None else [],
+            "observed_at": current["ts"],
+        })
+    _apply_human_confirmations(entries, _human_annotations(store))
+    result = build_sword_archive(store, {"candidate_pool": {
+        "done": current is not None, "reason": "还没有日服所持名单",
+        "entries": entries, "observed_at": current["ts"] if current else None,
+        "source": {"kind": "jp"}, "roster_complete": payload.get("roster_complete", False),
+    }})
+    result["roster_complete"] = payload.get("roster_complete", False)
+    return result
 
 
 def get_sword_archive(store=None) -> dict:

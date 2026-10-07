@@ -3251,15 +3251,17 @@ async def api_honmaru_profile():
 
 
 @app.get("/api/data/sword-archive")
-async def api_sword_archive():
+async def api_sword_archive(server: str = ""):
     """刀帐档案：机器盘点 + 人工标注的合并视图（形态确认/要练的刀），
     只读生成，契约见 docs/telemetry-data.md「刀帐档案」。"""
-    from touken.sword_archive import get_sword_archive
+    from touken.sword_archive import get_sword_archive, build_jp_sword_archive
+    if server == "jp":
+        return build_jp_sword_archive(_telemetry_store_for(server))
     return get_sword_archive()
 
 
 @app.post("/api/data/sword-archive/annotations")
-async def api_save_sword_annotation(request: Request):
+async def api_save_sword_annotation(request: Request, server: str = ""):
     """保存一条刀帐人工标注；同指纹已存在时更新传入的非空字段。"""
     body = await request.json()
     from touken.telemetry import get_telemetry_store
@@ -3267,7 +3269,7 @@ async def api_save_sword_annotation(request: Request):
     favorite = body.get("favorite")
     watch = body.get("watch")
     try:
-        annotation = get_telemetry_store().save_sword_annotation(
+        annotation = _telemetry_store_for(server).save_sword_annotation(
             sword_catalog_id=body.get("sword_catalog_id"),
             kiwame_date=body.get("kiwame_date"),
             level_at_mark=body.get("level_at_mark"),
@@ -3284,11 +3286,11 @@ async def api_save_sword_annotation(request: Request):
 
 
 @app.delete("/api/data/sword-archive/annotations/{annotation_id}")
-async def api_revoke_sword_annotation(annotation_id: int):
+async def api_revoke_sword_annotation(annotation_id: int, server: str = ""):
     """软删一条人工标注（撤销形态确认/要练标记），历史保留不丢。"""
     from touken.telemetry import get_telemetry_store
     try:
-        get_telemetry_store().revoke_sword_annotation(annotation_id)
+        _telemetry_store_for(server).revoke_sword_annotation(annotation_id)
     except (TypeError, ValueError) as exc:
         return JSONResponse({"ok": False, "reason": str(exc)}, status_code=400)
     return {"ok": True}
@@ -3386,13 +3388,13 @@ async def api_event_points(event_id: str = ""):
 
 
 @app.get("/api/data/sword-journal/{serial_id}")
-async def api_sword_journal(serial_id: int):
+async def api_sword_journal(serial_id: int, server: str = ""):
     """单振刀入手履历：入手（刀帐档案 created_at + sword.obtained 收据）、
     修行进出、首次观测满级，按 ts 升序；缺哪段就没有哪段，不编。
     契约见 docs/telemetry-data.md「入手履历」。"""
     from touken.sword_journal import build_sword_journal
     from touken.telemetry import get_telemetry_store
-    result = build_sword_journal(get_telemetry_store(), serial_id)
+    result = build_sword_journal(_telemetry_store_for(server), serial_id)
     if result is None:
         raise HTTPException(404, f"编号 {serial_id} 还没有履历记录。")
     return result

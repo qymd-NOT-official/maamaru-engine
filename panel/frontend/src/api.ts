@@ -29,7 +29,7 @@ export const api = {
   forgeHistory: (days: number, server = '') => request<ForgeHistoryResponse>(`/api/data/forge-history?days=${days}&server=${server}`),
   eventPointsList: () => request<EventPointsListResponse>('/api/data/event-points'),
   eventPoints: (id: string) => request<EventPointsTimelineResponse>(`/api/data/event-points?event_id=${encodeURIComponent(id)}`),
-  swordJournal: (id: number) => request<SwordJournalResponse>(`/api/data/sword-journal/${id}`),
+  swordJournal: (id: number, server = '') => optionalRecord<SwordJournalResponse>(`/api/data/sword-journal/${id}?server=${server}`),
   honmaruHome: () => request<HonmaruHomeData>('/api/honmaru-home'),
   honmaruSituation: () => request<{ situation: HonmaruSituation | null }>('/api/honmaru-home/situation'),
   refreshHonmaruSituation: () => request<{ situation: HonmaruSituation }>('/api/honmaru-home/situation/refresh', { method: 'POST' }),
@@ -129,11 +129,11 @@ export const api = {
   dashboard: () => request<any>('/api/dashboard'),
   dataSummary: (days = 30) => request<any>(`/api/data/summary?days=${days}`),
   swordInventory: () => request<SwordInventoryResponse>('/api/data/sword-inventory/latest'),
-  swordArchive: () => request<SwordArchiveResponse>('/api/data/sword-archive'),
-  saveSwordAnnotation: (body: SwordAnnotationBody) => request<{ ok: boolean; annotation: SwordArchiveAnnotation }>('/api/data/sword-archive/annotations', {
+  swordArchive: (server = '') => request<SwordArchiveResponse>(`/api/data/sword-archive?server=${server}`),
+  saveSwordAnnotation: (body: SwordAnnotationBody, server = '') => request<{ ok: boolean; annotation: SwordArchiveAnnotation }>(`/api/data/sword-archive/annotations?server=${server}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }),
-  revokeSwordAnnotation: (id: number) => request<{ ok: boolean }>(`/api/data/sword-archive/annotations/${id}`, { method: 'DELETE' }),
+  revokeSwordAnnotation: (id: number, server = '') => request<{ ok: boolean }>(`/api/data/sword-archive/annotations/${id}?server=${server}`, { method: 'DELETE' }),
   resourceLedger: (days = 7, server = '') => request<ResourceLedger>(`/api/data/resource-ledger?days=${days}${server ? `&server=${server}` : ''}`),
   resourceLedgerRange: (from: number, to: number, server = '') => request<ResourceLedger>(`/api/data/resource-ledger?from=${from}&to=${to}&server=${server}`),
   dailyReport: (date = '', server = '') => {
