@@ -37,6 +37,7 @@ const journalEvents = ref<any[]>([])
 const swordDepartures = ref<any[]>([])
 const situation = ref<HonmaruSituation | null>(null)
 const syncingSituation = ref(false)
+const launchingGame = ref(false)
 const situationError = ref('')
 const editingProfile = ref(false)
 const writing = ref(false)
@@ -130,6 +131,16 @@ async function syncSituation() {
   }
   catch (error) { situationError.value = errorMessage(error) }
   finally { syncingSituation.value = false }
+}
+async function launchGame() {
+  if (!isJp.value || launchingGame.value) return
+  launchingGame.value = true
+  notice.value = ''
+  try {
+    await api.jpListenerStart()
+    notice.value = '日服浏览器已打开，进入游戏后会自动更新本丸数据。'
+  } catch (error) { notice.value = errorMessage(error) }
+  finally { launchingGame.value = false }
 }
 const runPostKinds: Record<string, { label: string; icon: string; scene: string }> = {
   sortie: { label: '出阵手记', icon: 'sortie.png', scene: 'honmaru_sortie_stage.png' },
@@ -331,7 +342,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
     </aside>
 
     <section class="honmaru-journal" aria-label="本丸动态">
-      <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
+      <header class="journal-heading"><div><p class="home-eyebrow">{{ todayLabel }}</p><h2>{{ welcome }}</h2></div><button v-if="isJp" type="button" class="home-primary" :disabled="launchingGame" @click="launchGame">{{ launchingGame ? '启动中…' : '启动游戏' }}</button><button v-else type="button" class="home-primary" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button></header>
       <div class="home-office-link"><div><span class="office-dot" :class="{ active }"></span><p><strong>{{ active ? currentActivityTitle : isJp ? '日服本丸 · 数据自动更新' : 'まあ丸待命中' }}</strong><small v-if="active && currentActivityStep">{{ currentActivityStep }}</small></p></div><div class="home-office-actions"><button v-if="!active && !isJp" type="button" class="home-primary" :disabled="executingToday || !dayPlan?.conductor.available" @click="executeToday">{{ executingToday ? '正在接班…' : '一键执行今日安排' }}</button><button v-if="active" type="button" class="home-text-button" @click="emit('office')">去执务台 →</button></div></div>
       <div v-for="block in interruptedRaids" :key="block.run_id" class="home-raid-reminder" role="status">
         <span>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</span>
@@ -339,6 +350,7 @@ watch(() => props.busy, (busy, previous) => { if (previous && !busy) void refres
       </div>
       <p v-if="todayExecutionMessage" class="home-notice" role="status">{{ todayExecutionMessage }}</p>
       <div class="journal-filter" aria-label="记录筛选"><button type="button" :class="{ selected: filter === 'all' }" :aria-pressed="filter === 'all'" @click="filter = 'all'; limit = 8">本丸动态</button><button type="button" :class="{ selected: filter === 'notes' }" :aria-pressed="filter === 'notes'" @click="filter = 'notes'; limit = 8">我的小记 <span>{{ notes.length }}</span></button><button type="button" class="journal-refresh" :disabled="loading" @click="refresh">{{ loading ? '整理中…' : '刷新' }}</button></div>
+      <button v-if="isJp && filter === 'notes'" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">＋ 写小记</button>
       <div v-if="!entries.length" class="journal-empty"><span aria-hidden="true">✿</span><h3>{{ loading ? '正在翻看本丸记录…' : '日子还长，慢慢记。' }}</h3><p>{{ filter === 'notes' ? '今天的碎念、喜欢的一刻，都可以写在这里。' : '你写下的小记和最近的执务记录，会按日期留在这里。' }}</p><button v-if="!loading" type="button" class="home-text-button" :disabled="!homeReady" @click="writeNote()">写下第一笔 →</button></div>
       <section v-for="group in groups" :key="group.date" class="journal-day">
         <h3 class="journal-date">{{ dateLabel(group.date) }}<span v-if="group.date === today">{{ today.replaceAll('-', '.') }}</span></h3>
