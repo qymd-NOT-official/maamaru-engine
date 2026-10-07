@@ -25,12 +25,19 @@ def frame_summary(encoded):
                 'digest': hashlib.sha256(picture.convert('RGB').tobytes()).hexdigest()}
 
 
+def is_game_page(row):
+    try:
+        url = urlsplit(row.get('url', ''))
+        return (row.get('type') == 'page' and url.scheme == 'https'
+                and url.hostname in ('pc-play.games.dmm.com', 'play.games.dmm.com')
+                and url.path.rstrip('/') in ('/play/tohken', '/game/tohken'))
+    except (TypeError, ValueError):
+        return False
+
+
 def sample():
     targets = jp_listener._http_json('/json/list') or []
-    target = next((row for row in targets if row.get('type') == 'page'
-                   and urlsplit(row.get('url', '')).hostname in (
-                       'pc-play.games.dmm.com', 'play.games.dmm.com')
-                   and urlsplit(row.get('url', '')).path.rstrip('/') == '/play/tohken'), None)
+    target = next((row for row in targets if is_game_page(row)), None)
     if not target:
         raise RuntimeError('game_missing')
     socket = jp_listener._CdpSocket(target['webSocketDebuggerUrl'])
@@ -65,11 +72,14 @@ def _run():
                     'changed': previous is not None and previous != frame['digest'],
                     'near_black': frame['near_black']})
             previous = frame['digest']
-        except Exception:
+        except Exception as error:
             with _lock:
                 _state['failed_frames'] += 1
-                _state['last_error'] = '游戏页面未找到，或画面读取失败'
-                _state['samples'].append({'at': time.time(), 'ok': False})
+                missing = isinstance(error, RuntimeError) and str(error) == 'game_missing'
+                _state['last_error'] = ('未找到日服游戏页面，请从まあ丸打开游戏并进入本丸'
+                                        if missing else '已找到游戏页面，但画面读取失败；请确认浏览器仍在运行')
+                _state['samples'].append({'at': time.time(), 'ok': False,
+                    'reason': 'game_missing' if missing else 'frame_failed'})
     with _lock:
         _state['state'] = 'done'
         _state['finished_at'] = time.time()

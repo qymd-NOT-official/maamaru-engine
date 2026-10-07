@@ -28,6 +28,41 @@ def test_missing_game_does_not_connect_or_launch(monkeypatch):
         probe.sample()
 
 
+@pytest.mark.parametrize('host,path', [
+    ('pc-play.games.dmm.com', '/play/tohken'),
+    ('play.games.dmm.com', '/game/tohken'),
+    ('play.games.dmm.com', '/game/tohken/'),
+])
+def test_game_page_redirect_is_accepted(host, path):
+    assert probe.is_game_page({'type': 'page', 'url': f'https://{host}{path}?test=1'})
+
+
+@pytest.mark.parametrize('url', [
+    'https://example.com/game/tohken', 'https://play.games.dmm.com/game/other',
+    'http://play.games.dmm.com/game/tohken', 'https://play.games.dmm.com.evil.test/game/tohken',
+])
+def test_other_pages_are_rejected(url):
+    assert not probe.is_game_page({'type': 'page', 'url': url})
+
+
+def test_sample_uses_redirected_game_and_closes_connection(monkeypatch):
+    monkeypatch.setattr(probe.jp_listener, '_http_json', lambda path: [{
+        'type': 'page', 'url': 'https://play.games.dmm.com/game/tohken',
+        'webSocketDebuggerUrl': 'local-test'}])
+    calls = []
+    class Socket:
+        def __init__(self, url):
+            assert url == 'local-test'
+        def call(self, method, params, timeout):
+            calls.append(method)
+            return {'data': encoded('white')}
+        def close(self):
+            calls.append('closed')
+    monkeypatch.setattr(probe.jp_listener, '_CdpSocket', Socket)
+    assert not probe.sample()['near_black']
+    assert calls == ['Page.captureScreenshot', 'closed']
+
+
 def test_report_has_no_image_or_automatic_success_claim(tmp_path, monkeypatch):
     monkeypatch.setattr(probe, '_state', {'state': 'idle'})
     monkeypatch.setattr(probe, 'JP_DATA_DIR', tmp_path)
