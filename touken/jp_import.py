@@ -135,7 +135,7 @@ def sword_roster(payload: dict) -> list[dict]:
             "fatigue": entry.get("fatigue"),
         }
         for stat in ("hp", "atk", "def", "mobile", "back", "scout", "hide"):
-            record[f"{stat}_up"] = entry.get(f"{stat}_up", 0)
+            record[f"{stat}_up"] = entry.get(f"{stat}_up")
         out.append(record)
     out.sort(key=lambda r: (r["sword_id"], r["serial_id"] or 0))
     return out

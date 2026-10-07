@@ -60,8 +60,7 @@ def _resource_snapshot(payload: dict, card: dict) -> dict | None:
 
 def _roster_fingerprint(roster: list[dict]) -> tuple:
     return tuple(
-        (r["serial_id"], r["level"], r["exp"], r["ranbu_level"],
-         r["ranbu_exp"])
+        tuple(sorted(r.items()))
         for r in roster
     )
 
@@ -130,13 +129,17 @@ class JpLedgerSession:
             else:
                 stats["dedup_snapshots"] += 1
 
+        path = jp_import.endpoint_path(tx.path or tx.url)
         roster = jp_import.sword_roster(payload)
-        if roster:
-            fp = _roster_fingerprint(roster)
+        # 已核对的所持列表决定成员；其他画面的读数只更新单振状态。
+        roster_scope = "full" if path == "/party/list" else "partial"
+        if roster or (roster_scope == "full" and payload.get("sword") == {}):
+            fp = (roster_scope, _roster_fingerprint(roster))
             if fp != self._last_roster_fp:
                 _record(self.store, ts, "training.captured", {
                     "captured_at": _display_time(ts),
-                    "source": self.script, "swords": roster}, self.script)
+                    "source": self.script, "swords": roster,
+                    "roster_scope": roster_scope, "endpoint": path}, self.script)
                 stats["training.captured"] += 1
                 self._last_roster_fp = fp
             else:

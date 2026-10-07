@@ -39,7 +39,7 @@ def _training_events(store) -> list[dict]:
     """全部 training.captured 按时间升序；直查事件表，不吃
     recent_events 的 1001 条上限（快照链可能攒得比它长）。"""
     rows = store._conn().execute(
-        "SELECT ts, payload FROM events WHERE event_type = ? ORDER BY ts, id",
+        "SELECT ts, script, payload FROM events WHERE event_type = ? ORDER BY ts, id",
         (_EVENT_TYPE,)).fetchall()
     events = []
     for row in rows:
@@ -49,8 +49,42 @@ def _training_events(store) -> list[dict]:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        events.append({"ts": float(row["ts"]), "payload": payload})
+        events.append({"ts": float(row["ts"]), "script": row["script"], "payload": payload})
     return events
+
+
+def current_training_roster(events: list[dict]) -> dict | None:
+    """合成当前名册；日服局部更新不得替换所持名单，旧记录只恢复已见成员。"""
+    if not events:
+        return None
+    if events[-1].get("script") not in ("jp_listener", "jp_netlog"):
+        return events[-1]
+    members = {}
+    complete = False
+    for event in events:
+        payload = event["payload"]
+        scope = payload.get("roster_scope")
+        if scope == "full":
+            members = {}
+            complete = True
+        for raw in payload.get("swords") or []:
+            if not isinstance(raw, dict):
+                continue
+            serial = _num(raw.get("serial_id"))
+            if serial is None:
+                continue
+            # 无完整来源的旧快照不能推断删除；有完整基准后局部更新不增加成员。
+            if scope != "full" and serial not in members and complete:
+                continue
+            previous = members.get(serial, {})
+            members[serial] = {
+                **previous, **{key: value for key, value in raw.items() if value is not None},
+                "captured_at": payload.get("captured_at") or "",
+            }
+    return {**events[-1], "payload": {
+        **events[-1]["payload"], "swords": list(members.values()),
+        "roster_complete": complete,
+    }}
 
 
 def _resolve_rarity(sword_id):
@@ -84,11 +118,11 @@ def _plateau(values: list[int], k: int = PLATEAU_K) -> bool | None:
 
 
 def build_training_overview(store) -> dict | None:
-    """最新一条 training.captured 的全刀练度总览；没有快照返回 None。"""
+    """当前所持名册与单振最新练度；没有快照返回 None。"""
     events = _training_events(store)
     if not events:
         return None
-    latest = events[-1]
+    latest = current_training_roster(events)
     captured_at = str(latest["payload"].get("captured_at") or "")
     swords = []
     for raw in latest["payload"].get("swords") or []:
@@ -107,10 +141,11 @@ def build_training_overview(store) -> dict | None:
             "ranbu_exp": nums["ranbu_exp"],
             "ranbu_next": ranbu_rules.next_level_requirement(
                 nums["ranbu_level"], nums["ranbu_exp"], _resolve_rarity(nums["sword_id"])),
-            "captured_at": captured_at,
+            "captured_at": raw.get("captured_at") or captured_at,
         })
     swords.sort(key=lambda row: row["serial_id"])
     return {"ts": latest["ts"], "captured_at": captured_at,
+            "roster_complete": latest["payload"].get("roster_complete", True),
             "sword_count": len(swords), "swords": swords}
 
 
@@ -149,7 +184,7 @@ def build_internal_affairs(store) -> dict | None:
     平台期启发式结论；没有快照返回 None。
 
     口径（诚实标注，见模块 docstring 与 docs/telemetry-data.md）：
-    - 名册取最新一条 training.captured（已离开刀池的刀不出现）。
+    - 名册以完整所持列表为准，日服局部快照只更新已在册成员。
     - hp_up/scout_up 只在内番能喂；其他 *_up 炼结也能喂，不出。
     - hp_plateau/scout_plateau：该振自己的快照链（含它的帧，按时间序）
       上最近连续 PLATEAU_K 条不增长 → True；链上有效读数不足 K 条 →
@@ -160,7 +195,7 @@ def build_internal_affairs(store) -> dict | None:
     events = _training_events(store)
     if not events:
         return None
-    latest = events[-1]
+    latest = current_training_roster(events)
     captured_at = str(latest["payload"].get("captured_at") or "")
 
     # 每振自己的 hp/scout 读数链（时间升序，None 帧跳过）
@@ -195,7 +230,7 @@ def build_internal_affairs(store) -> dict | None:
             "scout_up": nums["scout_up"],
             "hp_plateau": _plateau(chain["hp_up"]),
             "scout_plateau": _plateau(chain["scout_up"]),
-            "captured_at": captured_at,
+            "captured_at": raw.get("captured_at") or captured_at,
         })
     swords.sort(key=lambda row: row["serial_id"])
     return {"ts": latest["ts"], "captured_at": captured_at,

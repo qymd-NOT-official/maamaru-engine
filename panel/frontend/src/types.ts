@@ -1020,6 +1020,7 @@ export interface TrainingOverviewSword {
 }
 
 export interface TrainingOverviewResponse {
+  roster_complete?: boolean
   ts: number
   captured_at: string
   sword_count: number

@@ -50,7 +50,7 @@ onMounted(async () => {
 
 <template>
   <section class="jp-sword-panel">
-    <PanelHeader variant="page" title="日服刀帐" :subtitle="data ? `快照时间 ${data.captured_at || '—'} · 共 ${data.sword_count} 振` : '已同步的练度快照'" />
+    <PanelHeader variant="page" title="日服刀帐" :subtitle="data ? `最近更新 ${data.captured_at || '—'} · 已读取 ${data.sword_count} 振` : '已同步的练度快照'" />
     <div class="jp-sword-content">
       <p v-if="error" class="jp-sword-error">{{ error }}</p>
       <p v-else-if="loading" class="jp-sword-empty">正在翻日服刀帐……</p>
@@ -59,10 +59,12 @@ onMounted(async () => {
         <p>到仓库点「读取游戏家底」，在打开的日服浏览器里游玩后，这里会自动更新刀帐。</p>
       </div>
       <template v-else>
+        <p v-if="data.roster_complete === false" class="jp-sword-empty">已恢复目前读到的刀剑记录；进入「结成」更新完整名单后，可确认当前所持数量。</p>
         <div class="jp-sword-toolbar">
           <input v-model="query" type="search" placeholder="输入刀名找一找" aria-label="按刀名筛选">
           <span>{{ filtered.length }} 振</span>
         </div>
+        <div class="jp-sword-table-scroll" role="region" aria-label="刀帐名单" tabindex="0">
         <table class="jp-sword-table">
           <thead>
             <tr><th>刀名</th><th>等级</th><th>累计经验</th><th>乱舞</th><th>习合值</th><th>距下一级乱舞</th></tr>
@@ -78,6 +80,7 @@ onMounted(async () => {
             </tr>
           </tbody>
         </table>
+        </div>
       </template>
     </div>
   </section>
@@ -145,6 +148,11 @@ onMounted(async () => {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+}
+
+.jp-sword-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .jp-sword-table th,

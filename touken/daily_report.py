@@ -304,6 +304,13 @@ def _build_training(store, start_ts: float, end_ts: float) -> dict | None:
     current = _training_rows(current_event["payload"])
     previous_event = _last_event_before(store, "training.captured",
                                         current_event["ts"])
+    if current_event["payload"].get("source") in ("jp_listener", "jp_netlog"):
+        from .training_view import _training_events, current_training_roster
+        chain = [event for event in _training_events(store)
+                 if event["ts"] <= current_event["ts"]]
+        current_event = current_training_roster(chain)
+        current = _training_rows(current_event["payload"])
+        previous_event = current_training_roster(chain[:-1])
     base = {
         "snapshot_ts": current_event["ts"],
         "snapshot_captured_at": str(

@@ -139,6 +139,74 @@ def test_encrypted_battle_skipped(store):
         "SELECT COUNT(*) c FROM events").fetchone()["c"] == 0
 
 
+def _roster_payload(count, level=10):
+    return {"now": NOW_JST, "sword": {
+        str(serial): {"serial_id": serial, "sword_id": 3, "level": level,
+                      "exp": level * 100, "ranbu_level": 1, "ranbu_exp": 0}
+        for serial in range(1, count + 1)}}
+
+
+def test_partial_updates_preserve_full_roster_and_same_name_instances(store):
+    from touken.training_view import build_training_overview, build_internal_affairs
+    session = jp_ledger.JpLedgerSession(store, script="jp_listener")
+    session.feed(_tx("/party/list", _roster_payload(150)))
+    session.feed(_tx("/party/getpartyinfo", _roster_payload(6, level=20)))
+    result = build_training_overview(store)
+    assert result["sword_count"] == 150
+    assert result["roster_complete"] is True
+    assert result["swords"][0]["level"] == 20
+    assert result["swords"][6]["level"] == 10
+    assert build_internal_affairs(store)["sword_count"] == 150
+    assert daily_report.build_daily_report(store, DAY_SH)["training"]["sword_count"] == 150
+    # 新完整名单仍能确认刀解或离开所持名单的成员。
+    session.feed(_tx("/party/list", _roster_payload(149)))
+    assert build_training_overview(store)["sword_count"] == 149
+    session.feed(_tx("/party/getpartyinfo", _roster_payload(150, level=30)))
+    assert build_training_overview(store)["sword_count"] == 149
+
+
+def test_legacy_snapshots_recovered_without_rewriting_history(store):
+    from touken.training_view import build_training_overview
+    for count, level in ((150, 10), (6, 20)):
+        swords = jp_ledger.jp_import.sword_roster(_roster_payload(count, level))
+        jp_ledger._record(store, NOW_EPOCH, "training.captured",
+                          {"source": "jp_netlog", "swords": swords}, "jp_netlog")
+    result = build_training_overview(store)
+    assert result["sword_count"] == 150
+    assert result["roster_complete"] is False
+    assert result["swords"][0]["level"] == 20
+    assert result["swords"][6]["level"] == 10
+    raw = store._conn().execute(
+        "SELECT payload FROM events ORDER BY id DESC LIMIT 1").fetchone()
+    assert len(json.loads(raw["payload"])["swords"]) == 6
+
+
+def test_complete_scope_is_not_deduplicated_with_identical_partial(store):
+    from touken.training_view import build_training_overview
+    session = jp_ledger.JpLedgerSession(store)
+    session.feed(_tx("/party/getpartyinfo", _roster_payload(6)))
+    assert build_training_overview(store)["roster_complete"] is False
+    session.feed(_tx("/party/list", _roster_payload(6)))
+    assert session.stats["training.captured"] == 2
+    assert build_training_overview(store)["roster_complete"] is True
+    session.feed(_tx("/party/list", _roster_payload(0)))
+    assert build_training_overview(store)["sword_count"] == 0
+
+
+def test_partial_missing_fields_preserve_previous_reading(store):
+    from touken.training_view import build_internal_affairs
+    session = jp_ledger.JpLedgerSession(store)
+    full = _roster_payload(1)
+    full["sword"]["1"]["hp_up"] = 7
+    session.feed(_tx("/party/list", full))
+    partial = _roster_payload(1)
+    session.feed(_tx("/party/getpartyinfo", partial))
+    assert build_internal_affairs(store)["swords"][0]["hp_up"] == 7
+    partial["sword"]["1"]["fatigue"] = 80
+    session.feed(_tx("/party/getpartyinfo", partial))
+    assert session.stats["training.captured"] == 3
+
+
 def test_payload_without_now_not_recorded(store):
     payload = {"resource": {"charcoal": 1}}  # 没有 now 字段
     stats = jp_ledger.import_transactions(
