@@ -55,9 +55,16 @@ def make_template(settings, config, daily_steps):
                 "times": daily.get(
                     "forge_times", config.get("daily", {}).get("forge_times", 3)),
             }
-            for key in RECIPE_KEYS:
+            recipe = config.get("forge", {}).get("recipe") or []
+            for index, key in enumerate(RECIPE_KEYS):
                 if key in daily:
                     params[key] = copy.deepcopy(daily[key])
+                elif len(recipe) == 4:
+                    params[key] = recipe[index]
+        elif step == "演练":
+            params = copy.deepcopy(daily.get("practice") or {})
+        elif step == "远征":
+            params = copy.deepcopy(daily.get("expedition") or {})
         elif step == "出阵":
             params = {k: copy.deepcopy(v) for k, v in daily.items()
                       if k in DAILY_SORTIE_KEYS}
@@ -87,16 +94,13 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
             yield "[日课] ✓ 已登录本丸"
 
     def daily_practice(agent, params, config_path):
-        saved = (_load_settings().get("params", {}).get("practice") or {})
-        fallback = getattr(agent, "config", {}).get("daily", {}).get("practice", {})
-        values = {**(saved or fallback), **params}
         # 复用普通演练积木的部队解析：普通队号与 preset:<id> 都走同一条
         # 开工前检查/套队逻辑，避免一键日课另造半套实现。
         yield from workflow.NODE_REGISTRY["practice"]["run"](
-            agent, values, config_path)
+            agent, params, config_path)
 
     def daily_expedition(agent, params, config_path):
-        routes = plan_inputs({})[4]
+        routes = plan_inputs({"expedition": params})[4]
         yield from agent._daily_expedition_step(routes)
 
     def daily_snapshot(agent, params, config_path):

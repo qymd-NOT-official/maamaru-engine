@@ -430,6 +430,7 @@ def create_preset(body: dict) -> dict:
         "nodes": normalize_nodes(body.get("nodes")),
         "after": normalize_after(body.get("after", "none")),
         "daily_mode": body.get("daily_mode") is True,
+        "parameter_version": 1,
     }
     validate_ending(preset)
     presets = load_presets()
@@ -461,6 +462,7 @@ def update_preset(preset_id: str, body: dict) -> dict | None:
                 else existing.get("nodes")),
             "after": normalize_after(body.get("after", existing.get("after", "none"))),
             "daily_mode": body.get("daily_mode", existing.get("daily_mode", False)) is True,
+            "parameter_version": existing.get("parameter_version", 1),
         }
         validate_ending(presets[i])
         save_presets(presets)

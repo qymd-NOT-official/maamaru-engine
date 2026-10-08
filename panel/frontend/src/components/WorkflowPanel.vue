@@ -66,12 +66,12 @@ function keyFor(node: WorkflowNode) {
 function defOf(type: string) { return defs.value.find(def => def.type === type) }
 function valueFor(node: WorkflowNode, key: string) {
   const def = defOf(node.type)
-  return node.params[key] ?? def?.saved_params?.[key] ?? def?.params.find(field => field.key === key)?.default ?? ''
+  return node.params[key] ?? def?.params.find(field => field.key === key)?.default ?? ''
 }
 function description(type: string) {
   if (draft.value?.daily_mode) {
     const dailyDescriptions: Record<string, string> = {
-      expedition: '收取归来奖励，按常用安排派遣；仍在远征中的部队会跳过。',
+      expedition: '收取归来奖励，按这一步的安排派遣；仍在远征中的部队会跳过。',
       dismantle: '按白名单刀解一把；今天已经刀解过时自动跳过。',
       snapshot: '收工时盘点家底；本轮锻刀已顺手盘点时不再重复。',
     }
@@ -325,7 +325,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                 </div>
                 <div v-if="expanded === node" class="wf-step-detail">
                   <p>{{ description(node.type) }}</p>
-                  <p v-if="defOf(node.type)?.saved_params && !Object.keys(node.params).length" class="wf-inherited">沿用该玩法已保存的配置；在这里修改后，会作为这一步的专用设置。</p>
+                  <p v-if="defOf(node.type)?.category === 'battle' || node.type === 'expedition'" class="wf-inherited">这里的设置只用于这一步，与单独玩法设置分开保存。</p>
                   <p v-if="node.type === 'raid'" class="wf-inherited">直接运行任务流时，按这里的圈数执行。只有在时间表选「联队战」并指定这份任务流时，才会用时间表填写的圈数替换本次执行；这里的设置不变。</p>
                   <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="valueFor(node, field.key)" @update:model-value="node.params[field.key] = $event" /></div>
                   <p v-if="draft.daily_mode && node.type === 'login'" class="wf-inherited">登录未成功时，会停止后面的日课安排。</p>

@@ -503,39 +503,18 @@ def _daily_plan_inputs(params):
             sortie_plan["formation_id"] = sortie_preset["id"]
         if sortie_team_error:
             sortie_plan["formation_error"] = sortie_team_error
-    # 一键日课的演练完整沿用「演练」配置页，避免两处配置互相打架。
-    saved_practice = (_load_panel_settings().get("params", {}).get("practice", {}) or {})
-    practice_plan = dict(saved_practice)
+    from .task_parameters import field_defaults
+    practice_plan = {**field_defaults(_SCRIPTS["practice"]["params"]), **(params.get("practice") or {})}
     if practice_plan.get("team_no") not in (None, ""):
-        practice_team, practice_preset, practice_error = _resolve_team(
-            practice_plan, 2)
+        practice_team, practice_preset, practice_error = _resolve_team(practice_plan, 2)
         practice_plan["team_no"] = practice_team
         if practice_preset:
             practice_plan["formation_id"] = practice_preset["id"]
         if practice_error:
             practice_plan["formation_error"] = practice_error
-    # 排班接管的队伍只收奖励，续派由排班统一负责。
-    from .scheduler import find_map, load_config, managed_teams
-    schedule = load_config()
-    owned = managed_teams(schedule)
-    expedition_plan = []
-    for row in schedule.get("common_plan", []):
-        if (not row.get("enabled") or not row.get("map_code")
-                or int(row["team_no"]) in owned):
-            continue
-        found = find_map(row["map_code"])
-        route = {
-            "team_no": int(row["team_no"]), "map_code": row["map_code"],
-            "era": found.get("era") if found else None,
-            "map_slot": found.get("slot") if found else None,
-            "map_name": found.get("name") if found else None,
-        }
-        if row.get("formation_id"):
-            route["formation_id"] = str(row["formation_id"])
-        if schedule.get('automation', {}).get('sakura_before_dispatch'):
-            route['sakura_before_dispatch'] = True
-            route['repair_threshold'] = (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')
-        expedition_plan.append(route)
+    from .scheduler import find_map, managed_teams
+    from .task_parameters import expedition_routes
+    expedition_plan = expedition_routes(params.get("expedition") or {}, find_map, managed_teams())
     return steps, after, sortie_plan, practice_plan, expedition_plan
 
 
@@ -950,7 +929,7 @@ def _build_expedition_manager(agent, config_path, params):
     """收取归来队伍，最多等十分钟，再按“常用安排”派遣。"""
     from .scheduler import find_map, load_config, managed_teams
 
-    plan = [p for p in load_config().get("common_plan", [])
+    plan = [p for p in (params["_routes"] if "_routes" in params else load_config().get("common_plan", []))
             if p.get("enabled") and p.get("map_code")]
     owned = managed_teams()
     plan = [p for p in plan if int(p["team_no"]) not in owned]
@@ -1015,8 +994,8 @@ def _build_expedition_manager(agent, config_path, params):
         yield f"[远征管理] 派部队{team}去 {m['code']}「{m['name']}」"
         yield from agent.expedition_stream(
             era=m["era"], map_slot=m["slot"], team_no=int(team),
-            sakura_before_dispatch=load_config().get('automation', {}).get('sakura_before_dispatch', False),
-            repair_threshold=(_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light'))
+            sakura_before_dispatch=(row.get('sakura_before_dispatch', False) if '_routes' in params else load_config().get('automation', {}).get('sakura_before_dispatch', False)),
+            repair_threshold=(row.get('repair_threshold', 'light') if '_routes' in params else (_load_panel_settings().get('params', {}).get('sakura', {}) or {}).get('repair_threshold', 'light')))
 
     yield "[远征管理] 常用安排处理完毕"
 
@@ -1433,8 +1412,8 @@ register_script("formation", "编队换人",
 
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
-# 各 _build_* builder（未覆盖的战斗参数沿用「单独配置页」已存参数，与 _build_daily
-# 一个思路）；由 server 注入 NODE_REGISTRY 而非 workflow import server，避免循环依赖。
+# 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
+# 由 server 注入 NODE_REGISTRY，避免循环依赖。
 from touken.flows.report_judge import (  # noqa: E402
     _equip_warning_status,
     _practice_report_status,
@@ -1443,19 +1422,16 @@ from . import workflow as _workflow  # noqa: E402
 from . import home_layout as _home_layout  # noqa: E402
 
 
-def _wf_node(script, builder, category, merge_saved=False, detail=None):
+def _wf_node(script, builder, category, snapshot_saved=False, detail=None):
     info = _SCRIPTS[script]
 
     def _run(agent, params, config_path):
-        merged = dict(params or {})
-        if merge_saved:
-            saved = (_load_panel_settings().get("params", {}).get(script, {})
-                     or {})
-            merged = {**saved, **merged}
+        from .task_parameters import field_defaults
+        merged = {**field_defaults(info["params"]), **(params or {})}
         yield from builder(agent, config_path, merged)
 
     node = {"type": script, "label": info["label"], "desc": info["desc"],
-            "category": category, "params": info["params"], "run": _run, "merge_saved": merge_saved}
+            "category": category, "params": info["params"], "run": _run, "snapshot_saved": snapshot_saved}
     if detail:
         node["detail"] = list(detail)
     _workflow.register_node(node)
@@ -1467,13 +1443,22 @@ for _wf_script, _wf_builder in (
         ("yosari", _build_yosari), ("osaka", _build_osaka),
         ("pumpkin", _build_pumpkin), ("sakura", _build_sakura),
         ("hanafuda", _build_hanafuda)):
-    _wf_node(_wf_script, _wf_builder, "battle", merge_saved=True,
+    _wf_node(_wf_script, _wf_builder, "battle", snapshot_saved=True,
              detail=[_equip_warning_status])
 # 演练专项判分（打了却一场没赢不算绿）照旧补上
 _workflow.NODE_REGISTRY["practice"]["detail"].append(_practice_report_status)
 _wf_node("forge", _build_forge, "chore")
 _wf_node("repair", _build_repair, "chore")
-_wf_node("expedition", _build_expedition_manager, "chore")
+def _build_workflow_expedition(agent, config_path, params):
+    from .scheduler import find_map, managed_teams
+    from .task_parameters import expedition_routes
+    routes = expedition_routes(params, find_map, managed_teams())
+    yield from _build_expedition_manager(agent, config_path, {"_routes": routes})
+
+
+_wf_node("expedition", _build_workflow_expedition, "chore")
+from .task_parameters import expedition_fields
+_workflow.NODE_REGISTRY["expedition"]["params"] = expedition_fields(_map_select_field())
 
 
 install_daily_template(
@@ -1631,6 +1616,49 @@ async def startup():
         raise
 
 
+def _migrate_task_parameters():
+    """备份后一次性固化旧任务参数；已迁移值不再跟随单跑设置。"""
+    import copy
+    from .scheduler import load_config
+    from .task_parameters import expedition_snapshot, isolate_presets
+    settings = _load_panel_settings()
+    if settings.get("task_parameter_version") != 1:
+        path = _panel_settings_path()
+        if path.exists() and not path.with_suffix(path.suffix + ".parameters-v0.bak").exists():
+            path.with_suffix(path.suffix + ".parameters-v0.bak").write_bytes(path.read_bytes())
+        _migrate_daily_battle_settings()
+        settings = _load_panel_settings()
+    saved = settings.get("params", {})
+    fallback = _CFG_DATA.get("daily", {}).get("practice", {})
+    expedition = expedition_snapshot(load_config(), saved.get("sakura", {}) or {})
+    if settings.get("task_parameter_version") != 1:
+        daily = settings.setdefault("params", {}).setdefault("daily", {})
+        daily.setdefault("practice", copy.deepcopy(saved.get("practice") or fallback))
+        daily.setdefault("expedition", copy.deepcopy(expedition))
+        settings["task_parameter_version"] = 1
+        _save_panel_settings(settings)
+    presets = _workflow.load_presets()
+    # 默认日课也必须持久化，不能每次从其他设置重新生成。
+    if not any(p.get("id") == _workflow.DAILY_PRESET_ID for p in presets):
+        presets.insert(0, _workflow.daily_template_provider())
+    recipe = _CFG_DATA.get("forge", {}).get("recipe") or []
+    if len(recipe) == 4:
+        from .daily_workflow import RECIPE_KEYS
+        for preset in presets:
+            if preset.get("parameter_version") == 1:
+                continue
+            for node in preset.get("nodes", []):
+                if node["type"] == "forge":
+                    for key, value in zip(RECIPE_KEYS, recipe):
+                        node.setdefault("params", {}).setdefault(key, value)
+    isolated = isolate_presets(presets, _workflow.NODE_REGISTRY, saved, fallback, expedition)
+    if isolated != _workflow.load_presets():
+        path = _workflow._presets_path()
+        if path.exists() and not path.with_suffix(".parameters-v0.bak").exists():
+            path.with_suffix(".parameters-v0.bak").write_bytes(path.read_bytes())
+        _workflow.save_presets(isolated)
+
+
 async def _startup():
     if _ledger_mode():
         # 账房模式必须能在模拟器、ADB、MAA 全都没开的情况下独立使用。
@@ -1638,7 +1666,7 @@ async def _startup():
         # 因此这里不初始化；账本、规划与手动录入 API 仍照常可用。
         return
 
-    _migrate_daily_battle_settings()
+    _migrate_task_parameters()
     _start_broadcast()
     runner = get_runner()
     runner.set_message_callback(_on_script_message)
@@ -2010,22 +2038,25 @@ async def api_list_workflows():
 async def api_workflow_nodes():
     """节点目录：type/label/desc/category/params schema，前端渲染积木选择器用"""
     nodes = _workflow.node_catalog()
-    saved = _load_panel_settings().get("params", {})
     from touken.custom_formations import load_formations
+    formations = load_formations()
     formation_options = [[f["id"],
                           f'{f["name"]}（覆盖部队{_TEAM_CN[f["target_team"]]}）']
-                         for f in load_formations()]
+                         for f in formations]
     for node in nodes:
+        if node["type"] == "expedition":
+            node["params"] = [
+                {**field, "options": [["", "保持当前部队"]] + [
+                    [f["id"], f["name"]] for f in formations
+                    if int(f["target_team"]) == int(field["key"].split("_")[-1])
+                ]} if field["key"].startswith("preset_") else field
+                for field in node["params"]]
         if node["type"] == "apply_formation_preset":
             node["params"] = [
                 {**field, "options": [option[:] for option in formation_options],
                  "default": (formation_options[0][0] if formation_options else "")}
                 if field.get("key") == "preset_id" else field
                 for field in node.get("params") or []]
-        if _workflow.NODE_REGISTRY[node["type"]].get("merge_saved"):
-            node["saved_params"] = saved.get(node["type"], {})
-            if node["type"] == "practice" and not node["saved_params"]:
-                node["saved_params"] = _CFG_DATA.get("daily", {}).get("practice", {})
     return {"nodes": nodes}
 
 

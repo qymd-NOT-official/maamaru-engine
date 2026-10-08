@@ -179,7 +179,7 @@ class DailyWorkflowTests(unittest.TestCase):
             self.run_plan([_node("signin", on_error=policy)], after="sleep", agent=agent)
             self.assertEqual(any(c[0] == "logout_stream" for c in agent.calls), should_exit)
 
-    def test_daily_preserves_live_practice_settings_expedition_and_snapshot(self):
+    def test_daily_uses_own_practice_settings_expedition_and_snapshot(self):
         agent = _FakeAgent()
         agent._daily_expedition_step = Mock(return_value=iter(["✓"]))
         agent._closing_snapshot_stream = Mock(return_value=iter(["✓"]))
@@ -187,7 +187,7 @@ class DailyWorkflowTests(unittest.TestCase):
         with patch.object(server, "_load_panel_settings", return_value={"params": {
                 "practice": {"team_no": "4", "formation_mode": "auto", "formation": "横队阵"}}}), \
              patch("panel.scheduler.load_config", return_value={"common_plan": []}):
-            self.run_plan([_node("practice"), _node("expedition"), _node("forge", params={"times": 5}),
+            self.run_plan([_node("practice", params={"team_no": "4", "formation_mode": "auto", "formation": "横队阵"}), _node("expedition"), _node("forge", params={"times": 5}),
                            _node("dismantle"), _node("snapshot")], agent=agent, daily_mode=True)
         call = next(c for c in agent.calls if c[0] == "practice_stream")
         self.assertEqual(call[2], {"dry_run": False, "team_no": 4, "formation_mode": "auto", "formation": "横队阵"})
@@ -207,7 +207,7 @@ class DailyWorkflowTests(unittest.TestCase):
                 "params": {"practice": {"team_no": "preset:pf1"}}}), \
              patch.object(server, "_team_with_preset_stream", choose_preset):
             _, messages = self.run_plan(
-                [_node("practice")], agent=agent, daily_mode=True)
+                [_node("practice", params={"team_no": "preset:pf1"})], agent=agent, daily_mode=True)
         call = next(c for c in agent.calls if c[0] == "practice_stream")
         self.assertEqual(call[2]["team_no"], 4)
         self.assertIn("[部队预设] 已套用", messages)

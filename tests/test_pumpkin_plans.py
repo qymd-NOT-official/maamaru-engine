@@ -297,7 +297,7 @@ class PumpkinPlanTests(unittest.TestCase):
                            if field.get("key") == "sortie_mode")
         self.assertIn("osaka", [value for value, _ in daily_modes["options"]])
 
-    def test_daily_uses_standalone_expedition_common_plan(self):
+    def test_daily_uses_own_expedition_plan(self):
         agent = FakeAgent()
         common = {"common_plan": [
             {"team_no": 2, "map_code": "B2", "enabled": True},
@@ -309,10 +309,11 @@ class PumpkinPlanTests(unittest.TestCase):
                 patch("panel.scheduler.find_map", return_value={
                     "code": "B2", "name": "享保の大飢饉", "era": 2, "slot": 2,
                 }):
-            list(wrap(_build_daily)("config.json", {"steps": ["远征"]}))
+            list(wrap(_build_daily)("config.json", {"steps": ["远征"], "expedition": {"enabled_2": True, "map_2": "B2"}}))
 
         self.assertEqual(agent.daily_args["expedition_override"], [{
-            "team_no": 2, "map_code": "B2", "era": 2, "map_slot": 2,
+            "enabled": True, "team_no": 2, "map_code": "B2", "era": 2, "map_slot": 2,
+            "sakura_before_dispatch": False, "repair_threshold": "light",
             "map_name": "享保の大飢饉",
         }])
 
