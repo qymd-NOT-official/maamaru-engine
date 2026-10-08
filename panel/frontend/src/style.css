@@ -2326,3 +2326,13 @@ body[data-theme='pixel'] .home-edit-row button { color: #f2d26f; }
   .home-entry-tools { max-width: 96px; }
 }
 
+
+/* 单次执行的参数与日志在同一执务台内顺序展开。 */
+.single-task-office .home-center { display: flex; flex-direction: column; overflow-y: auto; }
+.single-task-office .home-center > * { flex-shrink: 0; }
+.office-task-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.office-task-picker label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.office-task-picker select { max-width: 100%; padding: 8px; color: var(--ink); background: var(--paper-panel); border: 1px solid var(--paper-line); border-radius: 6px; }
+@media (max-width: 760px) {
+  .single-task-office .home-center { overflow: visible; min-height: 0; }
+}
