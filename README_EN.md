@@ -8,7 +8,7 @@
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.2.0 (Chinese)](docs/releases/v1.2.0.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.0 (Chinese)](docs/releases/v1.3.0.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 Maamaru supports the **Simplified Chinese client on the China server**. The app is currently in Simplified Chinese.
 
@@ -26,11 +26,11 @@ Recent game state, new swords, and your own notes stay here.
 
 **2. Save a daily routine**
 
-Choose Execute Today’s Schedule (一键执行今日安排) on the home page to adopt the current expedition and Regiment Battle suggestions, then run dailies after the battles finish. Completed dailies are skipped. Check your saved gameplay settings first; arrangements remain editable in Planning.
+Set planned expeditions, the daily checklist, and the ending action in Planning. The home page and Planning share Execute Today’s Schedule: due expeditions depart first, followed by the daily routine. Daily, standalone gameplay, and custom workflow settings remain separate. Recommended Regiment Battle runs enable koban-funded ticket refill.
 
-![Today’s arrangements accepted](docs/assets/v1.2-today-arranged.png)
+![Today’s arrangements accepted](docs/assets/v1.3-daily-planning.png)
 
-You can also arrange the daily steps in order and save a workflow for reuse.
+Use the workflow builder for custom routines; the system daily checklist is configured in Planning.
 
 ![2. Save a daily routine](docs/assets/v1-daily-workflow.png)
 
@@ -224,3 +224,7 @@ In ancient times, Moonshot AI sent Kimi K3 down from the heavens to forge the ba
 > _This Honmaru follows the Great Python, with Java as its aide. If there are bugs, such is the Mandate of Heaven; if there are none, all credit belongs to our fellow cultivators._
 
 </details>
+
+## Japanese-server ledger
+
+Choose 日服本丸 in the launcher and connect the dedicated game browser to update balances, items, and sword records during play. Server-specific settings and records stay separate. This entry provides ledger features, not Chinese-server automation.
