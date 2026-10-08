@@ -247,8 +247,8 @@ def _run_wait_until(agent, params, config_path):
     yield f"[闹钟] ⏰ {label} 到点，起床接着干活"
 
 
-_node("wait_until", "等到指定时间再继续",
-      "用于流程中途等待，等待期间其他任务可以开工；整套流程几点开始请在时间表安排。跨刷新后记得接「登录游戏」。",
+_node("wait_until", "定时开启",
+      "到指定时间后开始执行后续步骤，等待期间其他任务可以照常运行。",
       "time", _run_wait_until, needs_agent=False,
       params=[{"key": "time", "type": "text", "label": "几点继续（24小时制）",
                "default": "04:05",

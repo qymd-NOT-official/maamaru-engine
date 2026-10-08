@@ -725,7 +725,7 @@ class WaitUntilNodeTests(unittest.TestCase):
         report = json.loads(
             (Path(tmp.name) / "latest_report.json").read_text("utf-8"))
         self.assertEqual(report["steps"], [
-            {"name": "等到指定时间再继续", "status": "✓"},
+            {"name": "定时开启", "status": "✓"},
             {"name": "签到", "status": "✓"},
         ])
         self.assertTrue(report["all_green"])
