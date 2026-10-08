@@ -13,6 +13,7 @@ import FormationPanel from './components/FormationPanel.vue'
 import WorkflowPanel from './components/WorkflowPanel.vue'
 import SystemPanel from './components/SystemPanel.vue'
 import DevToolsPanel from './components/DevToolsPanel.vue'
+import OverviewTaskCard from './components/OverviewTaskCard.vue'
 import AdvancedSettingLink from './components/AdvancedSettingLink.vue'
 import SwordListDrawer from './components/SwordListDrawer.vue'
 import MaamaruFrame from './components/MaamaruFrame.vue'
@@ -72,6 +73,7 @@ function workflowSaved(preset: WorkflowPreset) {
 const loading = ref(true)
 const message = ref('')
 type AppTab = 'home' | 'planning' | 'swords' | 'office' | 'tasks' | 'workflow' | 'devtools' | 'report' | 'archive' | 'system'
+type WorkshopTab = Extract<AppTab, 'office' | 'tasks' | 'workflow' | 'devtools'>
 const tab = ref<AppTab>('home')
 const raidRecoveryRunId = ref('')
 function openRaidRecovery(runId: string) {
@@ -81,11 +83,12 @@ function openRaidRecovery(runId: string) {
 watch(tab, value => { if (value !== 'planning') raidRecoveryRunId.value = '' })
 // 刀剑页内视图：刀帐 / 部队预设（'archive' tab 保留为旧入口兼容别名）
 const swordView = ref<'archive' | 'formation'>('archive')
-const workshopActive = computed(() => ['office', 'tasks'].includes(tab.value))
-const settingsActive = computed(() => ['system', 'workflow', 'devtools'].includes(tab.value))
+const lastWorkshopTab = ref<WorkshopTab>('office')
+const workshopActive = computed(() => ['office', 'tasks', 'workflow', 'devtools'].includes(tab.value))
 function openWorkshop() {
-  tab.value = 'office'
+  tab.value = lastWorkshopTab.value === 'devtools' && !devToolsEnabled.value ? 'workflow' : lastWorkshopTab.value
 }
+function openWorkshopTab(value: WorkshopTab) { tab.value = value }
 const ledgerMode = ref(false)
 const reportEntry = ref<'report' | 'records'>('report')
 const launcherAvailable = ref(false)
@@ -572,9 +575,9 @@ watch(selected, async () => {
   contentEl.value?.closest<HTMLElement>('.tasks-frame')?.scrollTo({ top: 0 })
 })
 watch(tab, value => {
-  if (value === 'tasks' && !selected.value.startsWith('$')) { tab.value = 'office'; return }
   stageCollapsed.value = value === 'planning' && !!raidRecoveryRunId.value
   if (stageCollapsed.value) stageCollapseLockedUntil = Date.now() + 260
+  if (value === 'office' || value === 'tasks' || value === 'workflow' || value === 'devtools') lastWorkshopTab.value = value
   if (value !== 'report') reportEntry.value = 'report'
   if (value === 'system') systemMounted.value = true
   if (value === 'devtools') devtoolsMounted.value = true
@@ -600,15 +603,15 @@ watch(tab, value => {
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
-          <button class="nav-system" :class="{ active: settingsActive }" @click="tab = 'system'">设置</button>
+          <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">设置</button>
         </template>
         <template v-else>
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
-          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">执务台</button>
+          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">功能</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' || tab === 'archive' }" @click="tab = 'swords'">刀剑</button>
-          <button class="nav-system" :class="{ active: settingsActive }" @click="tab = 'system'">设置</button>
+          <button class="nav-system" :class="{ active: tab === 'system' }" @click="tab = 'system'">设置</button>
         </template>
       </nav>
       <div class="top-status">
@@ -619,12 +622,13 @@ watch(tab, value => {
         <a v-if="!ledgerMode && !jpMode" href="/legacy">旧版备用</a>
       </div>
     </header>
-    <nav v-if="!ledgerMode && !jpMode && settingsActive" class="workshop-nav" aria-label="设置">
-      <div class="workshop-title"><strong>设置</strong><small>调整本丸偏好，保存自己的任务安排</small></div>
+    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
+      <div class="workshop-title"><strong>功能</strong><small>看实况、搭流程，需要时再调玩法</small></div>
       <div class="workshop-tabs">
-        <button type="button" :class="{ active: tab === 'system' }" @click="tab = 'system'">基本设置</button>
-        <button type="button" :class="{ active: tab === 'workflow' }" @click="tab = 'workflow'">自定义任务流</button>
-        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="tab = 'devtools'">开发工具</button>
+        <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
+        <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
+        <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
+        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
       </div>
     </nav>
     <nav v-if="!ledgerMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
@@ -706,12 +710,12 @@ watch(tab, value => {
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :server="appServer" :activity="jpMode ? null : dashboardRun" :busy="jpMode ? false : running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" @resume-raid="openRaidRecovery" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout single-task-office" @scroll="onStageScroll">
+    <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">
-          <h2>执行任务</h2>
+          <h2>常用功能</h2>
           <span v-if="homeScriptIndex >= 0 && !editingHome">{{ homeScriptIndex + 1 }} / {{ homeEntries.length }}</span>
-          <button type="button" class="home-customize" @click="editingHome ? finishHomeEdit() : startHomeEdit()">{{ editingHome ? '完成' : '整理入口' }}</button>
+          <button type="button" class="home-customize" @click="editingHome ? finishHomeEdit() : startHomeEdit()">{{ editingHome ? '完成' : '自定义' }}</button>
         </div>
         <div class="home-functions-carousel">
           <button type="button" class="home-functions-arrow previous" aria-label="上一个常用功能" :disabled="editingHome || homeScriptIndex <= 0" @click="chooseAdjacentHome(-1)">‹</button>
@@ -763,51 +767,21 @@ watch(tab, value => {
         <p v-if="eventHiddenLabels.length" class="home-functions-hidden-note">{{ eventHiddenLabels.join('、') }} 未开放，先收起来了</p>
       </aside>
       <section class="home-center">
-        <div class="office-task-picker">
-          <label>这次做什么
-            <select v-model="selected">
-              <optgroup v-for="group in scriptGroups" :key="group.label" :label="group.label.replace('配置', '任务')">
-                <option v-for="([key, info]) in group.entries" :key="key" :value="key">{{ info.label }}</option>
-              </optgroup>
-              <option v-for="preset in homeWorkflows.filter(item => item.id !== 'builtin-daily')" :key="preset.id" :value="`wf:${preset.id}`">{{ preset.name }}</option>
-            </select>
-          </label>
-          <button type="button" class="secondary" @click="selected = '$repair-list'; tab = 'tasks'">名单设置</button>
-        </div>
         <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>{{ stopping ? "正在停止…" : workflowRunningLabel }}</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
         <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="runSelectedWorkflow">跑这条</button></div>
-        <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「整理入口」里收拾一下常用功能吧</strong></div>
+        <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
         <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="run">运行日课</button></div>
-        <TaskForm
+        <OverviewTaskCard
           v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
-          :script-key="selected"
           :info="selectedInfo"
-          :model-value="params[selected] || {}"
+          :icon-src="taskIcon(selected)"
+          :params="params[selected] || {}"
           :running="running && current === selected"
           :busy="running"
-          :has-advanced="selected === 'expedition' || selected === 'pumpkin' || (selected === 'daily' && params.daily?.sortie_mode === 'pumpkin')"
-          :advanced-label="selected === 'expedition' ? '派遣设置' : '特有高级设置'"
-          @update:model-value="params[selected] = $event"
-          @save="save"
           @run="run"
           @stop="stop"
-        >
-          <template #advanced>
-            <ImmediateExpeditionFields v-if="selected === 'expedition'" ref="immediateExpedition" />
-            <AdvancedSettingLink
-              v-else-if="selected === 'pumpkin'"
-              title="南瓜目标名单"
-              :summary="pumpkinTargets.length ? `已选 ${pumpkinTargets.length} 把` : '未指定目标'"
-              @open="advancedDrawer = 'pumpkin'"
-            />
-            <AdvancedSettingLink
-              v-else
-              title="日课南瓜目标名单"
-              :summary="dailyPumpkinTargets.length ? `已选 ${dailyPumpkinTargets.length} 把` : '未指定目标'"
-              @open="advancedDrawer = 'daily-pumpkin'"
-            />
-          </template>
-        </TaskForm>
+          @configure="tab = 'tasks'"
+        />
         <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>

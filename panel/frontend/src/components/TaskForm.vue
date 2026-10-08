@@ -82,7 +82,7 @@ function update(key: string, value: unknown) {
     </div>
     <div v-if="!visibleFields.length && !hasAdvanced" class="task-empty-state">
       <strong>这个功能无需设置</strong>
-      <span>可以直接开始这次任务。</span>
+      <span>可以直接在这里启动，也可以回执务台把它放进常用功能。</span>
     </div>
     <div v-if="hasAdvanced" class="advanced-settings-slot">
       <span class="advanced-settings-label">{{ advancedLabel || '特有高级设置' }}</span>
