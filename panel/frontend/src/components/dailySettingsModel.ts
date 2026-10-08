@@ -4,7 +4,7 @@ export type DailyRow = { id: string; label: string; enabled: boolean; nodes: Wor
 // 临时保留去名单页之前的日课草稿，返回规划时恢复，不写入用户配置。
 export const listJumpDraft = { value: null as WorkflowPreset | null }
 export const dailyGroups = [
-  ['signin', '签到领鸡蛋', 'signin', 'free_gift'],
+  ['signin', '签到', 'signin', 'free_gift'],
   ['practice', '演练', 'practice'], ['naihanka', '内番', 'naihanka'],
   ['forge', '锻刀刀解', 'forge', 'dismantle'], ['synthesize', '合成', 'synthesize'], ['expedition', '指定远征', 'expedition'],
   ['yosari', '异去', 'yosari'], ['activity', '当期活动'],
@@ -17,7 +17,7 @@ export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
 }
 export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string): DailyRow[] {
   if (preset.daily_ui?.rows) {
-    const saved = clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
+    const saved = clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'signin' ? {...row, label: '签到'} : row.id === 'expedition' ? {...row, label: '指定远征'} : row)
     if (!saved.some(row => row.id === 'synthesize')) {
       const old = saved.find(row => row.id === 'custom' && row.nodes.some(node => node.type === 'synthesize'))
       const nodes = old?.nodes.filter(node => node.type === 'synthesize') || [makeNode('synthesize', defs)]

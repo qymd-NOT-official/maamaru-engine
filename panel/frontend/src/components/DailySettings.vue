@@ -25,7 +25,7 @@ const activityOptions = computed(() => (props.timeline.gameplay_options || []).f
 const enabledCount = computed(() => rows.value.filter(r => r.enabled).length)
 function definition(type: string) { return defs.value.find(d => d.type === type) }
 const activeHasParameters = computed(() => activeRow.value?.nodes.some(node => node.type === 'dismantle' || !!definition(node.type)?.params.length))
-const simpleDescription = computed(() => ({signin: '签到奖励和免费鸡蛋会一起领取。', naihanka: '开工后安排内番，已经安排过时自动跳过。', rewards: '领取已完成任务的奖励。', inbox: '领取杂物箱里的物品。', sugar: '日课收工前执行炼糖。'}[activeRow.value?.id || ''] || '无需额外设置，开工后会按顺序处理。'))
+const simpleDescription = computed(() => ({signin: '签到加领取万屋的暖心礼包。', naihanka: '开工后安排内番，已经安排过时自动跳过。', rewards: '领取已完成任务的奖励。', inbox: '领取杂物箱里的物品。', sugar: '日课收工前执行炼糖。'}[activeRow.value?.id || ''] || '无需额外设置，开工后会按顺序处理。'))
 function valueFor(node: WorkflowNode, key: string) { return node.params[key] ?? definition(node.type)?.params.find(f => f.key === key)?.default }
 function summary(row: DailyRow) {
   return row.nodes.map(node => {
@@ -137,7 +137,7 @@ async function stopToday() {
         <div class="daily-select-actions"><button :disabled="busy || running" @click="rows.forEach(r => r.enabled = r.id !== 'sugar')">日常全选</button><button :disabled="busy || running" @click="rows.forEach(r => r.enabled = false)">清空</button></div>
       </aside>
       <section v-if="activeRow" class="daily-parameters" :aria-label="`${activeRow.label}参数`">
-        <div class="daily-parameter-heading"><h4>{{ activeRow.label }}</h4><small>{{ activeRow.enabled ? '今日执行' : '今日不执行' }}</small></div><p v-if="summary(activeRow) !== '无需额外设置'" class="daily-summary">{{ summary(activeRow) }}</p>
+        <div class="daily-parameter-heading"><h4>{{ activeRow.label }}</h4><small>{{ activeRow.enabled ? '今日执行' : '今日不执行' }}</small></div><p v-if="activeRow.id === 'practice'" class="daily-summary">挑最简单的打，不打丙子椒林剑。</p><p v-else-if="summary(activeRow) !== '无需额外设置'" class="daily-summary">{{ summary(activeRow) }}</p>
         <p v-if="activeRow.id === 'expedition'" class="daily-muted">日课执行到这里时，按指定部队和地图派遣一次；时间表里的远征排班另行安排。</p>
         <p v-if="!activeRow.enabled" class="daily-muted">这项今天没有勾选，仍可提前调整设置。</p>
         <label v-if="activeRow.id === 'activity'" class="daily-activity">活动玩法

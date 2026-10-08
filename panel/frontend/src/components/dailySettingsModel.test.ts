@@ -6,7 +6,7 @@ describe('日课分组执行', () => {
  it('按约定顺序合并签到与锻刀，炼糖默认关闭', () => {
   const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[{type:'login',params:{},on_error:'stop'},{type:'free_gift',params:{},on_error:'continue'},{type:'forge',params:{times:7},on_error:'continue'}]}
   const rows = dailyRows(preset,definitions,'raid')
-  expect(rows.map(r=>r.label)).toEqual(['签到领鸡蛋','演练','内番','锻刀刀解','合成','指定远征','异去','当期活动','任务奖励','领杂物箱','炼糖'])
+  expect(rows.map(r=>r.label)).toEqual(['签到','演练','内番','锻刀刀解','合成','指定远征','异去','当期活动','任务奖励','领杂物箱','炼糖'])
   expect(rows.find(r=>r.id==='sugar')?.enabled).toBe(false)
   expect(compileDaily(rows,[]).map(n=>n.type)).toEqual(['boot_emulator','login','signin','free_gift','forge','dismantle'])
   expect(preset.nodes[2]?.params.times).toBe(7)
