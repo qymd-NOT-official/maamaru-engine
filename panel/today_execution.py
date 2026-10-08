@@ -130,6 +130,15 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         records = {} if same_day and old.get("today_execution") else suggestion_records(timeline)
         if daily_preset is not None and (daily_preset.get('daily_ui') or {}).get('plannedExpeditions') is False:
             records = {}
+        recommended_runs = None
+        if daily_preset and (daily_preset.get('daily_ui') or {}).get('useRecommendedRuns') is True and any(
+                node.get('type') == 'raid' for node in daily_preset.get('nodes', [])):
+            activity = timeline.get('activity') or {}
+            recommended_runs = sum(item.get('runs', 0) for item in timeline.get('suggestions', [])
+                                   if type(item.get('runs')) is int and item['runs'] > 0)
+            if (activity.get('name') != '联队战' or activity.get('target_runs', 0) <= 0
+                    or not 1 <= recommended_runs <= 99):
+                raise ValueError('暂时没有可用的建议圈数，请同步活动进度或改为手动圈数')
         cfg = scheduler.load_config()
         paused = cfg.get("automation", {}).get("paused_until", "")
         if records and paused and paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
@@ -146,6 +155,8 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
             for block in candidate["blocks"]:
                 if block["kind"] == "daily" and block["status"] == "pending":
                     block.update(status="ended", reason="今日已完成")
+        if recommended_runs is not None:
+            candidate['blocks'][0]['daily_recommended_runs'] = recommended_runs
         candidate["today_execution"] = True
         if daily_preset is not None:
             cutoff = plan['blocks'][0]['start_min']

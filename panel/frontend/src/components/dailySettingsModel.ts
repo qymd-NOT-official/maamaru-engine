@@ -55,3 +55,8 @@ export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activ
 export function compileDaily(rows: DailyRow[], tail: WorkflowNode[]): WorkflowNode[] {
   return clone([{type:'boot_emulator',params:{},on_error:'stop'}, {type:'login',params:{},on_error:'stop'}, ...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])
 }
+
+export function withRecommendedRuns(node: WorkflowNode, runs: number): WorkflowNode {
+  if (node.type !== 'raid' || !Number.isInteger(runs) || runs < 1 || runs > 99) throw new Error('建议圈数暂不可用')
+  return {...clone(node), params: {...clone(node.params), runs, auto_refill: true}}
+}

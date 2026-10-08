@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileDaily, dailyRows } from './dailySettingsModel'
+import { compileDaily, dailyRows, withRecommendedRuns } from './dailySettingsModel'
 import type { WorkflowPreset, WorkflowNodeDef } from '../types'
 const definitions = ['boot_emulator','login','signin','free_gift','practice','naihanka','forge','dismantle','synthesize','expedition','yosari','raid','task_rewards','inbox_supplies','sugar'].map(type => ({type,label:type,desc:'',category:'chore',params:[]})) as WorkflowNodeDef[]
 describe('日课分组执行', () => {
@@ -22,6 +22,12 @@ describe('日课分组执行', () => {
   expect(rows[1]).toMatchObject({label:'合成',enabled:false,nodes:[node]})
   expect(rows[2]?.nodes.map(n=>n.type)).toEqual(['snapshot'])
   expect(preset.daily_ui?.rows[1]?.nodes).toHaveLength(2)
+ })
+ it('建议圈数强制补充手形，保留手动配置供恢复', () => {
+  const manual = {type:'raid',params:{runs:3,auto_refill:false,team_no:'2'},on_error:'stop' as const}
+  expect(withRecommendedRuns(manual,12).params).toEqual({runs:12,auto_refill:true,team_no:'2'})
+  expect(manual.params).toEqual({runs:3,auto_refill:false,team_no:'2'})
+  expect(() => withRecommendedRuns(manual,0)).toThrow()
  })
  it('旧异去参数转换为独立节点，清单与执行参数不共享引用', () => {
   const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[{type:'daily_sortie',params:{sortie_mode:'yosari',yosari_map_no:4,yosari_runs:8,team_no:'2'},on_error:'continue'}]}

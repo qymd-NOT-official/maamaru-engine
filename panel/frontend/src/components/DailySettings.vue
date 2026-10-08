@@ -3,7 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import ParamField from './ParamField.vue'
 import { matchesRule } from '../visibility'
-import { compileDaily, dailyRows, listJumpDraft, makeNode, type DailyRow } from './dailySettingsModel'
+import { raidDayRecommendation } from './report/planningLinkModel'
+import { compileDaily, dailyRows, listJumpDraft, makeNode, withRecommendedRuns, type DailyRow } from './dailySettingsModel'
 import type { DayTimeline, WorkflowNode, WorkflowNodeDef, WorkflowPreset } from '../types'
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 const props = defineProps<{timeline: DayTimeline}>()
@@ -20,6 +21,12 @@ const after = ref<WorkflowPreset['after']>('none')
 const startTime = ref('')
 const plannedExpeditions = ref(true)
 const running = ref(false)
+const useRecommendedRuns = ref(false)
+const manualActivityParams = ref<WorkflowNode['params'] | null>(null)
+const recommendation = computed(() => {
+  const result = raidDayRecommendation(props.timeline, rows.value.find(r => r.id === 'activity')?.nodes[0]?.type === 'raid')
+  return result && result.runs > 99 ? {...result, available: false, reason: '本次建议超过 99 圈，请先调整活动目标或使用手动圈数。'} : result
+})
 const activeRow = computed(() => rows.value.find(r => r.id === selected.value))
 const activityOptions = computed(() => (props.timeline.gameplay_options || []).filter(o => o.available && o.script !== 'yosari' && o.script !== 'sortie'))
 const enabledCount = computed(() => rows.value.filter(r => r.enabled).length)
@@ -47,19 +54,32 @@ async function load() {
     if (!preset.value) throw new Error('默认日课没有加载出来，请重试')
     rows.value = dailyRows(preset.value, defs.value, activityOptions.value[0]?.script || '')
     tail.value = clone(preset.value.nodes.filter(n => ['snapshot', 'ledger_sync'].includes(n.type)))
+    useRecommendedRuns.value = preset.value.daily_ui?.useRecommendedRuns === true
+    manualActivityParams.value = preset.value.daily_ui?.manualActivityParams ? clone(preset.value.daily_ui.manualActivityParams) : null
     plannedExpeditions.value = preset.value.daily_ui?.plannedExpeditions !== false
     after.value = preset.value.after || 'none'; startTime.value = preset.value.daily_ui?.startTime || ''
   } catch (err) { message.value = err instanceof Error ? err.message : '日课加载失败' }
   finally { loading.value = false }
 }
 function changeActivity(event: Event) {
+  if (useRecommendedRuns.value) setRecommendedRuns(false)
   const type = (event.target as HTMLSelectElement).value
   const row = rows.value.find(r => r.id === 'activity')!
   row.nodes = [makeNode(type, defs.value)]
 }
+function setRecommendedRuns(enabled: boolean) {
+  const node = rows.value.find(row => row.id === 'activity')?.nodes[0]
+  if (!node || node.type !== 'raid') return
+  if (enabled) {
+    if (!recommendation.value?.available) return
+    manualActivityParams.value = clone(node.params)
+    node.params = withRecommendedRuns(node, recommendation.value.runs).params
+  } else if (manualActivityParams.value) node.params = clone(manualActivityParams.value)
+  useRecommendedRuns.value = enabled
+}
 function openDismantleList() {
   if (preset.value) listJumpDraft.value = {...clone(preset.value), nodes: compileDaily(rows.value, tail.value), after: after.value,
-    daily_ui: { rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value }}
+    daily_ui: { rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined }}
   emit('openDismantleList')
 }
 async function saveExpeditionPrefs(rounds: number, teams: number[]) {
@@ -86,12 +106,17 @@ async function save(start = false) {
     const current = await api.scripts()
     running.value = current.running
     if (current.running) throw new Error('当前任务收工后再调整日课')
+    const activityNode = rows.value.find(row => row.id === 'activity')?.nodes[0]
+    if (useRecommendedRuns.value && activityNode?.type === 'raid') {
+      if (!recommendation.value?.available) throw new Error(recommendation.value?.reason || '暂时没有可用的建议圈数')
+      activityNode.params = withRecommendedRuns(activityNode, recommendation.value.runs).params
+    }
     const nodes = compileDaily(rows.value, tail.value)
     if (!enabledCount.value) throw new Error('先勾选一项日课')
     const activity = rows.value.find(r => r.id === 'activity')
     if (activity?.enabled && (!activity.nodes.length || !activityOptions.value.some(d => d.script === activity.nodes[0]?.type))) throw new Error('当前选择的活动未开放，请更换活动或取消勾选')
     const body: WorkflowPreset = {...preset.value, nodes, after: after.value, daily_mode: true,
-      daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value}}
+      daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined}}
     const result = await api.updateWorkflow(body)
     if (!result.ok) throw new Error('日课没有保存成功')
     preset.value = body
@@ -147,6 +172,10 @@ async function stopToday() {
             <option v-for="option in activityOptions" :key="option.script" :value="option.script">{{ option.label }}</option>
           </select>
         </label>
+        <div v-if="activeRow.id === 'activity' && activeRow.nodes[0]?.type === 'raid'" class="daily-recommendation">
+          <label><input type="checkbox" :checked="useRecommendedRuns" :disabled="busy || running || (!useRecommendedRuns && !recommendation?.available)" @change="setRecommendedRuns(($event.target as HTMLInputElement).checked)" /> 使用建议圈数</label>
+          <p class="daily-muted">{{ recommendation?.available ? `本次建议 ${recommendation.runs} 圈` : recommendation?.reason }}<template v-if="useRecommendedRuns"> · 手形不足时使用小判补充</template></p>
+        </div>
         <p v-if="!activeHasParameters && activeRow.nodes.length" class="daily-muted">{{ simpleDescription }}</p>
         <template v-if="activeHasParameters">
         <fieldset v-for="(node, index) in activeRow.nodes" :key="`${activeRow.id}-${index}-${node.type}`" :disabled="busy || running">
@@ -154,7 +183,7 @@ async function stopToday() {
           <button v-if="node.type === 'dismantle'" type="button" @click="openDismantleList">刀解名单 →</button>
           <div class="daily-fields">
             <template v-for="field in definition(node.type)?.params || []" :key="field.key">
-              <ParamField v-if="matchesRule(field.visibleWhen, key => valueFor(node, key))" :field="field" :model-value="node.params[field.key] ?? field.default" @update:model-value="node.params[field.key] = $event" />
+              <ParamField v-if="matchesRule(field.visibleWhen, key => valueFor(node, key)) && !(activeRow.id === 'activity' && useRecommendedRuns && ['runs', 'auto_refill'].includes(field.key))" :field="field" :model-value="node.params[field.key] ?? field.default" @update:model-value="node.params[field.key] = $event" />
             </template>
           </div>
           <p v-if="!definition(node.type)?.params.length" class="daily-muted">无需设置，开工后会按顺序处理。</p>
@@ -227,6 +256,8 @@ async function stopToday() {
 .daily-start { margin-left: auto; display: grid; gap: 8px; }
 .daily-start > small { text-align: right; }
 .daily-start .primary { padding: 11px 22px; border-radius: 6px; font-weight: bold; }
+.daily-recommendation { margin-top: 16px; padding: 12px; background: var(--paper-panel); border-radius: 5px; }
+.daily-recommendation label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .daily-stop { margin-top: 12px; padding: 5px 0; border: 0; background: transparent; color: var(--ink-dim); text-decoration: underline; text-underline-offset: 4px; font-size: 12px; }
 @media(max-width: 760px) { .daily-settings-layout, .daily-fields { grid-template-columns: minmax(0, 1fr); } .daily-settings-layout { gap: 18px; } .daily-planned-expeditions { gap: 14px; } .daily-expedition-title { width: 100%; } .daily-start { margin-left: 0; width: 100%; } .daily-start > small { text-align: left; } .daily-parameters { padding: 18px; } }
 </style>

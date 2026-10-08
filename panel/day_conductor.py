@@ -37,9 +37,12 @@ def _digest(value) -> str:
 
 def _workflow_block_signature(preset: dict) -> str:
     """workflow 块的授权签名：节点规整结果 + 收尾 + 日课模式。"""
-    return _digest({"nodes": workflow.normalize_nodes(preset["nodes"]),
-                    "after": preset.get("after", "none"),
-                    "daily_mode": bool(preset.get("daily_mode", False))})
+    payload = {"nodes": workflow.normalize_nodes(preset["nodes"]),
+               "after": preset.get("after", "none"),
+               "daily_mode": bool(preset.get("daily_mode", False))}
+    if (preset.get('daily_ui') or {}).get('useRecommendedRuns') is True:
+        payload['use_recommended_runs'] = True
+    return _digest(payload)
 
 
 def _migrate_v1_block(block: dict, signature) -> dict:
@@ -492,7 +495,8 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             block["reason"] = "任务流改过了，请重新开启大总管"
         else:
             run_id = runner.start("workflow", config_path,
-                                  {"workflow_id": block["workflow_id"]})
+                                  {"workflow_id": block["workflow_id"],
+                                   **({"daily_recommended_runs": block["daily_recommended_runs"]} if "daily_recommended_runs" in block else {})})
             if not run_id:
                 return False
             block.update(status="running", run_id=run_id, started_at=now)

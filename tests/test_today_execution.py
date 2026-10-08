@@ -161,6 +161,28 @@ class TodayExecutionTests(unittest.TestCase):
         self.assertEqual(ec.load_choice_sets(self.paths['choices_path'])[1], {})
         self.assertEqual(dc.load_state(self.paths['state_path'])['initial_expedition_keys'], [])
 
+    def test_recommended_runs_are_refreshed_when_today_is_armed(self):
+        preset = {'id': 'builtin-daily', 'name': '日课', 'nodes': [{'type': 'raid', 'params': {'runs': 3}}],
+                  'daily_ui': {'useRecommendedRuns': True, 'plannedExpeditions': False}}
+        self.day['suggestions'] = [{'runs': 5}, {'runs': 7}]
+        with patch.object(dc.workflow, 'find_preset', return_value=preset):
+            execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
+            state = dc.load_state(self.paths['state_path'])
+            self.assertEqual(state['blocks'][0]['daily_recommended_runs'], 12)
+            with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}):
+                dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
+                        lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
+        self.assertEqual(self.runner.calls[0][2]['daily_recommended_runs'], 12)
+        self.assertEqual(preset['nodes'][0]['params']['runs'], 3)
+
+    def test_missing_recommendation_does_not_arm_or_adopt_departures(self):
+        preset = {'id': 'builtin-daily', 'nodes': [{'type': 'raid', 'params': {}}],
+                  'daily_ui': {'useRecommendedRuns': True}}
+        self.day['suggestions'] = []
+        with self.assertRaisesRegex(ValueError, '建议圈数'):
+            execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
+        self.assertFalse(any(p.exists() for p in self.paths.values()))
+
     def test_ledger_endpoint_is_blocked(self):
         from fastapi.testclient import TestClient
         with patch.object(server, '_ledger_mode', return_value=True):

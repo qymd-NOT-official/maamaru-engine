@@ -76,6 +76,16 @@ class DailyWorkflowTests(unittest.TestCase):
             list(server._build_workflow("fake.json", legacy))
             self.assertEqual([n['type'] for n in run.call_args.args[1]], ['login', 'signin'])
 
+    def test_daily_recommendation_always_enables_ticket_refill_in_worker(self):
+        preset = {'id': 'builtin-daily', 'name': '日课', 'nodes': [_node('raid', params={'runs':3, 'auto_refill':False})]}
+        with patch.object(workflow, 'find_preset', return_value=preset), patch.object(
+                workflow, 'run_workflow', return_value=iter(())) as run:
+            list(server._build_workflow('fake.json', {'workflow_id': 'builtin-daily', 'daily_recommended_runs': 12}))
+            raid = next(n for n in run.call_args.args[1] if n['type'] == 'raid')
+            self.assertEqual(raid['params']['runs'], 12)
+            self.assertIs(raid['params']['auto_refill'], True)
+        self.assertFalse(preset['nodes'][0]['params']['auto_refill'])
+
     def test_template_imports_selected_steps_and_day_specific_parameters(self):
         saved = {"params": {"daily": {"steps": ["演练", "锻刀", "出阵"], "after": "shutdown",
                     "sortie_mode": "yosari", "yosari_runs": 8, "team_no": "2"}}}

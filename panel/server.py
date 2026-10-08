@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import copy
 import json
 import os
 import re
@@ -1503,12 +1504,19 @@ def _build_workflow(config_path, params):
         raise FlowAborted("等待期间任务流已修改，续跑已停止，请重新安排")
     params["workflow_preset_signature"] = preset_signature
     try:
-        plan = _workflow.normalize_nodes(preset.get("nodes"))
+        plan = copy.deepcopy(_workflow.normalize_nodes(preset.get("nodes")))
     except _workflow.WorkflowError as exc:
         yield f"[工作流] 预设校验翻车: {exc}"
         return
     if preset.get('id') == _workflow.DAILY_PRESET_ID and (
             not params.get('workflow_resume') or params.get('daily_bootstrap_version') == 1):
+        recommended_runs = params.get('daily_recommended_runs')
+        if recommended_runs is not None:
+            if type(recommended_runs) is not int or not 1 <= recommended_runs <= 99:
+                raise FlowAborted('建议圈数无效，日课停止')
+            for node in plan:
+                if node['type'] == 'raid':
+                    node['params'].update(runs=recommended_runs, auto_refill=True)
         params['daily_bootstrap_version'] = 1
         plan = [node for node in plan if node['type'] not in {'boot_emulator', 'login'}]
         plan[:0] = [{'type': 'boot_emulator', 'params': {}, 'on_error': 'stop'},
