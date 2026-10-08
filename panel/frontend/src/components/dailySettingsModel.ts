@@ -6,7 +6,7 @@ export const listJumpDraft = { value: null as WorkflowPreset | null }
 export const dailyGroups = [
   ['signin', '签到领鸡蛋', 'signin', 'free_gift'],
   ['practice', '演练', 'practice'], ['naihanka', '内番', 'naihanka'],
-  ['forge', '锻刀刀解', 'forge', 'dismantle'], ['expedition', '指定远征', 'expedition'],
+  ['forge', '锻刀刀解', 'forge', 'dismantle'], ['synthesize', '合成', 'synthesize'], ['expedition', '指定远征', 'expedition'],
   ['yosari', '异去', 'yosari'], ['activity', '当期活动'],
   ['rewards', '任务奖励', 'task_rewards'], ['inbox', '领杂物箱', 'inbox_supplies'],
   ['sugar', '炼糖', 'sugar'],
@@ -16,7 +16,16 @@ export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
   return {type, on_error: 'stop', params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
 }
 export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string): DailyRow[] {
-  if (preset.daily_ui?.rows) return clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
+  if (preset.daily_ui?.rows) {
+    const saved = clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
+    if (!saved.some(row => row.id === 'synthesize')) {
+      const old = saved.find(row => row.id === 'custom' && row.nodes.some(node => node.type === 'synthesize'))
+      const nodes = old?.nodes.filter(node => node.type === 'synthesize') || [makeNode('synthesize', defs)]
+      if (old) old.nodes = old.nodes.filter(node => node.type !== 'synthesize')
+      saved.splice(saved.findIndex(row => row.id === 'forge') + 1, 0, {id: 'synthesize', label: '合成', enabled: old?.enabled || false, nodes})
+    }
+    return saved.filter(row => row.id !== 'custom' || row.nodes.length)
+  }
   const used = new Set<WorkflowNode>(preset.nodes.filter(n => ['boot_emulator', 'login'].includes(n.type)))
   const rows = dailyGroups.map(([id, label, ...types]) => {
     if (id === 'activity' && activity) types = [activity]
