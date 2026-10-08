@@ -149,6 +149,9 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     source_node = source_nodes[raid_index]
     saved = raid_settings if isinstance(raid_settings, dict) else {}
     effective = {**saved, **source_node["params"]}
+    # 一键安排按目标圈数执行；单跑的节省手形设置不影响今日安排。
+    if workflow_id == BUILTIN_ID:
+        effective["auto_refill"] = True
     node = {**source_node, "params": effective}
     raw_team = effective.get("team_no", "3")
     if isinstance(raw_team, str) and raw_team.startswith("preset:"):
@@ -173,8 +176,8 @@ def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     source_signature = _digest({**signature_payload, "nodes": source_nodes})
     effective_signature = _digest({**signature_payload, "nodes": nodes})
     compatible = {source_signature, effective_signature}
-    # 旧面板强制补充手形的签名，仅在玩家本就明确开启补充时兼容。
-    if workflow_id == BUILTIN_ID and saved.get("auto_refill") is True:
+    # 内置今日安排固定补充手形，兼容旧安排的同一策略签名。
+    if workflow_id == BUILTIN_ID:
         legacy_nodes = [{**source_node, "params": {"auto_refill": True}}]
         compatible.add(_digest({**signature_payload, "nodes": legacy_nodes}))
     return {"name": preset["name"], "team_no": team_no, "nodes": nodes,

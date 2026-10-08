@@ -585,11 +585,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_builtin_scheduled_raid_respects_saved_ticket_setting():
+def test_builtin_scheduled_raid_refills_without_changing_solo_setting():
     settings = {"team_no": "3", "auto_refill": False}
     spec = dc.workflow_spec(dc.BUILTIN_ID, settings)
-    assert spec["nodes"][0]["params"]["auto_refill"] is False
+    assert spec["nodes"][0]["params"]["auto_refill"] is True
     assert settings["auto_refill"] is False
+
+
+def test_daily_raid_refills_even_with_old_disabled_setting():
+    from panel.server import _daily_plan_inputs
+    plan = _daily_plan_inputs({'sortie_mode': 'raid', 'raid_rounds': 21,
+                               'raid_auto_refill': False})[2]
+    assert plan['auto_buy_ticket'] is True
+    assert plan['max_buys'] == 21
 
 
 class RaidRecoveryTests(unittest.TestCase):

@@ -1352,6 +1352,7 @@ const caption = computed(() => {
           </div>
         </div>
         <p v-if="data.expedition_advice_note && !data.expedition_advice_note.includes('不用再点')" class="tl-expedition-help-note" role="status">{{ data.expedition_advice_note }}</p>
+        <p v-if="data.booking?.blocks.some(row => row.kind === 'raid')" class="tl-booking-message">一键执行今日联队战会使用小判补充手形，跑够安排的圈数；单跑的「不补充」设置保持不变。</p>
         <details v-for="s in (data.expedition_suggestions || []).filter(s => s.blocked_resource && s.restrictions?.length)" :key="`restriction-${s.key}`" class="tl-expedition-help-note">
           <summary>{{ s.blocked_resource }}暂时排不出，部队{{ TEAM_NAMES[s.team_no] ?? s.team_no }}改补{{ s.resource }} · 查看限制</summary>
           <p v-for="reason in s.restrictions" :key="reason">{{ reason }}</p>
@@ -1403,7 +1404,7 @@ const caption = computed(() => {
               <li v-for="(step, stepIndex) in presetSteps(row.workflow_id)" :key="stepIndex"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : stepIndex === 0 ? '开始后' : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
             </ol>
           </div>
-          <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队、换队长和补充手形等使用已保存的玩法设置；次数以本段安排为准。</p>
+          <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队与换队长使用已保存的玩法设置；次数以本段安排为准。内置今日联队战会使用小判补充手形，单跑的补充开关不影响它；其他玩法与自定义任务流保留各自设置。</p>
           <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
           <div class="tl-booking-actions">
             <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存' }}</button>

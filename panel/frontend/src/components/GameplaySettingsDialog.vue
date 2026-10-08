@@ -16,6 +16,7 @@ const schedule = ref<{time: string; runs: number; choices?: {script: string; lab
 let requestId = 0
 const fields = computed(() => (info.value?.params || []).filter(field =>
   !['runs', 'rounds', 'loops', 'floors', 'max_runs', 'refill_run_limit'].includes(field.key)
+  && !(schedule.value && script.value === 'raid' && field.key === 'auto_refill')
   && matchesRule(field.visibleWhen, key => params.value[key])))
 
 async function open(key: string, booking?: typeof schedule.value) {
@@ -83,6 +84,7 @@ defineExpose({ open })
       <label>圈数<input v-model.number="schedule.runs" type="number" min="1" max="99" :disabled="busy" /></label>
     </div>
     <p v-if="schedule" class="note">00:00–03:59 为次日凌晨；保存后按这段时间和圈数安排出阵。</p>
+    <p v-if="schedule && script === 'raid'" class="note">今日联队战自动使用小判补充手形，跑够本段圈数；不会改动单跑的补充开关。</p>
     <p v-else class="note">与玩法页共用设置；本段出阵次数以时间表为准。保存后还需保存时间表，才会到点开工。</p>
     <div class="gameplay-fields">
       <ParamField v-for="field in fields" :key="field.key" :field="field"
