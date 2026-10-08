@@ -1,11 +1,13 @@
 import type { WorkflowNode, WorkflowNodeDef, WorkflowPreset } from '../types'
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 export type DailyRow = { id: string; label: string; enabled: boolean; nodes: WorkflowNode[] }
+// 临时保留去名单页之前的日课草稿，返回规划时恢复，不写入用户配置。
+export const listJumpDraft = { value: null as WorkflowPreset | null }
 export const dailyGroups = [
   ['boot', '启动游戏', 'boot_emulator', 'login'],
   ['signin', '签到领鸡蛋', 'signin', 'free_gift'],
   ['practice', '演练', 'practice'], ['naihanka', '内番', 'naihanka'],
-  ['forge', '锻刀刀解', 'forge', 'dismantle'], ['expedition', '远征', 'expedition'],
+  ['forge', '锻刀刀解', 'forge', 'dismantle'], ['expedition', '指定远征', 'expedition'],
   ['yosari', '异去', 'yosari'], ['activity', '当期活动'],
   ['rewards', '任务奖励', 'task_rewards'], ['inbox', '领杂物箱', 'inbox_supplies'],
   ['sugar', '炼糖', 'sugar'],
@@ -15,7 +17,7 @@ export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
   return {type, on_error: 'stop', params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
 }
 export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string): DailyRow[] {
-  if (preset.daily_ui?.rows) return clone(preset.daily_ui.rows)
+  if (preset.daily_ui?.rows) return clone(preset.daily_ui.rows).map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
   const used = new Set<WorkflowNode>()
   const rows = dailyGroups.map(([id, label, ...types]) => {
     if (id === 'activity' && activity) types = [activity]

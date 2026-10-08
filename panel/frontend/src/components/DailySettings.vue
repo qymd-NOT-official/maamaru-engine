@@ -3,11 +3,11 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import ParamField from './ParamField.vue'
 import { matchesRule } from '../visibility'
-import { compileDaily, dailyRows, makeNode, type DailyRow } from './dailySettingsModel'
+import { compileDaily, dailyRows, listJumpDraft, makeNode, type DailyRow } from './dailySettingsModel'
 import type { DayTimeline, WorkflowNode, WorkflowNodeDef, WorkflowPreset } from '../types'
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 const props = defineProps<{timeline: DayTimeline}>()
-const emit = defineEmits<{saved: []}>()
+const emit = defineEmits<{saved: []; openDismantleList: []}>()
 const defs = ref<WorkflowNodeDef[]>([])
 const rows = ref<DailyRow[]>([])
 const preset = ref<WorkflowPreset | null>(null)
@@ -39,7 +39,8 @@ async function load() {
   try {
     const [library, catalog, state] = await Promise.all([api.workflows(), api.workflowNodes(), api.scripts()])
     defs.value = catalog.nodes; running.value = state.running
-    preset.value = library.presets.find(p => p.id === 'builtin-daily') || null
+    preset.value = listJumpDraft.value || library.presets.find(p => p.id === 'builtin-daily') || null
+    listJumpDraft.value = null
     if (!preset.value) throw new Error('默认日课没有加载出来，请重试')
     rows.value = dailyRows(preset.value, defs.value, activityOptions.value[0]?.script || '')
     tail.value = clone(preset.value.nodes.filter(n => ['snapshot', 'ledger_sync'].includes(n.type)))
@@ -51,6 +52,11 @@ function changeActivity(event: Event) {
   const type = (event.target as HTMLSelectElement).value
   const row = rows.value.find(r => r.id === 'activity')!
   row.nodes = [makeNode(type, defs.value)]
+}
+function openDismantleList() {
+  if (preset.value) listJumpDraft.value = {...clone(preset.value), nodes: compileDaily(rows.value, tail.value), after: after.value,
+    daily_ui: { rows: clone(rows.value), startTime: startTime.value }}
+  emit('openDismantleList')
 }
 async function save(start = false) {
   if (!preset.value || busy.value) return
@@ -115,6 +121,7 @@ async function stopToday() {
       </aside>
       <section v-if="activeRow" class="daily-parameters" :aria-label="`${activeRow.label}参数`">
         <h4>{{ activeRow.label }}</h4>
+        <p v-if="activeRow.id === 'expedition'" class="daily-muted">日课执行到这里时，按指定部队和地图派遣一次；时间表里的远征排班另行安排。</p>
         <p v-if="!activeRow.enabled" class="daily-muted">这项今天没有勾选，仍可提前调整设置。</p>
         <label v-if="activeRow.id === 'activity'" class="daily-activity">活动玩法
           <select :value="activeRow.nodes[0]?.type || ''" :disabled="busy || running" @change="changeActivity">
@@ -125,6 +132,7 @@ async function stopToday() {
         </label>
         <fieldset v-for="(node, index) in activeRow.nodes" :key="`${activeRow.id}-${index}-${node.type}`" :disabled="busy || running">
           <legend v-if="activeRow.nodes.length > 1">{{ definition(node.type)?.label || node.type }}</legend>
+          <button v-if="node.type === 'dismantle'" type="button" @click="openDismantleList">刀解名单 →</button>
           <div class="daily-fields">
             <template v-for="field in definition(node.type)?.params || []" :key="field.key">
               <ParamField v-if="matchesRule(field.visibleWhen, key => valueFor(node, key))" :field="field" :model-value="node.params[field.key] ?? field.default" @update:model-value="node.params[field.key] = $event" />

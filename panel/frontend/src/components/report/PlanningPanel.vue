@@ -20,6 +20,7 @@ const isJp = computed(() => props.server === 'jp')
 const emit = defineEmits<{
   gameplaySettingsSaved: [script: string, params: ScriptParams]
   goalSaved: []
+  openDismantleList: []
   openExpedition: []
   openActivity: [script: 'hanafuda' | 'raid', loops: number]
 }>()
@@ -430,7 +431,7 @@ onMounted(load)
     <p v-if="goalNotice" class="planning-success" role="status">✓ {{ goalNotice }}</p>
 
     <p v-if="isJp" class="planning-success">日服目标独立保存。活动日程、玩法试算、自动排班与执行待适配；暂不预测达成日期。</p>
-    <DayTimeline :daily-settings="!isJp" v-if="!isJp" :recovery-run-id="props.recoveryRunId" :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
+    <DayTimeline :daily-settings="!isJp" v-if="!isJp" :recovery-run-id="props.recoveryRunId" :refresh-request="focusRefresh" :adopt-recommendation-request="dayTimelineRequest" collapsible @open-dismantle-list="emit('openDismantleList')" @timeline-updated="dayTimeline = $event" @gameplay-settings-saved="(script, params) => emit('gameplaySettingsSaved', script, params)" @open-expedition="emit('openExpedition')" />
     <PlanningOverview v-if="planning && !isJp" :planning="planning" :budgets="budgetGoals" :resource-focus="dayTimeline?.expedition_help.resource_focus" :suggested-resource="dayTimeline?.expedition_help.suggested_resource" :focus-saving="focusSaving" @change-focus="changeResourceFocus" @open-expedition="emit('openExpedition')" />
     <EventTimeline v-if="!isJp"
       id="event-timeline"

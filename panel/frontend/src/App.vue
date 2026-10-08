@@ -261,6 +261,10 @@ async function startWorkflow(preset: WorkflowIdentity) {
   } catch (error) { message.value = error instanceof Error ? error.message : '启动失败，请重试' }
   finally { startingWorkflow.value = false }
 }
+function openDismantleList() {
+  selected.value = '$dismantle-list'
+  tab.value = 'tasks'
+}
 function openWishlist() {
   selected.value = '$wishlist'
   tab.value = 'tasks'
@@ -786,7 +790,7 @@ watch(tab, value => {
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel @open-dismantle-list="openDismantleList" :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'swords' || tab === 'archive')" variant="single" page-class="single-layout archive-page" @scroll="onStageScroll"><SwordArchivePanel v-if="swordView === 'archive'" :server="jpMode ? 'jp' : ''" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" /><FormationPanel v-else :server="appServer" :running="running" :current="current" :stopping="stopping" :starting="startingScript === 'sword_inventory'" @run-inventory="runScript('sword_inventory')" @stop="stop" @notify="message = $event" /></MaamaruFrame>
     <div v-else-if="loading" class="loading">正在整理本丸配置……</div>
     <!-- 系统设置表单保留组件，切去别的页签再回来不丢已填的内容。 -->

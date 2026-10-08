@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: b
   collapsible: false,
   adoptRecommendationRequest: 0,
 })
-const emit = defineEmits<{ openExpedition: []; timelineUpdated: [timeline: DayTimeline | null]; gameplaySettingsSaved: [script: string, params: ScriptParams] }>()
+const emit = defineEmits<{ openExpedition: []; openDismantleList: []; timelineUpdated: [timeline: DayTimeline | null]; gameplaySettingsSaved: [script: string, params: ScriptParams] }>()
 
 const DAY = 1680
 // workflow/daily 没有可靠时长，预计收工按 30 分钟估算（与后端口径一致）
@@ -1444,7 +1444,7 @@ const caption = computed(() => {
       </template>
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
-    <DailySettings v-if="dailySettings && data" :timeline="data" @saved="load(true)" />
+    <DailySettings v-if="dailySettings && data" :timeline="data" @saved="load(true)" @open-dismantle-list="emit('openDismantleList')" />
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
   <dialog ref="expeditionDialog" class="tl-expedition-dialog" @cancel="expeditionConfigBusy && $event.preventDefault()">
