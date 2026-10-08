@@ -1206,6 +1206,10 @@ const showDetails = computed(() => !props.collapsible || expanded.value)
 const caption = computed(() => {
   const running = runBlocks.value.find((block) => block.current)
   if (running) return `正在跑 ${running.rowTitle}`
+  if (props.dailySettings) {
+    const count = data.value?.expeditions.filter(e => e.will_run && e.kind !== 'running' && !['expired', 'failed_unknown', 'dispatched'].includes(e.state)).length || 0
+    return count ? `已安排远征 ${count} 班 · 展开查看时段` : '查看远征往返与任务时段'
+  }
   const activity = data.value?.activity
   if (activity) {
     if (!activity.target_runs) return '联队战今天的进度已够，等下一次记账再更新'
@@ -1226,7 +1230,7 @@ const caption = computed(() => {
   <PaperCard variant="dashboard" class="timeline-card" :class="{ 'is-collapsible': props.collapsible, 'is-collapsed': props.collapsible && !expanded }">
     <div class="tl-card-head">
       <div>
-        <h3><span aria-hidden="true">◷</span> 今天的时间表</h3>
+        <h3><span aria-hidden="true">◷</span> {{ dailySettings ? '今日时间表' : '今天的时间表' }}</h3>
         <p>{{ caption }}</p>
       </div>
       <div class="tl-card-actions">
@@ -1234,7 +1238,7 @@ const caption = computed(() => {
         <time v-if="data">{{ fmtMin(nowMin) }}</time>
         <button type="button" :disabled="refreshing || !!drag || dragBusy" @click="refreshTimeline">{{ refreshing ? '刷新中…' : '刷新' }}</button>
         <button v-if="props.collapsible" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
-          {{ expanded ? '收起' : '展开' }}
+          {{ expanded ? '收起' : dailySettings ? '查看时间表' : '展开' }}
         </button>
       </div>
     </div>
