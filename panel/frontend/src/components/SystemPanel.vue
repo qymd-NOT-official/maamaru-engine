@@ -34,10 +34,11 @@ function markTestPoint(event: MouseEvent) {
   const rect = (event.currentTarget as HTMLImageElement).getBoundingClientRect()
   testPoint.value = { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height }
 }
-async function startClickTest(immediate = false) {
+async function startClickTest(immediate = false, mode?: 'background' | 'screenoff') {
   if (!testPoint.value || clickBusy.value) return
   clickBusy.value = true
-  try { clickProbe.value = await api.jpClickProbe(immediate ? 'immediate' : 'start', testPoint.value); calibration.value = ''; testPoint.value = null }
+  if (mode === 'screenoff' && !window.confirm('确认 3 秒后关闭屏幕，并在随后 10 秒后只点一次结成？不改电源设置，移动鼠标可重新亮屏。')) { clickBusy.value = false; return }
+  try { clickProbe.value = await api.jpClickProbe(mode || (immediate ? 'immediate' : 'start'), testPoint.value); calibration.value = ''; testPoint.value = null }
   catch (error) { message.value = error instanceof Error ? error.message : '测试未能启动' }
   finally { clickBusy.value = false }
 }
@@ -136,8 +137,8 @@ const qqBroadcastEnabled = computed({
           <p v-if="probe" role="status">{{ probe.state === 'running' ? '诊断进行中' : probe.state === 'done' ? '诊断已结束' : '尚未开始' }} · 成功截图 {{ probe.successful_frames ?? 0 }} 次 · 失败 {{ probe.failed_frames ?? 0 }} 次 · 画面变化 {{ probe.changed_frames ?? 0 }} 次 · 近黑画面 {{ probe.near_black_frames ?? 0 }} 次</p>
           <p v-if="probe?.last_error">{{ probe.last_error }}</p><p>静止画面不等于卡死，画面变化也不代表操作成功。此诊断不检测屏幕是否真的关闭、不测试点击或拖动，不能单独证明熄屏自动化可用。</p>
           <h3>单次点击测试：先亮屏，再熄屏</h3>
-          <p>先标定「结成」，选择亮屏立即测试，约 10 秒后查看结果并核对游戏。亮屏确认能进入结成后，手动回本丸、重新获取截图，再进行第 6 分钟定时测试。两种模式都只点一次。</p>
-          <p>游戏停在本丸，获取截图后在图上点击「结成」并确认。之后保持游戏画面、窗口尺寸不变，接电并放开鼠标键盘，确认屏幕自行熄灭。约 7 分钟后查看结果。画面变化会跳过点击；不会激活窗口或移动系统鼠标。</p>
+          <p>游戏停在本丸，获取截图，在图上标定「结成」。先测亮屏立即点击，再测 10 秒后台，最后测关闭屏幕。每种模式只点一次。旧的第 6 分钟测试仍可用于对照自然熄屏。</p>
+          <p>保持游戏画面与窗口尺寸不变。画面变化会跳过点击；不会激活游戏窗口或移动系统鼠标。关闭屏幕请求不等于已验证屏幕熄灭，也不等于结成成功，请核对实际游戏。</p>
           <button class="secondary" :disabled="clickBusy || clickProbe?.state === 'running'" @click="clickTest('prepare')">获取本丸截图并标定</button>
           <button class="secondary" :disabled="clickBusy" @click="clickTest()">查看点击结果</button>
           <button class="secondary" :disabled="clickBusy || clickProbe?.state !== 'running'" @click="clickTest('cancel')">取消点击测试</button>
@@ -146,7 +147,10 @@ const qqBroadcastEnabled = computed({
             <span v-if="testPoint" aria-hidden="true" :style="{position:'absolute',left:`${testPoint.x * 100}%`,top:`${testPoint.y * 100}%`,transform:'translate(-50%,-50%)',color:'red',fontSize:'24px',pointerEvents:'none'}">⊕</span>
           </div>
           <p v-if="testPoint">已选位置：横向 {{ Math.round(testPoint.x * 100) }}% · 纵向 {{ Math.round(testPoint.y * 100) }}%。确认这里是「结成」按钮后再开始。<button class="primary" :disabled="clickBusy" @click="startClickTest(true)">确认结成，亮屏立即测试</button><button class="secondary" :disabled="clickBusy" @click="startClickTest(false)">确认结成，第 6 分钟测试</button></p>
-          <p v-if="clickProbe" role="status">{{ clickProbe.detail }} · 点击已发送：{{ clickProbe.click_sent ? '是' : '否' }} · 画面变化：{{ clickProbe.picture_changed ? '是' : '否' }}</p>
+          <p v-if="testPoint" class="test-shortcuts"><button class="secondary" :disabled="clickBusy" @click="startClickTest(false, 'background')">确认结成，10 秒后台测试</button><button class="secondary" :disabled="clickBusy" @click="startClickTest(false, 'screenoff')">确认结成，关闭屏幕测试</button></p>
+          <p>短测试不必等 7 分钟。后台测试开始后切到麻麻露；熄屏测试会一次性关闭屏幕，不改电源设置。约半分钟后查看结果。每次先手动回本丸并重新标定，不会抢焦点或重试。</p>
+          <p v-if="clickProbe" role="status">{{ clickProbe.detail }} · 完整点击已发送：{{ clickProbe.click_sent ? '是' : '否' }} · 画面变化：{{ clickProbe.picture_changed ? '是' : '否' }}<span v-if="clickProbe.input_attempted && !clickProbe.click_sent"> · 输入可能已部分发送，请核对游戏</span></p>
+          <details v-if="clickProbe?.steps?.length"><summary>查看测试步骤与耗时</summary><p v-for="(step, index) in clickProbe.steps" :key="index">{{ step.stage }}：{{ step.seconds }} 秒</p></details>
           <p>截图只在标定时显示，不写入磁盘。画面变化不自动判为进入结成，测试结束后请亲自核对。关闭麻麻露后测试不会继续。</p>
         </template>
         <template v-else><h3>运行播报</h3>

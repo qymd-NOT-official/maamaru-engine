@@ -3691,6 +3691,9 @@ async def api_jp_click_probe_action(action: str, request: Request):
             return await asyncio.to_thread(probe.prepare)
         if action == 'cancel':
             return probe.cancel()
+        if action in ('background', 'screenoff'):
+            body = await request.json()
+            return probe.start(body.get('x'), body.get('y'), mode=action)
         if action in ('start', 'immediate'):
             body = await request.json()
             return probe.start(body.get('x'), body.get('y'), immediate=action == 'immediate')

@@ -2,6 +2,11 @@ import pytest
 from touken import jp_click_probe as probe
 
 
+@pytest.fixture(autouse=True)
+def isolated_reports(monkeypatch, tmp_path):
+    monkeypatch.setattr(probe.frames, 'JP_DATA_DIR', tmp_path)
+
+
 @pytest.fixture
 def reference(monkeypatch):
     ref = {'target_id': 'game', 'summary': {'digest': 'same', 'near_black': False},
@@ -10,6 +15,38 @@ def reference(monkeypatch):
     monkeypatch.setattr(probe, '_state', {'state': 'idle'})
     monkeypatch.setattr(probe, '_cancel', probe.threading.Event())
     return ref
+
+
+@pytest.mark.parametrize('mode,expected', [('background', [10, 10]), ('screenoff', [3, 10, 10])])
+def test_short_modes_single_click_and_no_long_wait(reference, monkeypatch, tmp_path, mode, expected):
+    waits, clicks, off = [], [], []
+    class Cancel:
+        def wait(self, seconds):
+            waits.append(seconds)
+            return False
+        def is_set(self):
+            return False
+    monkeypatch.setattr(probe, '_cancel', Cancel())
+    monkeypatch.setattr(probe.frames, 'JP_DATA_DIR', tmp_path)
+    monkeypatch.setattr(probe, 'turn_display_off', lambda: off.append(True))
+    monkeypatch.setattr(probe, 'guarded_click', lambda *args: clicks.append(True))
+    monkeypatch.setattr(probe, 'capture', lambda target: ({}, '', {'digest': 'changed'}, {}))
+    probe._run(reference, .5, .5, mode=mode)
+    assert waits == expected and clicks == [True]
+    assert len(off) == int(mode == 'screenoff')
+    assert (tmp_path / 'debug' / 'click_probe.json').exists()
+
+
+def test_step_error_is_redacted_and_has_duration(reference):
+    def fail():
+        raise TimeoutError('private url and credentials')
+    with pytest.raises(TimeoutError):
+        probe.step('读取画面尺寸', fail)
+    result = probe.status()
+    assert result['failed_stage'] == '读取画面尺寸'
+    assert result['error_type'] == 'TimeoutError'
+    assert result['steps'][0]['seconds'] >= 0
+    assert 'private' not in str(result)
 
 
 @pytest.mark.parametrize('x,y', [(0, .5), (1, .5), (-1, .5), (True, .5), (.5, float('nan'))])
