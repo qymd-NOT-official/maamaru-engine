@@ -179,6 +179,7 @@ class PumpkinMixin:
                 return
 
             if self._expedition_takeover_requested():
+                self._expedition_takeover_remaining = max_skips - skips
                 yield "[南瓜] 🚩 远征排班请求接管：不开新圈，安全收工"
                 break
 

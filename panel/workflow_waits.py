@@ -4,6 +4,7 @@ import json
 import math
 import shutil
 import threading
+import time
 from pathlib import Path
 
 from touken.runtime_paths import STATE_DIR
@@ -54,7 +55,13 @@ def park(run_id, config_path, params, deadline, resume, name, path=None, script=
                       "status": "waiting", "wake_at": deadline, "config_path": config_path,
                       "params": {**params, "workflow_wait_root": root, "workflow_resume": resume}}
         if resume.get("reason") == "expedition":
-            runs[root]["reason"] = f"等远征派遣后续跑联队战，剩余 {resume['remaining_runs']} 圈"
+            runs[root]["reason"] = '等远征派遣后继续未完成的任务'
+            from . import scheduler
+            now = time.time()
+            slots = scheduler.load_config().get('automation', {}).get('slot_states', {})
+            runs[root]['expedition_keys'] = [key for key, slot in slots.items()
+                if slot.get('state') in {scheduler.SLOT_READY, scheduler.SLOT_WAITING_BUSY, scheduler.SLOT_WAITING_UNKNOWN}
+                and now <= float(slot.get('expires_at', 0))]
         _save(runs, path)
         return True
 
@@ -121,8 +128,12 @@ def resume_due(now, runner, path=None):
                     record.update(status="interrupted", reason="本日安排或活动已结束，剩余圈数未补跑")
                     _save(runs, path)
                     continue
-                from .scheduler import takeover_flag_path, load_config, SLOT_READY, SLOT_WAITING_BUSY
+                from .scheduler import takeover_flag_path, load_config, SLOT_READY, SLOT_WAITING_BUSY, SLOT_FAILED, SLOT_EXPIRED
                 slots = load_config().get("automation", {}).get("slot_states", {})
+                if any(slots.get(key, {}).get('state') in {SLOT_FAILED, SLOT_EXPIRED} for key in record.get('expedition_keys', [])):
+                    record.update(status='interrupted', reason='远征派遣未完成，后续任务与结束行为停止')
+                    _save(runs, path)
+                    continue
                 if any(slot.get("state") in {SLOT_READY, SLOT_WAITING_BUSY}
                        and now <= float(slot.get("expires_at", now)) for slot in slots.values()):
                     continue  # 包括接管预告窗口，防止联队战与派遣互相抢位置。

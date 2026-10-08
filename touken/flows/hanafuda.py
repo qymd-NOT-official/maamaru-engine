@@ -128,11 +128,12 @@ class HanafudaMixin:
         total_tama = 0
         team_record_saved = False
         while True:
-            if self._expedition_takeover_requested():
-                yield "[花札] 🚩 远征排班请求接管：不开新圈，安全收工"
-                break
             if max_runs > 0 and runs_done >= max_runs:
                 yield f"[花札] 已达最大圈数 {max_runs}，收工"
+                break
+            if self._expedition_takeover_requested():
+                self._expedition_takeover_remaining = max_runs - runs_done if max_runs > runs_done else None
+                yield "[花札] 🚩 远征排班请求接管：不开新圈，安全收工"
                 break
 
             tama_before = self._read_tama_total(cfg)

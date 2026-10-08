@@ -272,3 +272,128 @@ def test_conductor_does_not_treat_wait_as_finished_and_other_block_can_start(tmp
     assert runner.start.call_args.args[0] == "daily"
     assert dc.load_state(conductor_path)["blocks"][0]["status"] == "running"
     assert dc.load_state(conductor_path)["enabled"]
+
+
+def test_daily_pauses_between_steps_then_resumes_two_sorties_without_repeating_rewards(tmp_path, monkeypatch):
+    calls = []
+    takeover = {'active': False}
+    attempts = {'yosari': 0, 'raid': 0}
+    def before(agent, params, config):
+        calls.append('signin')
+        takeover['active'] = True
+        yield '已签到'
+    def battle(kind):
+        def run(agent, params, config):
+            calls.append((kind, params['runs']))
+            attempts[kind] += 1
+            if attempts[kind] == 1:
+                agent._expedition_takeover_remaining = params['runs'] - 1
+                yield '远征排班请求接管'
+            else:
+                yield '目标全部完成'
+        return run
+    def after(agent, params, config):
+        calls.append('rewards')
+        yield '已领取'
+    for kind, run in [('qa_before', before), ('yosari', battle('yosari')), ('raid', battle('raid')), ('qa_after', after)]:
+        monkeypatch.setitem(workflow.NODE_REGISTRY, kind, {'type': kind, 'label': kind, 'run': run})
+    for kind in ['boot_emulator', 'login']:
+        monkeypatch.setitem(workflow.NODE_REGISTRY, kind, {'type': kind, 'label': kind, 'run': lambda *args: iter(['✓'])})
+    plan = workflow.normalize_nodes([{'type':'qa_before'}, {'type':'yosari','params':{'runs':3}},
+                                    {'type':'raid','params':{'runs':20}}, {'type':'qa_after'}])
+    make = lambda _: SimpleNamespace(current_location='本丸', navigate_to_stream=lambda _:iter(()),
+        _expedition_takeover_requested=lambda: takeover['active'])
+    resume = None
+    for checkpoint in ['before_node', 'remaining', 'remaining']:
+        with pytest.raises(workflow.WorkflowPaused) as paused:
+            list(workflow.run_workflow('qa', plan, make, resume=resume, defer_expedition=True))
+        resume = json.loads(json.dumps(paused.value.resume))
+        assert resume['checkpoint'] == checkpoint
+        takeover['active'] = False
+        report = json.loads((tmp_path/'latest_report.json').read_text(encoding='utf-8'))
+        assert not report['finished'] and not report['all_green']
+        assert 'rewards' not in calls
+    list(workflow.run_workflow('qa', plan, make, resume=resume, defer_expedition=True))
+    assert calls == ['signin', ('yosari',3), ('yosari',2), ('raid',20), ('raid',19), 'rewards']
+
+
+def test_untracked_takeover_cannot_turn_green_or_execute_later_actions(tmp_path, monkeypatch):
+    def interrupted(agent, params, config):
+        yield '远征排班请求接管'
+    monkeypatch.setitem(workflow.NODE_REGISTRY, 'qa_interrupted', {'type':'qa_interrupted','label':'未完成','run':interrupted})
+    later = Mock(return_value=iter(['✓']))
+    monkeypatch.setitem(workflow.NODE_REGISTRY, 'qa_later', {'type':'qa_later','label':'后续','run':later})
+    monkeypatch.setitem(workflow.NODE_REGISTRY, 'logout', {'type':'logout','label':'退出','run':later})
+    make = lambda _: SimpleNamespace(current_location='本丸', navigate_to_stream=lambda _:iter(()))
+    list(workflow.run_workflow('qa', [{'type':'qa_interrupted','on_error':'continue'}, {'type':'qa_later'}], make, after='logout'))
+    later.assert_not_called()
+    report = json.loads((tmp_path/'latest_report.json').read_text(encoding='utf-8'))
+    assert not report['all_green']
+    assert report['steps'][0]['status'].startswith('✗')
+
+
+def test_failed_expedition_interrupts_waiting_daily_instead_of_resuming(tmp_path, monkeypatch):
+    from panel import scheduler
+    slots = {'one': {'state':'waiting_busy','expires_at':200}}
+    monkeypatch.setattr(waits.time,'time',lambda:100)
+    monkeypatch.setattr(scheduler,'load_config',lambda:{'automation':{'slot_states':slots}})
+    waits.park('root','qa',{},100,{**state(),'reason':'expedition','remaining_runs':3},'日课')
+    slots['one']['state']='failed_unknown'
+    runner = SimpleNamespace(is_running=False,start=Mock())
+    waits.resume_due(110,runner)
+    runner.start.assert_not_called()
+    assert waits.load()['root']['status']=='interrupted'
+
+
+def test_pending_expedition_defers_ending_without_repeating_finished_steps(monkeypatch):
+    flag = {'active':False}
+    calls = []
+    def step(agent, params, config):
+        calls.append('step')
+        flag['active'] = True
+        yield '✓'
+    def end(agent, params, config):
+        calls.append('logout')
+        yield '✓'
+    for kind, run in [('qa_done',step),('logout',end),('boot_emulator',lambda *args:iter(['✓'])),('login',lambda *args:iter(['✓']))]:
+        monkeypatch.setitem(workflow.NODE_REGISTRY,kind,{'type':kind,'label':kind,'run':run})
+    make = lambda _:SimpleNamespace(current_location='本丸',navigate_to_stream=lambda _:iter(()),
+        _expedition_takeover_requested=lambda:flag['active'])
+    plan = workflow.normalize_nodes([{'type':'qa_done'}])
+    with pytest.raises(workflow.WorkflowPaused) as paused:
+        list(workflow.run_workflow('qa',plan,make,after='logout',defer_expedition=True))
+    assert calls == ['step']
+    assert paused.value.resume['checkpoint'] == 'after_steps'
+    flag['active'] = False
+    list(workflow.run_workflow('qa',plan,make,after='logout',resume=paused.value.resume,defer_expedition=True))
+    assert calls == ['step','logout']
+
+
+@pytest.mark.parametrize('kind,params,remaining,key', [
+    ('yosari', {'runs':3}, 2, 'runs'),
+    ('sortie', {'runs':3}, 2, 'runs'),
+    ('edocastle', {'runs':3}, 2, 'runs'),
+    ('hanafuda', {'runs':3}, 2, 'runs'),
+    ('osaka', {'runs':3,'select_floor':True}, 2, 'runs'),
+    ('pumpkin', {'runs':3}, 0, 'runs'),
+    ('daily_sortie', {'sortie_mode':'yosari','yosari_runs':3}, 2, 'yosari_runs'),
+])
+def test_counted_gameplay_resume_uses_only_remaining_budget(kind, params, remaining, key, monkeypatch):
+    calls = []
+    def run(agent, actual, config):
+        calls.append(actual.copy())
+        if len(calls) == 1:
+            agent._expedition_takeover_remaining = remaining
+            yield '远征排班请求接管'
+        else:
+            yield '目标完成'
+    monkeypatch.setitem(workflow.NODE_REGISTRY, kind, {'type':kind,'label':kind,'run':run})
+    for entry in ['boot_emulator','login']:
+        monkeypatch.setitem(workflow.NODE_REGISTRY,entry,{'type':entry,'label':entry,'run':lambda *args:iter(['✓'])})
+    make=lambda _:SimpleNamespace(current_location='本丸',navigate_to_stream=lambda _:iter(()))
+    plan=workflow.normalize_nodes([{'type':kind,'params':params}])
+    with pytest.raises(workflow.WorkflowPaused) as paused:
+        list(workflow.run_workflow('qa',plan,make,defer_expedition=True))
+    list(workflow.run_workflow('qa',plan,make,resume=paused.value.resume,defer_expedition=True))
+    assert calls[1][key] == remaining
+    if kind == 'osaka': assert calls[1]['select_floor'] is False

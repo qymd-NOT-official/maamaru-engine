@@ -540,6 +540,8 @@ def _run_node(defn: dict, agent, params: dict, config_path: str):
         for msg in defn["run"](agent, params or {}, config_path):
             yield msg
             text = str(msg)
+            if '远征排班请求接管' in text and ('🚩' in text or text.strip() == '远征排班请求接管'):
+                agent._workflow_takeover_requested = True
             if _is_fail(text) or text.lstrip().startswith("✗"):
                 ok = False
             for detail_fn in defn.get("detail") or []:
@@ -582,6 +584,34 @@ class WorkflowPaused(Exception):
         super().__init__("任务流正在等待，到点再继续")
 
 
+_COUNT_KEYS = {'raid': ('runs', 'rounds'), 'yosari': ('runs', 'loops'),
+               'sortie': ('runs', 'loops'), 'edocastle': ('runs', 'max_runs'),
+               'hanafuda': ('runs', 'max_runs'), 'osaka': ('runs', 'floors'),
+               'pumpkin': ('runs', 'max_skips')}
+
+
+def _count_keys(node):
+    if node['type'] == 'daily_sortie':
+        return {'raid': ('raid_rounds',), 'yosari': ('yosari_runs',),
+                'osaka': ('osaka_runs',), 'pumpkin': ('pumpkin_runs',)}.get(node['params'].get('sortie_mode'), ())
+    return _COUNT_KEYS.get(node['type'], ())
+
+
+
+def _pause_for_expedition(agent, plan, index, report, remaining=None):
+    label = NODE_REGISTRY[plan[index]['type']]['label'] if index < len(plan) else '结束后行为'
+    status = f'等待远征派遣，剩余目标 {remaining}' if remaining is not None else '等待远征派遣，尚未执行'
+    _flush_report(report + [(label, status)], finished=False)
+    yield f'【工作流】{label}让位给远征，派遣后继续；未计作完成'
+    yield from agent.navigate_to_stream('本丸')
+    if agent.current_location != '本丸':
+        raise WorkflowError('让位时未确认回到本丸，续跑停止')
+    raise WorkflowPaused(time.time() + 5, {'nodes': plan, 'next_index': index,
+        'report': report, 'game_closed': False, 'reason': 'expedition',
+        'checkpoint': ('after_steps' if index == len(plan) else 'before_node') if remaining is None else 'remaining',
+        'remaining_runs': remaining, 'forge_ran': agent._workflow_forge_ran})
+
+
 def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                  resume=None, defer_wait=False, defer_expedition=False):
     """
@@ -608,9 +638,20 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
         raise WorkflowError("续跑位置无效，请重新安排")
     expedition_resume = bool(resume and resume.get("reason") == "expedition")
     remaining = (resume or {}).get("remaining_runs")
-    valid_expedition = (defer_expedition and expedition_resume and start < len(plan)
-                        and plan[start]["type"] == "raid"
-                        and type(remaining) is int and 1 <= remaining <= plan[start]["params"].get("runs", 0))
+    node_at_start = plan[start] if start < len(plan) else {'type':'', 'params':{}}
+    kind = node_at_start['type']
+    count_keys = _count_keys(node_at_start)
+    raw_target = next((node_at_start['params'][key] for key in count_keys if key in node_at_start['params']), 0)
+    try:
+        target = int(raw_target)
+    except (TypeError, ValueError):
+        target = 0
+    checkpoint = (resume or {}).get('checkpoint')
+    before_node = checkpoint == 'before_node' and start < len(plan) and remaining is None
+    after_steps = checkpoint == 'after_steps' and start == len(plan) and remaining is None
+    minimum = 0 if kind == 'pumpkin' or node_at_start['params'].get('sortie_mode') == 'pumpkin' else 1
+    counted = bool(count_keys) and type(remaining) is int and minimum <= remaining <= target
+    valid_expedition = defer_expedition and expedition_resume and (before_node or after_steps or counted)
     if resume and (resume.get("nodes") != plan or len(report) != start
                    or (not valid_expedition and (expedition_resume or start == 0
                        or plan[start - 1]["type"] != "wait_until"))):
@@ -669,6 +710,8 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                 break
             if defn.get("daily_run"):
                 defn = {**defn, "run": defn["daily_run"]}
+        if defer_expedition and node['type'] not in {'boot_emulator', 'login'} and getattr(agent, '_expedition_takeover_requested', lambda: False)() is True:
+            yield from _pause_for_expedition(agent, plan, i, report)
         suffix = "（翻车跳过继续）" if node["on_error"] == "continue" else ""
         yield f"【工作流】▶ 第 {i + 1} 块：{defn['label']}{suffix}"
         try:
@@ -677,22 +720,26 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
         except Exception:
             pass
         node_params = node["params"]
-        if expedition_resume and i == start:
-            node_params = {**node_params, "runs": remaining, "rounds": remaining}
-        if node["type"] == "raid":
+        if expedition_resume and i == start and remaining is not None:
+            node_params = {**node_params, **{key: remaining for key in _count_keys(node)}}
+            if node['type'] == 'osaka':
+                node_params['select_floor'] = False
+            if node['type'] == 'daily_sortie' and node['params'].get('sortie_mode') == 'osaka':
+                node_params['osaka_select_floor'] = False
+        agent._workflow_takeover_requested = False
+        agent._expedition_takeover_remaining = None
+        if node["type"] == "raid" or node["type"] == "daily_sortie":
             agent._raid_takeover_remaining = None
         ok, detail = yield from _run_node(defn, agent, node_params, config_path)
-        pending_runs = getattr(agent, "_raid_takeover_remaining", None)
-        if defer_expedition and ok and node["type"] == "raid" and type(pending_runs) is int and pending_runs > 0:
-            _flush_report(report + [(defn["label"], f"等待远征派遣，剩余 {pending_runs} 圈")], finished=False)
-            yield f"【工作流】联队战让位给远征，剩余 {pending_runs} 圈待续跑；未计作完成"
-            # 返回本丸后才释放执行位置，不运行后续步骤或下班安排。
-            yield from agent.navigate_to_stream("本丸")
-            if agent.current_location != "本丸":
-                raise WorkflowError("让位时未确认回到本丸，续跑停止")
-            raise WorkflowPaused(time.time() + 5, {"nodes": plan, "next_index": i,
-                "report": report, "game_closed": False, "reason": "expedition",
-                "remaining_runs": pending_runs, "forge_ran": agent._workflow_forge_ran})
+        pending_runs = getattr(agent, '_expedition_takeover_remaining', None)
+        if pending_runs is None and (node['type'] == 'raid' or node['type'] == 'daily_sortie' and node['params'].get('sortie_mode') == 'raid'):
+            pending_runs = getattr(agent, '_raid_takeover_remaining', None)
+        interrupted = getattr(agent, '_workflow_takeover_requested', False) or (type(pending_runs) is int)
+        if interrupted:
+            if defer_expedition and ok and _count_keys(node) and type(pending_runs) is int and pending_runs >= (0 if node['type'] == 'pumpkin' or node['params'].get('sortie_mode') == 'pumpkin' else 1):
+                yield from _pause_for_expedition(agent, plan, i, report, pending_runs)
+            ok, detail = False, '✗ 远征接班，目标未完成，未自动续跑'
+            node = {**node, 'on_error': 'stop'}
         if node["type"] == "forge":
             agent._workflow_forge_ran = True
         report.append((defn["label"], detail or ("✓" if ok else "✗")))
@@ -710,6 +757,8 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             _flush_report(report, finished=False)
             break
 
+    if after != 'none' and completed and defer_expedition and getattr(agent, '_expedition_takeover_requested', lambda: False)() is True:
+        yield from _pause_for_expedition(agent, plan, len(plan), report)
     if after != "none" and completed:
         # This action is outside the movable steps. A stopped/aborted run never
         # reaches it. Defer PC sleep until after the final report/notification.

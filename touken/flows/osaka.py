@@ -302,6 +302,8 @@ class OsakaMixin:
                                f"累计使用加速符 {_speedups_used} 个")
                         return
                     if takeover:
+                        if not injury_reached:
+                            self._expedition_takeover_remaining = _target_floors - total_completed
                         yield "[挖地] 🚩 远征排班请求接管：不开新层，安全收工"
                         return
 

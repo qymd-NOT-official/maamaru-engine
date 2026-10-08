@@ -496,6 +496,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
         else:
             run_id = runner.start("workflow", config_path,
                                   {"workflow_id": block["workflow_id"],
+                                   **({"scheduled_deadline": state["day_start"] + day_timeline.DAY_MINUTES * 60} if block["workflow_id"] == "builtin-daily" else {}),
                                    **({"daily_recommended_runs": block["daily_recommended_runs"]} if "daily_recommended_runs" in block else {})})
             if not run_id:
                 return False

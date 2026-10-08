@@ -1540,9 +1540,9 @@ def _build_workflow(config_path, params):
         after=preset.get("after", "none"),
         daily_mode=preset.get("daily_mode", False),
         resume=params.get("workflow_resume"), defer_wait=os.environ.get("MAAMARU_WORKER") == "1",
-        defer_expedition=scheduled_runs is not None)
-    if scheduled_runs is not None and completed is False:
-        raise FlowAborted("今日安排的联队战步骤未完成")
+        defer_expedition=scheduled_runs is not None or preset.get('id') == _workflow.DAILY_PRESET_ID)
+    if (scheduled_runs is not None or preset.get('id') == _workflow.DAILY_PRESET_ID) and completed is False:
+        raise FlowAborted("今日安排的步骤未完成")
 
 
 def _build_scheduled_gameplay(config_path, params):
@@ -1571,7 +1571,7 @@ def _build_scheduled_gameplay(config_path, params):
               "on_error": "stop"}]
     completed = yield from _workflow.run_workflow(
         config_path, nodes, make_agent=_make_agent, after="none", daily_mode=False,
-        resume=params.get("workflow_resume"), defer_expedition=params["script"] == "raid")
+        resume=params.get("workflow_resume"), defer_expedition=params["script"] in _workflow._COUNT_KEYS)
     if completed is False:
         raise FlowAborted("今日安排的玩法未完成")
 

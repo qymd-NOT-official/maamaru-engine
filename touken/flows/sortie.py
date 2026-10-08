@@ -210,6 +210,7 @@ class SortieMixin:
         auto_equip_active = bool(auto_equip)
         while loop_no <= max_loops:
             if self._expedition_takeover_requested():
+                self._expedition_takeover_remaining = max_loops - loop_no + 1
                 tag = "[异去]" if cfg_key == "yosari" else "[出阵]"
                 yield f"{tag} 🚩 远征排班请求接管：不开新圈，安全收工"
                 return
