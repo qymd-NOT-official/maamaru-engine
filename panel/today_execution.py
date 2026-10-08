@@ -86,16 +86,38 @@ def compose_plan(timeline: dict, old_plan: dict | None, raid_settings: dict, old
             "blocks": blocks, "daily_done": daily_done, "uses_saved_raid": uses_saved_raid}
 
 
+def compose_daily_plan(timeline: dict, preset: dict) -> dict:
+    """统一今日安排只执行规划页的日课，不再额外生成一份活动流程。"""
+    now_min = max(0, math.ceil((timeline['now'] - timeline['day_start']) / 60))
+    start = now_min
+    clock = (preset.get('daily_ui') or {}).get('startTime') or ''
+    if clock:
+        try:
+            hour, minute = map(int, clock.split(':'))
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError('开始时间格式不正确') from None
+        start = hour * 60 + minute
+        if start < now_min:
+            start += 1440
+    if start >= dt.DAY_MINUTES:
+        raise ValueError('这个开始时间超过本次日课刷新，请选择更早的时间')
+    return {'version': 2, 'day_start': timeline['day_start'], 'event_end_at': None,
+            'blocks': [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': start}],
+            'daily_done': False, 'uses_saved_raid': False}
+
+
 def execute_today(runner, timeline_fn, raid_settings_fn, *,
                   state_path: Path = dc.STATE_PATH, plan_path: Path = dp.PLAN_PATH,
-                  choices_path: Path = ec.CHOICES_PATH) -> dict:
+                  choices_path: Path = ec.CHOICES_PATH, daily_preset: dict | None = None) -> dict:
     with dc._LOCK, ec._WRITE_LOCK:
         timeline = timeline_fn()
         old = dc.load_state(state_path)
         same_day = old and old.get("day_start") == timeline["day_start"]
         if same_day and any(b["status"] in {"interrupted", "blocked"} for b in old["blocks"]):
             raise ValueError("还有中断的安排，请先到时间表确认后继续")
-        if same_day and old.get("today_execution") and (
+        if same_day and old.get("today_execution") and (daily_preset is None or old.get("unified_today")) and (
                 old.get("enabled") or all(b["status"] == "ended" for b in old["blocks"])):
             return {"ok": True, "message": "今日安排已经完成了。" if all(b["status"] == "ended" for b in old["blocks"]) else "今日安排已经接班了。"}
         if runner.is_running:
@@ -103,8 +125,11 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         if same_day and any(b["status"] == "running" for b in old["blocks"]):
             raise ValueError("上次的任务还在核对，请稍后刷新时间表")
         settings = raid_settings_fn()
-        plan = compose_plan(timeline, dp.load_plan(plan_path), settings, old if same_day else None)
+        plan = (compose_daily_plan(timeline, daily_preset) if daily_preset is not None else
+                compose_plan(timeline, dp.load_plan(plan_path), settings, old if same_day else None))
         records = {} if same_day and old.get("today_execution") else suggestion_records(timeline)
+        if daily_preset is not None and (daily_preset.get('daily_ui') or {}).get('plannedExpeditions') is False:
+            records = {}
         cfg = scheduler.load_config()
         paused = cfg.get("automation", {}).get("paused_until", "")
         if records and paused and paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
@@ -122,6 +147,22 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
                 if block["kind"] == "daily" and block["status"] == "pending":
                     block.update(status="ended", reason="今日已完成")
         candidate["today_execution"] = True
+        if daily_preset is not None:
+            cutoff = plan['blocks'][0]['start_min']
+            existing_skipped, existing_forced = ec.load_choice_sets(choices_path)
+            keys = {key for key, item in {**existing_forced, **records}.items()
+                    if key not in existing_skipped
+                    and cfg.get('automation', {}).get('slot_states', {}).get(key, {}).get('state') not in scheduler.TERMINAL_STATES
+                    and item.get('start_min', dt.DAY_MINUTES) <= cutoff
+                    and str(item.get('planned_at', '')).startswith(datetime.fromtimestamp(
+                        timeline['day_start'] + cutoff * 60, timezone(timedelta(hours=8))).date().isoformat())}
+            keys.update(item['key'] for item in timeline.get('expeditions', [])
+                        if item.get('will_run') and item.get('kind') != 'running' and item.get('time_min', dt.DAY_MINUTES) <= cutoff
+                        and item.get('state') not in scheduler.TERMINAL_STATES)
+            candidate['initial_expedition_keys'] = sorted(keys)
+            candidate['unified_today'] = True
+            if keys and paused and paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+                raise ValueError("远征排班正在暂停，先恢复远征再接今日安排")
         skipped, forced = ec.load_choice_sets(choices_path)
         for key, record in records.items():
             if key in forced and forced[key] != record:
@@ -144,6 +185,10 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
                         if b["kind"] == "raid" and b["status"] == "pending")
         daily = any(b["kind"] == "daily" and b["status"] == "pending" for b in candidate["blocks"])
         pieces = []
+        if daily_preset is not None:
+            return {'ok': True, 'message': ('今日安排已接班：先处理到点远征，再执行一键日课，最后按设置收工。'
+                    if not (daily_preset.get('daily_ui') or {}).get('startTime') else
+                    '今日安排已接班，将按设置的开始时间执行。')}
         if records:
             pieces.append(f"远征 {len(records)} 班")
         if raid_runs:

@@ -123,8 +123,9 @@ async function load() {
   loadError.value = ''
   try {
     const [workflowData, nodeData] = await Promise.all([api.workflows(), api.workflowNodes()])
-    presets.value = workflowData.presets || []
+    presets.value = (workflowData.presets || []).filter(preset => preset.id !== 'builtin-daily')
     defs.value = nodeData.nodes || []
+    if (draft.value?.id === 'builtin-daily') draft.value = null
     if (!draft.value) setDraft(presets.value[0] || { id: '', name: '', nodes: [] })
     else if (!keepEdits) {
       const current = presets.value.find(preset => preset.id === draft.value?.id)

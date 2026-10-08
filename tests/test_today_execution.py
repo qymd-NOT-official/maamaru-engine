@@ -116,6 +116,51 @@ class TodayExecutionTests(unittest.TestCase):
                     lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
         self.assertEqual(self.runner.calls[0][0], 'daily')
 
+    def test_unified_today_uses_daily_preset_without_extra_raid_and_waits_for_departure(self):
+        preset = {'id': 'builtin-daily', 'name': '一键日课', 'after': 'logout',
+                  'daily_mode': True, 'nodes': [{'type': 'signin', 'params': {}, 'on_error': 'stop'}]}
+        self.day['expeditions'] = [{'key': 'running:5:C4', 'kind': 'running', 'will_run': True, 'state': 'running', 'time_min': 500}]
+        self.day['expedition_suggestions'].append({'team_no': 5, 'map_code': 'C4', 'start_min': 900, 'duration_min': 480})
+        with patch.object(dc.workflow, 'find_preset', return_value=preset):
+            execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
+            plan = dp.load_plan(self.paths['plan_path'])
+            self.assertEqual(plan['blocks'], [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': 600}])
+            state = dc.load_state(self.paths['state_path'])
+            keys = state['initial_expedition_keys']
+            self.assertEqual(len(keys), 1)
+            with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}):
+                dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
+                        lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
+                self.assertEqual(self.runner.calls, [])
+                with patch('panel.scheduler.load_config', return_value={'automation': {'slot_states': {
+                        keys[0]: {'state': 'dispatched'}}}}):
+                    dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
+                            lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
+            self.assertEqual(self.runner.calls[0][0], 'workflow')
+            self.assertEqual(self.runner.calls[0][2]['workflow_id'], 'builtin-daily')
+
+    def test_unified_failed_departure_never_runs_daily_or_ending(self):
+        preset = {'id': 'builtin-daily', 'name': '一键日课', 'nodes': [{'type': 'signin', 'params': {}}]}
+        with patch.object(dc.workflow, 'find_preset', return_value=preset):
+            execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
+        key = dc.load_state(self.paths['state_path'])['initial_expedition_keys'][0]
+        with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}), patch(
+                'panel.scheduler.load_config', return_value={'automation': {'slot_states': {key: {'state': 'failed_unknown'}}}}):
+            dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
+                    lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
+        self.assertFalse(dc.load_state(self.paths['state_path'])['enabled'])
+        self.assertEqual(self.runner.calls, [])
+
+    def test_unified_daily_start_time_and_opt_out_preserve_existing_departures(self):
+        from panel.today_execution import compose_daily_plan
+        preset = {'id': 'builtin-daily', 'name': '一键日课', 'nodes': [{'type': 'signin', 'params': {}}],
+                  'daily_ui': {'startTime': '11:00', 'plannedExpeditions': False}}
+        self.assertEqual(compose_daily_plan(self.day, preset)['blocks'][0]['start_min'], 660)
+        with patch.object(dc.workflow, 'find_preset', return_value=preset):
+            execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
+        self.assertEqual(ec.load_choice_sets(self.paths['choices_path'])[1], {})
+        self.assertEqual(dc.load_state(self.paths['state_path'])['initial_expedition_keys'], [])
+
     def test_ledger_endpoint_is_blocked(self):
         from fastapi.testclient import TestClient
         with patch.object(server, '_ledger_mode', return_value=True):

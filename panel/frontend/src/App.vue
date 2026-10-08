@@ -38,7 +38,7 @@ const startingScript = ref<string | null>(null)
 const workflowDraft = ref<WorkflowPreset | null>(null)
 const workflowPanel = ref<{ dirty: boolean; locked: boolean } | null>(null)
 const dailyEntry = ref(0)
-function openDailyWorkflow() { dailyEntry.value++; tab.value = 'workflow' }
+function openDailyWorkflow() { tab.value = 'planning' }
 function openExpeditionPlanning() { tab.value = 'planning' }
 function openActivityTask(script: 'hanafuda' | 'raid', loops: number) {
   if (!scripts.value[script]) {
@@ -237,7 +237,7 @@ function pinHomeWorkflow(id: string) {
 const presetJump = ref<{ id: string; tick: number } | null>(null)
 function openWorkflowPreset(id: string) {
   presetJump.value = { id, tick: (presetJump.value?.tick || 0) + 1 }
-  tab.value = 'workflow'
+  tab.value = id === 'builtin-daily' ? 'planning' : 'workflow'
 }
 async function runSelectedWorkflow() {
   const preset = selectedWorkflow.value
@@ -245,6 +245,10 @@ async function runSelectedWorkflow() {
   await startWorkflow(preset)
 }
 async function startWorkflow(preset: WorkflowIdentity) {
+  if (preset.id === 'builtin-daily') {
+    try { message.value = (await api.executeToday()).message } catch (error) { message.value = error instanceof Error ? error.message : '今日安排没有启动' }
+    return
+  }
   if (running.value || stopping.value || startingWorkflow.value) return
   if (workflowDraft.value?.id === preset.id && (workflowPanel.value?.dirty || workflowPanel.value?.locked)) {
     openWorkflowPreset(preset.id)
@@ -533,7 +537,7 @@ async function runScript(scriptKey: string) {
 
 async function run() {
   if (selected.value === 'daily') {
-    await startWorkflow(homeWorkflows.value.find(preset => preset.id === 'builtin-daily') || { id: 'builtin-daily', name: '一键日课' })
+    try { message.value = (await api.executeToday()).message } catch (error) { message.value = error instanceof Error ? error.message : '今日安排没有启动' }
     return
   }
   await runScript(selected.value)
@@ -705,7 +709,7 @@ watch(tab, value => {
             />
           </template>
         </TaskForm>
-        <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课已放进工作流</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
+        <div v-else-if="selected === 'daily'" class="workflow-live-bar"><strong>一键日课在规划页设置</strong><button type="button" @click="openDailyWorkflow">打开日课安排</button></div>
         <!-- 自动排班已按老大意思藏起（温柔刀）：SchedulePanel 组件保留在仓库，UI 不再挂载。 -->
         <ListsPanel v-else-if="selected === '$repair-list'" key="repair-list" embedded initial="repair_blacklist" />
         <ListsPanel v-else-if="selected === '$dismantle-list'" key="dismantle-list" embedded initial="dismantle_whitelist" />
@@ -774,7 +778,7 @@ watch(tab, value => {
         <div v-if="running && current === 'workflow'" class="workflow-live-bar"><strong>{{ stopping ? "正在停止…" : workflowRunningLabel }}</strong><button type="button" class="secondary" @click="viewRunningWorkflow">查看流程</button><button type="button" class="danger" :disabled="stopping" @click="stop">{{ stopping ? '正在停止…' : '停止工作流' }}</button></div>
         <div v-if="selectedWorkflow && !(running && current === 'workflow')" class="workflow-live-bar"><strong>「{{ selectedWorkflow.name }}」 · {{ selectedWorkflow.nodes.length }} 块积木</strong><button type="button" class="secondary" @click="selectedWorkflow && openWorkflowPreset(selectedWorkflow.id)">调整</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="runSelectedWorkflow">跑这条</button></div>
         <div v-else-if="selected.startsWith('wf:') && !(running && current === 'workflow')" class="workflow-live-bar"><strong>这条工作流已经被删啦，去「自定义」里收拾一下常用功能吧</strong></div>
-        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>一键日课 · 默认流程</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="run">运行日课</button></div>
+        <div v-if="selected === 'daily' && !(running && current === 'workflow')" class="workflow-live-bar"><strong>今日安排 · 一键日课</strong><button type="button" class="secondary" @click="openDailyWorkflow">调整日课安排</button><button type="button" class="primary" :disabled="running || stopping || startingWorkflow" @click="run">执行今日安排</button></div>
         <OverviewTaskCard
           v-if="selectedInfo && selected !== 'daily' && !(running && current === 'workflow')"
           :info="selectedInfo"

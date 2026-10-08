@@ -430,7 +430,8 @@ def _daily_ui(body, nodes):
         normalized = normalize_nodes(row["nodes"]) if row.get("nodes") else []
         if row.get("enabled") is True:
             compiled.extend(normalized)
-    actual = [node for node in nodes if node["type"] not in {"snapshot", "ledger_sync"}]
+    compiled = [node for node in compiled if node["type"] not in {"boot_emulator", "login"}]
+    actual = [node for node in nodes if node["type"] not in {"snapshot", "ledger_sync", "boot_emulator", "login"}]
     return copy.deepcopy(ui) if compiled == actual else None
 
 

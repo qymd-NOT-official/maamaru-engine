@@ -62,6 +62,20 @@ class DailyWorkflowTests(unittest.TestCase):
         changed = workflow.update_preset(saved["id"], {"nodes": [_node("signin")]})
         self.assertIsNone(changed["daily_ui"])
 
+    def test_daily_bootstrap_is_automatic_and_legacy_resume_keeps_node_positions(self):
+        preset = {"id": "builtin-daily", "name": "日课", "daily_mode": True,
+                  "nodes": [_node("login"), _node("signin")], "after": "none"}
+        params = {"workflow_id": "builtin-daily"}
+        with patch.object(workflow, "find_preset", return_value=preset), patch.object(
+                workflow, "run_workflow", return_value=iter(())) as run:
+            list(server._build_workflow("fake.json", params))
+            self.assertEqual([n['type'] for n in run.call_args.args[1]], ['boot_emulator', 'login', 'signin'])
+            self.assertEqual(params['daily_bootstrap_version'], 1)
+            legacy = {"workflow_id": "builtin-daily", "workflow_resume": {"index": 1},
+                      "workflow_preset_signature": params['workflow_preset_signature']}
+            list(server._build_workflow("fake.json", legacy))
+            self.assertEqual([n['type'] for n in run.call_args.args[1]], ['login', 'signin'])
+
     def test_template_imports_selected_steps_and_day_specific_parameters(self):
         saved = {"params": {"daily": {"steps": ["演练", "锻刀", "出阵"], "after": "shutdown",
                     "sortie_mode": "yosari", "yosari_runs": 8, "team_no": "2"}}}

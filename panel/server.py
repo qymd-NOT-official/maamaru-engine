@@ -1507,6 +1507,12 @@ def _build_workflow(config_path, params):
     except _workflow.WorkflowError as exc:
         yield f"[工作流] 预设校验翻车: {exc}"
         return
+    if preset.get('id') == _workflow.DAILY_PRESET_ID and (
+            not params.get('workflow_resume') or params.get('daily_bootstrap_version') == 1):
+        params['daily_bootstrap_version'] = 1
+        plan = [node for node in plan if node['type'] not in {'boot_emulator', 'login'}]
+        plan[:0] = [{'type': 'boot_emulator', 'params': {}, 'on_error': 'stop'},
+                    {'type': 'login', 'params': {}, 'on_error': 'stop'}]
     if scheduled_runs is not None:
         raid_index = spec["raid_index"]
         plan[raid_index]["params"] = {**plan[raid_index]["params"],
@@ -2405,9 +2411,13 @@ def api_execute_today():
         raise HTTPException(403, "纯净账房模式不能自动开工")
     from .today_execution import execute_today
     try:
+        daily_preset = _workflow.find_preset(_workflow.DAILY_PRESET_ID)
+        if not daily_preset:
+            raise ValueError("日课设置没有加载出来，请重试")
         return execute_today(
             get_runner(), _day_timeline_payload,
-            lambda: (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+            lambda: (_load_panel_settings().get("params", {}).get("raid", {}) or {}),
+            daily_preset=daily_preset)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 

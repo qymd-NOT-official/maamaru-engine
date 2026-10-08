@@ -12,12 +12,13 @@ const defs = ref<WorkflowNodeDef[]>([])
 const rows = ref<DailyRow[]>([])
 const preset = ref<WorkflowPreset | null>(null)
 const tail = ref<WorkflowNode[]>([])
-const selected = ref('boot')
+const selected = ref('signin')
 const busy = ref(false)
 const loading = ref(true)
 const message = ref('')
 const after = ref<WorkflowPreset['after']>('none')
 const startTime = ref('')
+const plannedExpeditions = ref(true)
 const running = ref(false)
 const activeRow = computed(() => rows.value.find(r => r.id === selected.value))
 const activityOptions = computed(() => (props.timeline.gameplay_options || []).filter(o => o.available && o.script !== 'yosari' && o.script !== 'sortie'))
@@ -44,6 +45,7 @@ async function load() {
     if (!preset.value) throw new Error('默认日课没有加载出来，请重试')
     rows.value = dailyRows(preset.value, defs.value, activityOptions.value[0]?.script || '')
     tail.value = clone(preset.value.nodes.filter(n => ['snapshot', 'ledger_sync'].includes(n.type)))
+    plannedExpeditions.value = preset.value.daily_ui?.plannedExpeditions !== false
     after.value = preset.value.after || 'none'; startTime.value = preset.value.daily_ui?.startTime || ''
   } catch (err) { message.value = err instanceof Error ? err.message : '日课加载失败' }
   finally { loading.value = false }
@@ -55,8 +57,25 @@ function changeActivity(event: Event) {
 }
 function openDismantleList() {
   if (preset.value) listJumpDraft.value = {...clone(preset.value), nodes: compileDaily(rows.value, tail.value), after: after.value,
-    daily_ui: { rows: clone(rows.value), startTime: startTime.value }}
+    daily_ui: { rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value }}
   emit('openDismantleList')
+}
+async function saveExpeditionPrefs(rounds: number, teams: number[]) {
+  busy.value = true
+  try { await api.setExpeditionHelpPrefs(rounds, teams); emit('saved') }
+  catch (err) { message.value = err instanceof Error ? err.message : '远征偏好没有保存成功' }
+  finally { busy.value = false }
+}
+async function setResourceFocus(event: Event) {
+  busy.value = true
+  try { await api.setExpeditionResourceFocus((event.target as HTMLSelectElement).value); emit('saved') }
+  catch (err) { message.value = err instanceof Error ? err.message : '远征偏好没有保存成功' }
+  finally { busy.value = false }
+}
+function setRounds(event: Event) { void saveExpeditionPrefs(Number((event.target as HTMLSelectElement).value), props.timeline.expedition_help.available_teams) }
+function toggleTeam(team: number) {
+  const teams = props.timeline.expedition_help.available_teams
+  void saveExpeditionPrefs(props.timeline.expedition_help.rounds_per_team, teams.includes(team) ? teams.filter(t => t !== team) : [...teams, team].sort())
 }
 async function save(start = false) {
   if (!preset.value || busy.value) return
@@ -70,23 +89,12 @@ async function save(start = false) {
     const activity = rows.value.find(r => r.id === 'activity')
     if (activity?.enabled && (!activity.nodes.length || !activityOptions.value.some(d => d.script === activity.nodes[0]?.type))) throw new Error('当前选择的活动未开放，请更换活动或取消勾选')
     const body: WorkflowPreset = {...preset.value, nodes, after: after.value, daily_mode: true,
-      daily_ui: {rows: clone(rows.value), startTime: startTime.value}}
+      daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value}}
     const result = await api.updateWorkflow(body)
     if (!result.ok) throw new Error('日课没有保存成功')
     preset.value = body
     if (start) {
-      const state = await api.scripts()
-      if (state.running) throw new Error('日课已保存，当前任务收工后再开工')
-      const now = Math.ceil((Date.now() / 1000 - props.timeline.day_start) / 60)
-      let minute = now
-      if (startTime.value) {
-        const [h, m] = startTime.value.split(':').map(Number)
-        minute = h! * 60 + m!
-        if (minute < now) minute += 1440
-        if (minute >= 1680) throw new Error('日课已保存，这个时间超过本次日课刷新，请选择更早的时间')
-      }
-      await api.saveDaySchedule([{kind:'workflow', workflow_id:'builtin-daily', start_min: minute}])
-      message.value = startTime.value ? `已按 ${startTime.value} 安排开工` : '今日安排已接班，马上开工'
+      message.value = (await api.executeToday()).message
     } else message.value = '日课设置已保存'
     emit('saved')
   } catch (err) { message.value = err instanceof Error ? err.message : '保存失败，请重试' }
@@ -108,9 +116,18 @@ async function stopToday() {
 
 <template>
   <section class="daily-settings" aria-label="一键日课设置">
-    <header><h3>今日安排 · 一键日课</h3><p>勾选今天要做的事，按顺序执行；设置只用于这份日课。</p></header>
+    <header><h3>今日安排</h3><p>规划远征 → 一键日课 → 结束后行为；日课参数只用于今日安排。</p></header>
     <p v-if="loading">正在取出日课设置…</p>
-    <div v-else-if="preset" class="daily-settings-layout">
+    <section v-if="!loading && preset" class="daily-planned-expeditions">
+      <h4>① 规划远征</h4>
+      <label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> 按时间表的建议安排远征</label>
+      <p class="daily-muted">先派出到点的远征，再执行日课；后续班次到点接班。已单独开启的远征排班仍按原安排运行。</p>
+      <label>优先攒什么 <select :value="timeline.expedition_help.resource_focus || ''" :disabled="busy || running" @change="setResourceFocus"><option value="">交给狐之助建议</option><option v-for="resource in ['小判','木炭','玉钢','冷却材','砥石','委托符','加速符']" :key="resource" :value="resource">{{ resource }}</option></select></label>
+      <label>每支部队今天共安排 <select :value="timeline.expedition_help.rounds_per_team" :disabled="busy || running" @change="setRounds"><option v-for="n in [0,1,2,3,4,5]" :value="n" :key="n">{{ n }} 次</option></select></label>
+      <div class="daily-select-actions">可用部队 <button v-for="team in [1,2,3,4,5]" :key="team" :aria-pressed="timeline.expedition_help.available_teams.includes(team)" :disabled="busy || running" @click="toggleTeam(team)">部队{{ team }} {{ timeline.expedition_help.available_teams.includes(team) ? '✓' : '' }}</button></div>
+    </section>
+    <h4 v-if="!loading && preset">② 一键日课</h4>
+    <div v-if="!loading && preset" class="daily-settings-layout">
       <aside class="daily-checklist">
         <div v-for="row in rows" :key="row.id" class="daily-check-row" :class="{selected: selected === row.id}">
           <input v-model="row.enabled" type="checkbox" :aria-label="`执行${row.label}`" :disabled="busy || running" />
@@ -144,19 +161,23 @@ async function stopToday() {
       </section>
     </div>
     <p v-if="preset" class="daily-order">执行顺序：{{ rows.filter(r => r.enabled).map(r => r.label).join(' → ') || '尚未勾选' }}</p>
+    <h4 v-if="preset" class="daily-ending-title">③ 结束后</h4>
     <footer v-if="preset" class="daily-settings-footer">
       <label>开始时间<input v-model="startTime" type="time" :disabled="busy || running" /><small>留空则现在开始</small></label>
       <label>结束后<select v-model="after" :disabled="busy || running"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></select></label>
-      <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间开工' : '一键执行日课' }}</button></div></div>
+      <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间执行今日安排' : '一键执行今日安排' }}</button></div></div>
     </footer>
     <button v-if="timeline.conductor.enabled || running" :disabled="busy" @click="stopToday">{{ running ? '停止当前任务和今日安排' : '停止今日安排' }}</button>
-    <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份日课替换今日时间表的任务安排；远征排班仍保留。</p>
+    <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份今日安排替换旧的任务时段；远征排班仍保留。</p>
     <p v-if="message" role="status">{{ message }}</p><button v-if="!loading && !preset" @click="load">重新加载</button>
   </section>
 </template>
 
 <style scoped>
 .daily-settings { margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--paper-line); }
+.daily-planned-expeditions { margin: 20px 0 24px; padding: 16px; border: 1px solid var(--paper-line); border-radius: 8px; }
+.daily-planned-expeditions label { display: block; margin-top: 12px; }
+.daily-ending-title { margin-top: 24px !important; }
 .daily-settings h3, .daily-settings h4 { margin: 0 0 10px; }
 .daily-settings header p, .daily-muted, .daily-settings small { color: var(--ink-muted); }
 .daily-settings-layout { display: grid; grid-template-columns: minmax(230px, 310px) minmax(0, 1fr); gap: 28px; margin-top: 20px; }

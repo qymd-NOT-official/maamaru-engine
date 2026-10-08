@@ -4,7 +4,6 @@ export type DailyRow = { id: string; label: string; enabled: boolean; nodes: Wor
 // 临时保留去名单页之前的日课草稿，返回规划时恢复，不写入用户配置。
 export const listJumpDraft = { value: null as WorkflowPreset | null }
 export const dailyGroups = [
-  ['boot', '启动游戏', 'boot_emulator', 'login'],
   ['signin', '签到领鸡蛋', 'signin', 'free_gift'],
   ['practice', '演练', 'practice'], ['naihanka', '内番', 'naihanka'],
   ['forge', '锻刀刀解', 'forge', 'dismantle'], ['expedition', '指定远征', 'expedition'],
@@ -17,8 +16,8 @@ export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
   return {type, on_error: 'stop', params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
 }
 export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string): DailyRow[] {
-  if (preset.daily_ui?.rows) return clone(preset.daily_ui.rows).map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
-  const used = new Set<WorkflowNode>()
+  if (preset.daily_ui?.rows) return clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'expedition' ? {...row, label: '指定远征'} : row)
+  const used = new Set<WorkflowNode>(preset.nodes.filter(n => ['boot_emulator', 'login'].includes(n.type)))
   const rows = dailyGroups.map(([id, label, ...types]) => {
     if (id === 'activity' && activity) types = [activity]
     const found = preset.nodes.filter(n => types.includes(n.type))
@@ -42,11 +41,8 @@ export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activ
   }
   const extras = preset.nodes.filter(n => !used.has(n) && !['snapshot', 'ledger_sync'].includes(n.type))
   if (extras.length) rows.push({id:'custom',label:'原有其他步骤',enabled:true,nodes:clone(extras)})
-  // 原来没有启动步骤的默认日课补上模拟器启动，登录仍由共用安全流程完成。
-  const boot = rows.find(r => r.id === 'boot')!
-  if (!boot.nodes.some(n => n.type === 'boot_emulator')) boot.nodes.unshift(makeNode('boot_emulator', defs))
   return rows
 }
 export function compileDaily(rows: DailyRow[], tail: WorkflowNode[]): WorkflowNode[] {
-  return clone([...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])
+  return clone([{type:'boot_emulator',params:{},on_error:'stop'}, {type:'login',params:{},on_error:'stop'}, ...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])
 }
