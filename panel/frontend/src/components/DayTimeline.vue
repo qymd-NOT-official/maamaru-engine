@@ -4,10 +4,11 @@ import GameplaySettingsDialog from './GameplaySettingsDialog.vue'
 import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
+import DailySettings from './DailySettings.vue'
 import { draggedMinute } from './timelineDrag'
 import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
 
-const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number }>(), {
+const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number; dailySettings?: boolean }>(), {
   collapsible: false,
   adoptRecommendationRequest: 0,
 })
@@ -18,7 +19,7 @@ const DAY = 1680
 const GENERIC_BLOCK_MIN = 30
 const MAX_BLOCKS = 6
 const data = ref<DayTimeline | null>(null)
-const expanded = ref(!props.collapsible || !!props.recoveryRunId)
+const expanded = ref(!!props.dailySettings || !props.collapsible || !!props.recoveryRunId)
 const editing = ref(false)
 const saving = ref(false)
 const removing = ref(false)
@@ -1284,7 +1285,7 @@ const caption = computed(() => {
 
         </div>
       </div>
-      <div v-if="data.expedition_help" class="tl-expedition-help">
+      <div v-if="!dailySettings && data.expedition_help" class="tl-expedition-help">
         <label class="tl-expedition-help-count" title="包含今天已出发和已安排的班次。多班会接在前班归来、收菜后；跑够次数就不再推荐。">每支勾选部队今天共安排
           <select :value="data.expedition_help.rounds_per_team" :disabled="prefsBusy || !!adoptingSuggestion" @change="updateRounds">
             <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">{{ n }}</option>
@@ -1296,7 +1297,7 @@ const caption = computed(() => {
 
       </div>
       <p v-if="expeditionMessage" class="tl-expedition-message" role="status">{{ expeditionMessage }}</p>
-      <div class="tl-compact">
+      <div v-if="!dailySettings" class="tl-compact">
         <div class="tl-mini-meta">
           <span><i class="is-expedition"></i>远征 <i class="is-task"></i>任务<template v-if="suggestionBlocks.length"> <i class="is-suggest"></i>建议</template></span>
           <span>04:00 日课刷新</span>
@@ -1325,6 +1326,7 @@ const caption = computed(() => {
         <p v-else class="empty">今天还没有执行记录</p>
       </div>
 
+      <template v-if="!dailySettings">
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
       <section v-if="data.workflow_active" class="tl-booking" aria-label="正在执行的任务流">
         <strong>正在执行 · {{ data.workflow_active.name }}</strong>
@@ -1426,8 +1428,23 @@ const caption = computed(() => {
         </div>
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
+      </template>
+      <template v-if="dailySettings">
+        <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" :data-raid-recovery="block.run_id" tabindex="-1" class="tl-expedition-help-note tl-raid-recovery">
+          <strong>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</strong>
+          <p>先在游戏里回到本丸，再继续。</p>
+          <div v-if="block.recovery!.uncertain_round">
+            <p>中断的那一圈后来打完了吗？</p>
+            <div class="tl-booking-actions"><button type="button" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, true)">打完了，继续剩余 {{ Math.max(0, block.recovery!.remaining - 1) }} 圈</button>
+            <button type="button" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, false)">没打完，继续剩余 {{ block.recovery!.remaining }} 圈</button></div>
+          </div>
+          <button v-else type="button" class="tl-booking-link" :disabled="conductorBusy || !data.conductor.available" @click="resumeRaid(block, false)">继续剩余 {{ block.recovery!.remaining }} 圈</button>
+        </div>
+        <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
+      </template>
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
+    <DailySettings v-if="dailySettings && data" :timeline="data" @saved="load(true)" />
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
   <dialog ref="expeditionDialog" class="tl-expedition-dialog" @cancel="expeditionConfigBusy && $event.preventDefault()">

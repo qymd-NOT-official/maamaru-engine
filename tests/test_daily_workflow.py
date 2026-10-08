@@ -49,6 +49,19 @@ class DailyWorkflowTests(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError):
             workflow.delete_preset(default["id"])
 
+    def test_daily_checklist_retains_disabled_parameters_and_discards_stale_projection(self):
+        nodes = [_node("practice")]
+        ui = {"startTime": "08:00", "rows": [
+            {"id": "practice", "label": "演练", "enabled": True, "nodes": nodes},
+            {"id": "sugar", "label": "炼糖", "enabled": False, "nodes": [_node("sugar")]},
+        ]}
+        saved = workflow.create_preset({"name": "日课设置", "nodes": nodes, "daily_ui": ui})
+        self.assertEqual(workflow.find_preset(saved["id"])["daily_ui"], ui)
+        renamed = workflow.update_preset(saved["id"], {"name": "早课"})
+        self.assertEqual(renamed["daily_ui"], ui)
+        changed = workflow.update_preset(saved["id"], {"nodes": [_node("signin")]})
+        self.assertIsNone(changed["daily_ui"])
+
     def test_template_imports_selected_steps_and_day_specific_parameters(self):
         saved = {"params": {"daily": {"steps": ["演练", "锻刀", "出阵"], "after": "shutdown",
                     "sortie_mode": "yosari", "yosari_runs": 8, "team_no": "2"}}}

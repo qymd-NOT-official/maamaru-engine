@@ -416,6 +416,24 @@ def find_preset(preset_id) -> dict | None:
     return None
 
 
+def _daily_ui(body, nodes):
+    """只保留与实际执行节点一致的日课清单，避免流程编辑后显示旧设置。"""
+    ui = body.get("daily_ui")
+    if not isinstance(ui, dict) or not isinstance(ui.get("rows"), list):
+        return None
+    if len(ui["rows"]) > MAX_NODES:
+        raise WorkflowError("日课项目太多")
+    compiled = []
+    for row in ui["rows"]:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            raise WorkflowError("日课项目格式不正确")
+        normalized = normalize_nodes(row["nodes"]) if row.get("nodes") else []
+        if row.get("enabled") is True:
+            compiled.extend(normalized)
+    actual = [node for node in nodes if node["type"] not in {"snapshot", "ledger_sync"}]
+    return copy.deepcopy(ui) if compiled == actual else None
+
+
 def create_preset(body: dict) -> dict:
     if not isinstance(body, dict):
         raise WorkflowError("预设必须是对象")
@@ -431,6 +449,7 @@ def create_preset(body: dict) -> dict:
         "after": normalize_after(body.get("after", "none")),
         "daily_mode": body.get("daily_mode") is True,
         "parameter_version": 1,
+        "daily_ui": _daily_ui(body, normalize_nodes(body.get("nodes"))),
     }
     validate_ending(preset)
     presets = load_presets()
@@ -463,6 +482,7 @@ def update_preset(preset_id: str, body: dict) -> dict | None:
             "after": normalize_after(body.get("after", existing.get("after", "none"))),
             "daily_mode": body.get("daily_mode", existing.get("daily_mode", False)) is True,
             "parameter_version": existing.get("parameter_version", 1),
+            "daily_ui": _daily_ui({**body, "daily_ui": body.get("daily_ui", existing.get("daily_ui"))}, normalize_nodes(body.get("nodes") if body.get("nodes") is not None else existing.get("nodes"))),
         }
         validate_ending(presets[i])
         save_presets(presets)
