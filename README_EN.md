@@ -8,7 +8,7 @@
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.0 (Chinese)](docs/releases/v1.3.0.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.1 (Chinese)](docs/releases/v1.3.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 Maamaru supports the **Simplified Chinese client on the China server**. The app is currently in Simplified Chinese.
 

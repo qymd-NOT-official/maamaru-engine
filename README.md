@@ -8,7 +8,7 @@
 
 > **你决定今天的本丸要做什么，执行、照看、收尾和记录交给まあ丸。**
 
-**[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[功能与使用指南](docs/user-manual.md)** · [v1.3.0 更新内容](docs/releases/v1.3.0.md) · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[功能与使用指南](docs/user-manual.md)** · [v1.3.1 更新内容](docs/releases/v1.3.1.md) · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 玩刀剑乱舞九年了，现在还是想玩，只是不想再亲自点完每一轮重复操作，也不想继续手拉 Excel 计算资源。所以我做了まあ丸：需要时替我照看本丸，回来时能翻翻这一天留下的记录。
 
