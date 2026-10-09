@@ -1,176 +1,120 @@
-# Maamaru `🦊` — A Honmaru Steward for Touken Ranbu ONLINE China
+# Maamaru `🦊` — A Honmaru Steward for Touken Ranbu ONLINE
 
 [**简体中文**](README.md) · **English**
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![GitHub stars](https://img.shields.io/github/stars/qymd-NOT-official/maamaru-engine?style=social)](https://github.com/qymd-NOT-official/maamaru-engine)
+
+I have played Touken Ranbu for nine years, and I still want to keep playing. I just no longer want to click through every repetitive task myself—or keep an Excel sheet by hand to track resources. That is why I built Maamaru: to look after my Honmaru when needed, and leave records I can read when I return.
+
+![My Honmaru: the courtyard, journal, and today's clock](docs/assets/product/01-honmaru-home.png)
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-**[Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.1 (Chinese)](docs/releases/v1.3.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play. The app's interface is in Simplified Chinese.
 
-Maamaru supports the **Simplified Chinese client on the China server**. The app is currently in Simplified Chinese.
+**[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.1](docs/releases/v1.3.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
-## From today's plan to a new page in your Honmaru
+## Set up the daily routine once
 
-To hand over repetitive work, pick a task, check the team, spending permissions, and stop conditions, and try a short supervised run. When you want balances, bookkeeping, or a budget, choose Read Game Balances (读取游戏家底) in the warehouse. As run-time and yield records accumulate, use them to plan work and schedules.
+In Planning → Today's Arrangements (规划 → 今日安排), choose today's dailies, check their settings, and set planned expeditions and the ending action. Back at home, Execute Today's Schedule hands over that arrangement: due expeditions are confirmed first, followed by the daily checklist.
 
-**Start with a task, or read your balances to begin bookkeeping. Use what you need.**
+![Planning: today's arrangements and daily checklist](docs/assets/product/02-today-daily.png)
 
-**1. Return to My Honmaru**
+During events, use existing records to estimate remaining runs, time, and resources. Enabling recommended Regiment Battle runs also enables koban-funded ticket refill. You choose whether to turn it on.
 
-Recent game state, new swords, and your own notes stay here.
+<details>
+<summary>Start later, or refresh an expedition team's sakura first</summary>
 
-![1. Return to My Honmaru](docs/assets/v1.2-home.png)
+Schedule expeditions, Regiment Battle, or saved workflows on the timetable, then drag them to adjust their start time. Expeditions can use team presets and refresh sakura before departure. Maamaru restores and checks the original team and equipment before sending it out. This takes time and overwrites the game's team record slot one; read the [sakura guide](docs/user-manual.md#刷花与远征补花) first.
 
-**2. Save a daily routine**
+![Planning timetable](docs/assets/v1.2-timetable.png)
 
-Set planned expeditions, the daily checklist, and the ending action in Planning. The home page and Planning share Execute Today’s Schedule: due expeditions depart first, followed by the daily routine. Daily, standalone gameplay, and custom workflow settings remain separate. Recommended Regiment Battle runs enable koban-funded ticket refill.
+Scheduled work requires the panel to stay open and the computer to stay awake. See [Planning and scheduling](docs/user-manual.md#规划与定时开工).
 
-![Today’s arrangements accepted](docs/assets/v1.3-daily-planning.png)
+</details>
 
-Use the workflow builder for custom routines; the system daily checklist is configured in Planning.
+## Just a few tasks today? That works too
 
-![2. Save a daily routine](docs/assets/v1-daily-workflow.png)
+Functions (功能) runs **a standalone task or one custom workflow**. Pick a map, team, and run count in Gameplay Settings, or add and reorder steps in the Workflow Builder. **The one-click daily checklist is configured in Planning.** Daily, standalone, and workflow parameters are saved separately.
 
-**3. Put work on the timetable**
+<table>
+<tr><th width="50%">Run one task</th><th width="50%">Build your own sequence</th></tr>
+<tr><td><a href="docs/assets/product/10-single-task-settings.png"><img src="docs/assets/product/10-single-task-settings.png" alt="Standalone battle settings"></a></td><td><a href="docs/assets/product/08-workflow-builder.png"><img src="docs/assets/product/08-workflow-builder.png" alt="Custom workflow builder"></a></td></tr>
+<tr><td>Use your saved injury, repair, troop, and captain settings for this run.</td><td>Set parameters for each step and save the sequence for another day.</td></tr>
+<tr><th>Follow the task at the desk</th><th>Add the steps you need</th></tr>
+<tr><td><a href="docs/assets/product/07-task-desk.png"><img src="docs/assets/product/07-task-desk.png" alt="Task desk and execution log"></a></td><td><a href="docs/assets/product/09-workflow-steps.png"><img src="docs/assets/product/09-workflow-steps.png" alt="Adding workflow steps"></a></td></tr>
+<tr><td>Return here to check progress and the reason a task stopped.</td><td>Combine startup, login, sorties, and support tasks in your preferred order.</td></tr>
+</table>
 
-Set Regiment Battle runs and a start time, or schedule a saved workflow separately.
+Before departure, Maamaru checks the team, injuries, and equipment, and blocks confirmed critical injuries. When a task stops, check its latest messages and the game screen before continuing. [Supported tasks](docs/user-manual.md#出阵与活动任务) · [Workflows and dailies](docs/user-manual.md#任务流与一键日课)
 
-![3. Put work on the timetable](docs/assets/v1.2-timetable.png)
+## Balances without hand-copying, swords with a history
 
-**4. See what is happening**
+Warehouse brings together your latest recorded balances, resource trends, and transactions. The sword archive keeps level, cumulative experience, Ranbu progress, and acquisition time for each individual sword. Duplicate swords stay separate, and you can mark your favorites.
 
-The task desk shows the current job and its execution log.
+<table>
+<tr><th width="50%">Your Honmaru's balances</th><th width="50%">Each sword's archive</th></tr>
+<tr><td><a href="docs/assets/product/03-inventory.png"><img src="docs/assets/product/03-inventory.png" alt="Balances and resource trends"></a></td><td><a href="docs/assets/product/04-sword-archive.png"><img src="docs/assets/product/04-sword-archive.png" alt="Sword archive and growth history"></a></td></tr>
+<tr><td>See what remains and how resources have changed.</td><td>Find a sword, mark it for training, and browse its recorded growth.</td></tr>
+</table>
 
-![4. See what is happening](docs/assets/v1.2-running-log.png)
+On the China server, leave the game at the Honmaru and click Read Game Balances (读取游戏家底); avoid interacting with the emulator during collection. Import an old ledger or add transactions yourself when needed. Incomplete collection can be retried. Records need synchronization, and an expired countdown does not mean something has been collected. [Warehouse](docs/user-manual.md#仓库与成绩单怎么看) · [Sword archive](docs/user-manual.md#刀账与所持名单)
 
-**5. Review the ledger**
+## Save the teams and equipment you use often
 
-Check balances, gains, and spending, then follow the records for details.
+In Swords → Team Presets, select individual swords and save troop, horse, charm, and treasure settings for tasks that support presets. Empty slots stay as they are; missing requested members or equipment stop the operation.
 
-![5. Review the ledger](docs/assets/v1.2-balances.png)
+![Team presets and equipment settings](docs/assets/product/05-team-presets.png)
 
-You arrange the day's work; when you return, you can see what got done: completed runs, where resources came from, and which swords came home. Open the report or ledger when you want the details.
+Team presets and equipment changes are still in trial. Try a short run with a team you can easily restore, and check the result before using an important arrangement. [Team preset guide](docs/user-manual.md#部队预设试用)
 
-The records page groups tasks and transactions by date, with battle drops by map and a forging history. Each sword’s archive entry shows level, cumulative experience, Ranbu progress, and acquisition history.
+## Come back and browse the day
 
-![Records by date](docs/assets/v1.2-records.png)
+Tasks, spending, and gains live in All Records, grouped by date. Expand battle drops and forging notes to find which map brought a sword home, or a forge's recipe and result. Unconfirmed sources remain unknown.
 
-![Battle drops](docs/assets/v1.2-drops.png)
+<table>
+<tr><th width="50%">Records by date</th><th width="50%">Drops by map</th></tr>
+<tr><td><a href="docs/assets/product/06-records.png"><img src="docs/assets/product/06-records.png" alt="Calendar and daily records"></a></td><td><a href="docs/assets/v1.2-drops.png"><img src="docs/assets/v1.2-drops.png" alt="Battle drops grouped by map"></a></td></tr>
+<tr><td>Open a task to see its results and related transactions.</td><td>Browse battle drops and forging records when you need them.</td></tr>
+</table>
 
-![Sword archive](docs/assets/v1.2-sword-archive.png)
+Back in My Honmaru, write your own notes, change your avatar, edit your Saniwa profile, or switch between washi-paper and pixel themes. Make it feel like yours.
 
-## Hand over the repetitive work
+## Keep a ledger, or hand over the routine
 
-I have played Touken Ranbu for nine years, and I still want to keep playing. I just no longer want to click through every repetitive task myself—or maintain an Excel sheet by hand to track my resources. That is why I built Maamaru: to look after my Honmaru when needed, and leave records I can read when I return.
+| Feature | China server | Japanese server |
+|---|---|---|
+| Honmaru home, profile, and notes | ✓ | ✓ |
+| Balance, item, and sword records | ✓ | ✓ |
+| Update records | Read balances, update the archive, or sync after related tasks | Connect the dedicated game browser; update during play |
+| Standalone tasks, custom workflows, and dailies | ✓ | — |
+| Automated sorties, expeditions, and scheduled work | ✓ | — |
 
-### Planning: arrange work once you have records
+Choose the corresponding Honmaru in the launcher. Settings, profiles, notes, and records stay separate between servers. The Japanese-server entry provides the ledger and Honmaru display. [Japanese-server guide](docs/user-manual.md#日服本丸账房)
 
-Read balances support budgeting; run times and yields need task or manual activity records. You do not need a full plan to get started. Use your Honmaru's records to estimate the remaining event work, daily runs, and koban budget. Recommended Regiment Battle runs can go into the timetable, with the time and run count still editable. Saved workflows can be scheduled separately.
+## Get started
 
-Change Konnosuke's resource focus and the expedition recommendations follow it. If a team cannot reach a useful map, Maamaru explains the missing sword type, total-level requirement, or occupied map. Existing team presets can also be used for expeditions.
+The primary environment for China-server automation is **Windows, MuMu Player 12, and a 1280×720 game screen**.
 
+1. [Download the latest release](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest). Install `maamaru-setup-v*.exe`, or fully extract `maamaru-launcher-v*.zip` and run `まあ丸启动器.exe`.
+2. China server: open MuMu, enter the game's Honmaru, then choose Start Maamaru after the launcher finishes checking. Use Select Emulator if you need to locate the installation. Japanese server: choose 日服本丸 and follow the panel's instructions to connect the dedicated game browser.
+3. To run a task, open Functions → Gameplay Settings, check the map, team, injury rules, and spending settings, then try **one supervised run**. To start bookkeeping, open Warehouse and read game balances.
 
-### Workflows: save your daily routine
+You do not need a complete sword archive or budget to run ordinary tasks. Set up your daily checklist in Planning when you are ready.
 
-Combine dailies, expeditions, sorties, and events in your preferred order, then save the workflow for reuse. Each step retains its own team, run count, and spending settings. You can also launch one task directly.
+**Detailed instructions → [User guide (Chinese)](docs/user-manual.md)**. See [setup](docs/user-manual.md#安装与启动) or [why a task stopped](docs/user-manual.md#任务为什么停了) for help.
 
-Before departure, Maamaru checks the team, injuries, and equipment. During the run, it follows your settings for repairs, troop replenishment, and common interruptions. It resumes where recovery is supported and stops with an explanation when it cannot confirm the situation. At the end, your chosen action can exit the game, close the emulator, or put the PC to sleep.
+## Before using Maamaru
 
+This independent fan project is not affiliated with the game's operators. It includes automated game interactions that may violate the game's terms and lead to account penalties, unintended actions, or data loss. Decide for yourself whether to use it, and test new tasks with short supervised runs, especially after game updates.
 
-### Inventory and sword archive: balances with a history
+- You choose teams, injury conditions, spending permissions, and protected swords. Check those settings before starting.
+- Game updates, other resolutions, and new maps can affect recognition. Edo Castle currently supports E4 only; see the guide for each task's scope.
+- The standalone ledger entry and Android APK are paused. Open Warehouse in the full panel for bookkeeping.
+- Configuration and records stay local: installed builds use `%LOCALAPPDATA%\Maamaru`; source builds use `%LOCALAPPDATA%\Maamaru-Dev`. Updates preserve user data.
 
-The ledger translates game resource, item, and event records into readable transactions alongside Maamaru's execution records. Koban reserved for scheduled Regiment Battle runs is included in the budget, so you can see what remains available.
-
-The sword archive uses unique IDs from the game's owned-sword list, keeping duplicate swords separate. Forging, battle drops, and inbox collection leave acquisition records; confirmed refinement, Ranbu fusion, and dismantling update the specific swords involved. Your favorites and training marks stay with their entries.
-
-Game records are read during synchronization or at the end of related tasks, rather than monitored continuously. Unconfirmed sources remain unknown.
-
-
-### My Honmaru: look back on the day
-
-New swords, returning expeditions, forging, and sword sorting become journal posts with names and results. Add your own notes, change your avatar, and edit your Saniwa profile to make the Honmaru feel like yours.
-
-Switch between washi-paper and pixel themes whenever you like. Kogitsunemaru and Konnosuke are here in the courtyard, too.
-
-
-## First-time setup
-
-Choose **Start Maamaru** in the launcher, open the emulator, and enter the game's Honmaru. Then choose the path that suits you:
-
-**Just run a task**
-
-Pick a standalone task at the task desk, check the team, spending permissions, and stop conditions, and try a short supervised run. You can start directly without using the ledger, reading balances, or making a plan. Save a workflow when you want to combine several tasks.
-
-**Review balances, keep records, or plan work**
-
-Open the warehouse and click **Read Game Balances (读取游戏家底)**. Maamaru reads game records, then checks the forging and inventory screens for resources, koban, and tokens. It does not run daily tasks, forge, or depart. Each reading method reports its result; retry if either is incomplete.
-
-Old-ledger import and goals are optional. Current balances support budgeting; run times and yields need task or manual activity records. Use the corresponding planning advice and schedules as those records accumulate.
-
-The standalone ledger entry and Android APK are paused. Launch Maamaru and open Warehouse to read game balances and manage records.
-
-## Where to start
-
-| What you want to do | Which entry to open |
-|---|---|
-| Run dailies, sorties, events, or scheduled work | **Launch Maamaru** in the launcher |
-| Review records, enter transactions, budget, or import old records | **Launch Maamaru → Warehouse** |
-
-Excel/CSV imports and exports are supported, with import previews and backups before writing. Existing local records are preserved.
-
-Supported tasks include dailies and expeditions, normal battle maps, Chapter 1 of Iko, Underground Treasure Chest, Edo Castle E4, Treasure Trove, Regiment Battle (including the seaside map), and the Pumpkin event. Detailed settings, prerequisites, and stop conditions are in the [user guide (Chinese)](docs/user-manual.md).
-
-## The Saniwa keeps control
-
-| You decide | Maamaru handles |
-|---|---|
-| Goals, task order, teams, and formation rules | Repeating the saved steps |
-| Injury stop conditions and whether to repair and resume | Checking before departure and following those conditions |
-| Whether to replenish passes, spend koban, or use items | Spending within your permissions and stopping when uncertain |
-| Which swords may be dismantled or used for refinement and Ranbu fusion | Following the selection and protection rules |
-
-Reading game lists and records does not change the game. Applying a team preset, departing, and spending resources are actual actions that require you to start the corresponding task. Resource advice does not change teams on its own, and Regiment Battle advice only starts on a schedule after you save an arrangement.
-
-## Download and Get Started
-
-Download a package from [GitHub Releases](https://github.com/qymd-NOT-official/maamaru-engine/releases):
-
-- `maamaru-setup-v*.exe`: Windows installer;
-- `maamaru-launcher-v*.zip`: portable Windows package—extract it, then run `まあ丸启动器.exe`;
-
-> [!CAUTION]
-> This is an independent fan project and is not affiliated with the game's developer, publisher, or operators. The normal steward mode automates interactions with the game and may violate its terms of service, resulting in account penalties, unintended actions, or data loss. The standalone ledger does not connect to the game. Decide for yourself whether to use automation, and test every new task with a short supervised run—especially after a game update.
-
-> [!NOTE]
-> **Maamaru is under active development.** Its primary test environment is MuMu Player 12 with the game at 1280×720. It has seen long-running use on a real account and installation by non-technical users, but a new map, another emulator, a different resolution, or a game UI update may still break visual recognition.
-
-## Where Your Data Lives
-
-- The installed version stores configuration, logs, reports, journal entries, plans, and backups in `%LOCALAPPDATA%\Maamaru`. Updating the app does not remove this data.
-- The source version uses `%LOCALAPPDATA%\Maamaru-Dev` by default, keeping development records separate from the installed app's ledger.
-- Reports do not store game screenshots. An exported feedback bundle contains the app version, a system summary, and text logs—not configuration files, secrets, inventory data, or the state database.
-- Android data stays in the app's directory on the phone. There is currently no sync or export, and uninstalling the APK erases its preview data. Do not use it as the only copy of information you cannot recreate.
-
-## Current Limits
-
-- Edo Castle automation supports E4 only; other difficulties are not planned. Iko currently supports Chapter 1 only.
-- Team presets and equipment changes are still in trial. Start with a team you can easily restore, and check the result before using a preset for an important unattended run.
-- When the game controls marching, it also controls routes and formations. Maamaru chooses forks and formations only in its manual-marching mode.
-- The Pumpkin event automation never buys extra tokens. It stops safely when none remain.
-- Retreating before a boss, reading fatigue, captain rotation by drag, and reconnecting after a dropped connection all depend on the actual screen. Maamaru stops instead of guessing when it cannot verify the state.
-- Secretary chat and remote notifications through QQ or Telegram have not completed real-device validation by the maintainer and are not primary entry points.
-- Emergency Stop terminates the task process immediately, so it cannot guarantee a final inventory check or a return to the Honmaru. Check the emulator screen before starting another task.
-
-## What's Next
-
-v1.0.0 connects the honmaru journal, game sword archive, resource ledger, and planning. The next priority is real-device feedback about stalls, recognition mistakes, mismatched records, and changes that are hard to correct—especially while checking preset teams and equipment. Desktop–Android ledger sync remains a request to evaluate against actual use.
-
-## Reporting a Problem
-
-If a task stops, visual recognition fails, or installation goes wrong, preserve the current emulator screen first. Then export a feedback bundle from the panel or launcher and open a [GitHub Issue](https://github.com/qymd-NOT-official/maamaru-engine/issues) with the version, task, and steps to reproduce.
+If something goes wrong, preserve the emulator screen and export feedback from the panel or launcher. Open a [GitHub Issue](https://github.com/qymd-NOT-official/maamaru-engine/issues) with the version, task, and reproduction steps. [Feedback guide](docs/user-manual.md#反馈错误)
 
 <details>
 <summary><strong>Running from source and project structure</strong></summary>
@@ -224,7 +168,3 @@ In ancient times, Moonshot AI sent Kimi K3 down from the heavens to forge the ba
 > _This Honmaru follows the Great Python, with Java as its aide. If there are bugs, such is the Mandate of Heaven; if there are none, all credit belongs to our fellow cultivators._
 
 </details>
-
-## Japanese-server ledger
-
-Choose 日服本丸 in the launcher and connect the dedicated game browser to update balances, items, and sword records during play. Server-specific settings and records stay separate. This entry provides ledger features, not Chinese-server automation.
