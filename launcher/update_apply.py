@@ -22,7 +22,7 @@ class ApplyError(RuntimeError):
     """The staged installer or update plan is unsafe to apply."""
 
 
-def prepare_apply(installer: Path, expected_sha256: str, version: str) -> dict:
+def prepare_apply(installer: Path, expected_sha256: str, version: str, kind: str = "installer") -> dict:
     """Recheck a staged installer, create a plan, and launch the detached helper."""
     installer = Path(installer).resolve()
     updates = UPDATES_DIR.resolve()
@@ -36,6 +36,7 @@ def prepare_apply(installer: Path, expected_sha256: str, version: str) -> dict:
     backup_dir = updates / "backups" / f"before-{version}-{stamp}"
     plan_path = updates / f"apply-{version}.json"
     plan = {
+        "kind": kind,
         "version": version,
         "installer": str(installer),
         "sha256": expected_sha256.lower(),
@@ -45,10 +46,18 @@ def prepare_apply(installer: Path, expected_sha256: str, version: str) -> dict:
         "parent_pid": os.getpid(),
         "data_root": str(DATA_ROOT.resolve()),
     }
+    _validate_plan(plan)
     _write_json(plan_path, plan)
 
     if getattr(sys, "frozen", False):
-        helper = updates / "maamaru-update-helper.exe"
+        # Directory bundles need their native dependencies next to the helper.
+        # Never execute the helper from the installation being replaced.
+        helper_dir = updates / ("helper-" + str(time.time_ns()))
+        helper_dir.mkdir()
+        internal = Path(sys.executable).resolve().parent / "_internal"
+        if internal.is_dir():
+            shutil.copytree(internal, helper_dir / "_internal")
+        helper = helper_dir / "maamaru-update-helper.exe"
         shutil.copy2(Path(sys.executable).resolve(), helper)
         command = [str(helper), "--apply-update", str(plan_path)]
     else:
@@ -78,11 +87,29 @@ def run_plan(plan_path: Path) -> int:
     backup_dir = Path(plan["backup_dir"])
     previous_executable = Path(plan["previous_executable"])
 
-    _wait_for_process(int(plan["parent_pid"]), timeout=30)
+    try:
+        _wait_for_process(int(plan["parent_pid"]), timeout=30)
+    except ApplyError as exc:
+        _record_result(False, plan, str(exc), rolled_back=False)
+        return 2
     if _sha256(installer) != plan["sha256"]:
         _record_result(False, plan, "安装前复核失败，未运行安装器", rolled_back=False)
         _restart(previous_executable)
         return 2
+
+    if plan.get("kind") == "light":
+        from .light_update import apply_package
+        before_hash = _sha256(previous_executable)
+        try:
+            apply_package(installer, program_dir, backup_dir, plan["version"])
+        except Exception as exc:
+            restored = previous_executable.is_file() and _sha256(previous_executable) == before_hash
+            _record_result(False, plan, f"轻量更新未完成：{exc}。可重新检查更新或使用完整安装包。", rolled_back=restored)
+            _restart(previous_executable)
+            return 1
+        _record_result(True, plan, f"已更新到 v{plan['version']}", rolled_back=False)
+        _restart(program_dir / "まあ丸启动器.exe")
+        return 0
 
     had_program = program_dir.is_dir()
     if had_program:
@@ -130,6 +157,8 @@ def _validate_plan(plan: dict) -> None:
         raise ApplyError("更新计划指向了暂存区以外的文件")
     if data_root != DATA_ROOT.resolve():
         raise ApplyError("更新计划的用户数据目录不匹配")
+    if plan.get("kind", "installer") not in ("installer", "light"):
+        raise ApplyError("更新方式无效")
     program_dir = Path(plan["program_dir"]).resolve()
     if program_dir != _program_dir().resolve():
         # 更新助手是启动器复制到暂存区的副本，自身旁边没有 manifest.json，
@@ -137,8 +166,9 @@ def _validate_plan(plan: dict) -> None:
         # 一个真实存在的まあ丸安装目录（安装器总会安放 manifest.json）。
         if _has_local_manifest() or not (program_dir / "manifest.json").is_file():
             raise ApplyError("更新计划的程序目录不匹配")
-    if program_dir == data_root or program_dir.is_relative_to(data_root):
-        raise ApplyError("程序目录不能位于用户数据目录内")
+    if (program_dir == Path(program_dir.anchor) or program_dir.is_relative_to(data_root)
+            or data_root.is_relative_to(program_dir)):
+        raise ApplyError("程序目录与用户数据目录不能互相包含")
 
 
 def _program_dir() -> Path:
@@ -161,10 +191,17 @@ def _wait_for_process(pid: int, timeout: int) -> None:
     if os.name != "nt":
         return
     synchronize = 0x00100000
-    handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+    kernel = ctypes.windll.kernel32
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.OpenProcess(synchronize, False, pid)
     if handle:
         try:
-            ctypes.windll.kernel32.WaitForSingleObject(handle, timeout * 1000)
+            result = ctypes.windll.kernel32.WaitForSingleObject(handle, timeout * 1000)
+            if result != 0:
+                raise ApplyError("旧启动器尚未退出，更新未开始")
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
 
@@ -197,6 +234,7 @@ def _record_result(ok: bool, plan: dict, message: str, rolled_back: bool) -> Non
     backup_dir = str(plan.get("backup_dir", ""))
     _write_json(RESULT_PATH, {
         "ok": ok,
+        "kind": plan.get("kind", "installer"),
         "version": plan.get("version", "?"),
         "message": message,
         "rolled_back": rolled_back,

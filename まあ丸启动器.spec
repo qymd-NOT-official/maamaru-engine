@@ -67,9 +67,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='まあ丸启动器',
     debug=False,
     bootloader_ignore_signals=False,
@@ -83,3 +82,5 @@ exe = EXE(
     entitlements_file=None,
     icon='launcher/assets/maamaru-launcher.ico',
 )
+
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='まあ丸启动器')

@@ -38,6 +38,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 [Files]
 Source: "{#PackageDir}\まあ丸启动器.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PackageDir}\manifest.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PackageDir}\update-manifest.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PackageDir}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\まあ丸"; Filename: "{app}\まあ丸启动器.exe"; WorkingDir: "{app}"

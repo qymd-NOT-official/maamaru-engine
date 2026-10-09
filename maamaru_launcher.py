@@ -30,7 +30,7 @@ def _make_stdio_safe():
 _make_stdio_safe()
 
 
-if getattr(sys, "frozen", False):
+if getattr(sys, "frozen", False) and "--update-probe" not in sys.argv:
     data_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Maamaru"
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,21 @@ if getattr(sys, "frozen", False):
 
 
 def main():
-    if "--apply-update" in sys.argv:
+    if "--update-probe" in sys.argv:
+        import tempfile
+        try:
+            with tempfile.TemporaryDirectory(prefix="maamaru-probe-", ignore_cleanup_errors=True) as probe_data:
+                os.environ["MAAMARU_DATA_DIR"] = probe_data
+                os.environ["LOCALAPPDATA"] = probe_data
+                from launcher import app
+                from panel import server, worker
+                from touken.runtime_paths import BUNDLE_ROOT
+                if not (BUNDLE_ROOT / "panel/static").is_dir():
+                    raise SystemExit(1)
+        except Exception:
+            raise SystemExit(1)
+        raise SystemExit(0)
+    elif "--apply-update" in sys.argv:
         from launcher.update_apply import run_plan
         plan_index = sys.argv.index("--apply-update") + 1
         raise SystemExit(run_plan(Path(sys.argv[plan_index])))

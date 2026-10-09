@@ -25,7 +25,7 @@ from touken.data_relocation import (
 from touken.runtime_paths import DATA_ROOT, LOG_DIR, UPDATES_DIR, ensure_runtime_data
 from .health import has_blocker, run_checks
 from .update_apply import consume_result, prepare_apply
-from .updater import UpdateError, download_installer, select_installer
+from .updater import UpdateError, download_installer, select_update
 from .version import CURRENT_VERSION
 
 
@@ -146,8 +146,8 @@ async function refresh(){
 function setLaunchStep(index){const steps=[...document.querySelectorAll('#launchProgress span')];document.querySelector('#launchProgress').classList.add('show');steps.forEach((step,i)=>step.className=i<index?'done':i===index?'active':'')}
 async function startApp(mode){const b=document.querySelector(mode==='jp'?'#startJp':'#start');b.disabled=true;b.textContent='正在启动…';setState('','正在打开本丸','这次不需要你盯着黑窗口。','…');setLaunchStep(0);const timer=setTimeout(()=>setLaunchStep(1),500);const r=await pywebview.api.start(mode);clearTimeout(timer);if(!r.ok){document.querySelector('#launchProgress').classList.remove('show');setState('blocked','启动没有完成','错误已经留在启动记录中，可以修复后重试。','×');alert('启动失败：'+r.message);b.disabled=false;b.textContent='重新启动'}else{setLaunchStep(2);b.textContent='✓ 已启动';setState('ready','本丸已经打开','启动器的工作完成了，接下来交给まあ丸。','✓')}}
 async function repair(){setState('','正在修复环境','狐之助正在补齐可以自动恢复的项目。','…');const r=await pywebview.api.repair();alert(r.message);await refresh()}
-async function update(){
- setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update();
+async function update(full=false){
+ setState('','正在检查更新','正在向まあ丸的 GitHub 发布页确认最新版。','…');const r=await pywebview.api.check_update(full);
  if(r.update_available&&r.download_ready){
   if(confirm(r.message+'\n\n要现在安全下载到更新暂存区吗？')){
    setState('','正在下载更新','安装包下载后还会校验大小和 SHA-256。','…');setProgress(0);
@@ -162,7 +162,8 @@ async function update(){
    }
    d=d.result||{ok:false,message:'下载没有完成，请重试。'};
    alert(d.message);
-   if(d.ok&&confirm('安装包已经校验完成。\n\n要关闭まあ丸并打开安装向导吗？')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}
+   if(d.ok&&confirm('更新文件已经校验完成。\n\n要关闭まあ丸并开始更新吗？轻量更新会在检查通过后重新打开，完整更新会打开安装向导。')){const a=await pywebview.api.apply_update();if(!a.ok)alert(a.message)}
+   if(!d.ok&&r.light_update&&confirm('轻量更新下载未完成。要改用完整安装包吗？'))await update(true)
   }
  }else if(r.update_available&&r.url){if(confirm(r.message+'\n\n暂时无法自动下载，要打开发布页面吗？'))await pywebview.api.open_url(r.url)}else{alert(r.message)}
  await refresh();
@@ -184,16 +185,20 @@ class Api:
         self._download_state = None
         self._download_thread = None
         self._ledger_port = None
+        self._prefer_full_update = False
 
     def check(self):
         ensure_runtime_data()
         auto_configure_emulator()
         checks = run_checks()
         cleanup = pending_relocation_cleanup()
+        update_result = consume_result()
+        if update_result and not update_result.get("ok") and update_result.get("kind") == "light":
+            self._prefer_full_update = True
         return {
             "blocked": has_blocker(checks),
             "items": [item.__dict__ for item in checks],
-            "update_result": consume_result(),
+            "update_result": update_result,
             "data_root": str(DATA_ROOT),
             "data_cleanup": ({
                 "token": cleanup["token"],
@@ -335,7 +340,7 @@ class Api:
             _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": f"修复失败：{exc}"}
 
-    def check_update(self):
+    def check_update(self, full=False):
         try:
             request = urllib.request.Request(
                 "https://api.github.com/repos/qymd-NOT-official/maamaru-engine/releases/latest",
@@ -352,7 +357,11 @@ class Api:
             if comparison > 0:
                 message = f"发现新版本 {tag}\n当前版本：v{CURRENT_VERSION}"
                 try:
-                    self._pending_update = select_installer(data)
+                    from .update_apply import _program_dir
+                    from .updater import select_installer
+                    self._pending_update = select_installer(data) if (full or self._prefer_full_update) else select_update(data, _program_dir())
+                    kind = '轻量更新' if self._pending_update.get('kind') == 'light' else '完整安装包'
+                    message += f"\n{kind} · {self._pending_update['size'] / 1024 / 1024:.1f} MB"
                 except UpdateError as exc:
                     message += f"\n自动下载暂不可用：{exc}"
             elif comparison == 0:
@@ -364,6 +373,7 @@ class Api:
                 "message": message,
                 "update_available": update_available,
                 "download_ready": self._pending_update is not None,
+                "light_update": bool(self._pending_update and self._pending_update.get("kind") == "light"),
                 "url": data.get("html_url") or "https://github.com/qymd-NOT-official/maamaru-engine/releases/latest",
             }
         except Exception:
@@ -393,7 +403,7 @@ class Api:
                 except Exception as exc:  # GitHub 直连经常中途抽风，原地重试一次
                     error = exc
             if result is not None:
-                action = "已找到此前校验完成的安装包" if result["reused"] else "安装包已下载并通过安全校验"
+                action = "已找到此前校验完成的更新文件" if result["reused"] else "更新文件已下载并通过安全校验"
                 self._download_state["result"] = {
                     "ok": True,
                     "message": f"{action}。\n位置：{result['path']}",
@@ -422,10 +432,15 @@ class Api:
             return {"ok": False, "message": "请先重新检查并下载更新。"}
         installer = UPDATES_DIR / self._pending_update["version"] / self._pending_update["name"]
         try:
+            if _port_alive(8080):
+                with urllib.request.urlopen("http://127.0.0.1:8080/api/scripts", timeout=2) as response:
+                    status = json.load(response)
+                if status.get("running") is not False:
+                    return {"ok": False, "message": "请先让当前任务收工，再开始更新。"}
             prepare_apply(installer, self._pending_update["digest"].removeprefix("sha256:"),
-                          self._pending_update["version"])
+                          self._pending_update["version"], self._pending_update.get("kind", "installer"))
             threading.Thread(target=lambda: (time.sleep(0.3), webview.windows[0].destroy()), daemon=True).start()
-            return {"ok": True, "message": "まあ丸即将退出并打开安装向导。"}
+            return {"ok": True, "message": "まあ丸即将退出并开始更新。"}
         except Exception as exc:
             _write_launcher_log(traceback.format_exc())
             return {"ok": False, "message": f"无法开始安装：{exc}"}

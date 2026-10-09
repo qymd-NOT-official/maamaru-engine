@@ -45,10 +45,38 @@ class UpdateApplyTests(unittest.TestCase):
             result = json.loads((updates / "result.json").read_text(encoding="utf-8"))
             self.assertTrue(result["rolled_back"])
 
+    def test_directory_bundle_helper_keeps_native_runtime_outside_installation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, updates = self._plan(Path(tmp))
+            program = Path(plan['program_dir'])
+            (program / '_internal').mkdir()
+            (program / '_internal/python312.dll').write_bytes(b'native runtime')
+            with patch.object(update_apply, 'UPDATES_DIR', updates), \
+                    patch.object(update_apply, 'DATA_ROOT', Path(plan['data_root'])), \
+                    patch.object(update_apply, '_program_dir', return_value=program), \
+                    patch.object(update_apply.sys, 'frozen', True, create=True), \
+                    patch.object(update_apply.sys, 'executable', plan['previous_executable']), \
+                    patch.object(update_apply.subprocess, 'Popen') as launch:
+                update_apply.prepare_apply(Path(plan['installer']), plan['sha256'], '0.1.6')
+            helper = Path(launch.call_args.args[0][0])
+            self.assertTrue(helper.is_relative_to(updates))
+            self.assertEqual((helper.parent / '_internal/python312.dll').read_bytes(), b'native runtime')
+            self.assertFalse((helper.parent / 'manifest.json').exists())
+
     def test_plan_cannot_put_program_inside_user_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             plan, updates = self._plan(Path(tmp))
             plan["program_dir"] = str(Path(plan["data_root"]) / "program")
+            with patch.object(update_apply, "UPDATES_DIR", updates), \
+                    patch.object(update_apply, "DATA_ROOT", Path(plan["data_root"])), \
+                    patch.object(update_apply, "_program_dir", return_value=Path(plan["program_dir"])):
+                with self.assertRaises(update_apply.ApplyError):
+                    update_apply._validate_plan(plan)
+
+    def test_plan_cannot_put_user_data_inside_program(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, updates = self._plan(Path(tmp))
+            plan["data_root"] = str(Path(plan["program_dir"]) / "records")
             with patch.object(update_apply, "UPDATES_DIR", updates), \
                     patch.object(update_apply, "DATA_ROOT", Path(plan["data_root"])), \
                     patch.object(update_apply, "_program_dir", return_value=Path(plan["program_dir"])):

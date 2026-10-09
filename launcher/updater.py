@@ -22,9 +22,15 @@ class UpdateError(RuntimeError):
 
 def select_installer(release: dict) -> dict:
     """Return the signed-by-GitHub metadata for this release's Windows installer."""
+    version = str(release.get("tag_name") or "").removeprefix("v")
+    return _select_asset(release, f"maamaru-setup-v{version}.exe")
+
+
+def _select_asset(release: dict, expected_name: str) -> dict:
     tag = str(release.get("tag_name") or "")
     version = tag.removeprefix("v")
-    expected_name = f"maamaru-setup-v{version}.exe"
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", tag) or release.get("draft") or release.get("prerelease"):
+        raise UpdateError("这个版本不是可用的正式更新")
     for asset in release.get("assets") or []:
         if asset.get("name") != expected_name:
             continue
@@ -32,15 +38,35 @@ def select_installer(release: dict) -> dict:
         url = str(asset.get("browser_download_url") or "")
         size = asset.get("size")
         parsed = urllib.parse.urlparse(url)
-        expected_prefix = f"/{REPOSITORY}/releases/download/"
+        expected_path = f"/{REPOSITORY}/releases/download/{tag}/{expected_name}"
         if not _SHA256.fullmatch(digest):
             raise UpdateError("GitHub 没有提供可核对的安装包指纹")
-        if parsed.scheme != "https" or parsed.netloc != "github.com" or not parsed.path.startswith(expected_prefix):
+        if (parsed.scheme != "https" or parsed.netloc != "github.com" or parsed.path != expected_path
+                or parsed.query or parsed.fragment):
             raise UpdateError("安装包下载地址不是まあ丸官方仓库")
         if not isinstance(size, int) or size <= 0:
             raise UpdateError("安装包大小信息无效")
         return {"tag": tag, "version": version, "name": expected_name, "digest": digest, "url": url, "size": size}
     raise UpdateError("这个版本没有找到 Windows 安装包")
+
+
+def select_update(release: dict, program_dir: Path) -> dict:
+    from .light_update import installed_manifest, verify_files
+    current = installed_manifest(program_dir)
+    if current:
+        try:
+            verify_files(program_dir, current, "runtime")
+            version = str(release.get("tag_name", "")).removeprefix("v")
+            name = f"maamaru-update-v{version}-{current['runtime']}.zip"
+            # Reuse the official source/size/digest checks from installer selection.
+            for asset in release.get("assets") or []:
+                if asset.get("name") == name:
+                    selected = _select_asset(release, name)
+                    selected.update(name=name, kind="light")
+                    return selected
+        except (OSError, ValueError, KeyError, UpdateError):
+            pass
+    return select_installer(release)
 
 
 def download_installer(asset: dict, updates_dir: Path = UPDATES_DIR, progress=None) -> dict:
@@ -55,7 +81,10 @@ def download_installer(asset: dict, updates_dir: Path = UPDATES_DIR, progress=No
     expected_size = int(asset["size"])
     version = str(asset["version"])
     name = Path(str(asset["name"])).name
-    if name != asset["name"] or not name.endswith(".exe"):
+    if (name != asset["name"] or not re.fullmatch(r"\d+\.\d+\.\d+", version)
+            or (asset.get("kind") == "light" and not re.fullmatch(
+                rf"maamaru-update-v{re.escape(version)}-[0-9a-f]{{64}}\.zip", name))
+            or (asset.get("kind") != "light" and name != f"maamaru-setup-v{version}.exe")):
         raise UpdateError("安装包文件名无效")
 
     target_dir = Path(updates_dir) / version

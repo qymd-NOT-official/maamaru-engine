@@ -129,7 +129,7 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: |
-          $archive = & pyi-archive_viewer -l "dist/まあ丸启动器.exe" | Out-String
+          $archive = & pyi-archive_viewer -l "dist/まあ丸启动器/まあ丸启动器.exe" | Out-String
           $forbidden = @(
             "'panel\\panel_config.json'",
             "'panel_config.json'",
@@ -139,8 +139,8 @@ jobs:
           foreach ($entry in $forbidden) {
             if ($archive.Contains($entry)) { throw "发布成品混入用户数据：$entry" }
           }
-          $modules = & pyi-archive_viewer -r -b "dist/まあ丸启动器.exe" | Out-String
-          foreach ($required in @("launcher.updater", "launcher.update_apply")) {
+          $modules = & pyi-archive_viewer -r -b "dist/まあ丸启动器/まあ丸启动器.exe" | Out-String
+          foreach ($required in @("launcher.updater", "launcher.update_apply", "launcher.light_update")) {
             if (-not $modules.Contains($required)) { throw "发布成品缺少更新安全模块：$required" }
           }
 
@@ -148,13 +148,20 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          $exe = "dist/まあ丸启动器.exe"
+          $exe = "dist/まあ丸启动器/まあ丸启动器.exe"
           if (-not (Test-Path -LiteralPath $exe)) { throw "启动器构建失败：没有生成 $exe" }
           $package = "dist/package"
           New-Item -ItemType Directory -Path $package -Force | Out-Null
-          Copy-Item -LiteralPath $exe -Destination $package
+          Copy-Item -Path "dist/まあ丸启动器/*" -Destination $package -Recurse
           Copy-Item -LiteralPath "manifest.json" -Destination $package
+          python scripts/build_light_update.py $package dist ($tag.TrimStart("v"))
+          if ($LASTEXITCODE -ne 0) { throw "轻量更新包生成失败" }
           Compress-Archive -Path "$package/*" -DestinationPath "dist/maamaru-launcher-$tag.zip" -Force
+
+      - name: 验证轻量更新与失败恢复
+        run: python scripts/smoke_test_light_update.py dist/package
+        env:
+          PYTHONUTF8: "1"
 
       - name: 安装 Inno Setup
         shell: pwsh
@@ -199,3 +206,4 @@ jobs:
           files: |
             dist/maamaru-launcher-${{ steps.version.outputs.tag }}.zip
             dist/maamaru-setup-${{ steps.version.outputs.tag }}.exe
+            dist/maamaru-update-${{ steps.version.outputs.tag }}-*.zip

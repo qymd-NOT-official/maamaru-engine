@@ -95,7 +95,7 @@ try {
 
     $installDir = Join-Path $driveRoot "Programs\Maamaru"
     $physicalInstallDir = Join-Path $installVolume "Programs\Maamaru"
-    $install = Start-Process -FilePath $installer -PassThru -ArgumentList @(
+    $install = Start-Process -FilePath $installer -WindowStyle Hidden -PassThru -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
@@ -169,7 +169,7 @@ try {
     if (-not $uninstaller) {
         throw "安装目录里没有找到卸载程序"
     }
-    $uninstall = Start-Process -FilePath $uninstaller.FullName -PassThru -ArgumentList @(
+    $uninstall = Start-Process -FilePath $uninstaller.FullName -WindowStyle Hidden -PassThru -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",

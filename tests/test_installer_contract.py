@@ -24,6 +24,8 @@ class InstallerContractTests(unittest.TestCase):
             [
                 r"{#PackageDir}\まあ丸启动器.exe",
                 r"{#PackageDir}\manifest.json",
+                r"{#PackageDir}\update-manifest.json",
+                r"{#PackageDir}\_internal\*",
             ],
         )
 
