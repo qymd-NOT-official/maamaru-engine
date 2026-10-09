@@ -15,13 +15,23 @@ On the China server, run tasks or simply keep a ledger. On the Japanese server, 
 
 **[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [What's new in v1.3.1](docs/releases/v1.3.1.md) · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
-## Set up the daily routine once
+## Keep playing, without clicking through the same dailies
 
 In Planning → Today's Arrangements (规划 → 今日安排), choose today's dailies, check their settings, and set planned expeditions and the ending action. Back at home, Execute Today's Schedule hands over that arrangement: due expeditions are confirmed first, followed by the daily checklist.
 
 ![Planning: today's arrangements and daily checklist](docs/assets/product/02-today-daily.png)
 
-During events, use existing records to estimate remaining runs, time, and resources. Enabling recommended Regiment Battle runs also enables koban-funded ticket refill. You choose whether to turn it on.
+## Send expeditions after the resources you need
+
+Did a limited forge drain your steel? Saving koban for the next event? Set a resource goal in Planning, or choose what you want to replenish. Expedition suggestions follow that resource focus.
+
+Maamaru considers the participating teams and suggests destinations, times, and estimated yields. If a team cannot reach a map, it explains missing sword types, total-level shortfalls, or an occupied destination. Choose a saved team preset when you need another formation, then review the suggestion before turning it into an arrangement. You spend less time comparing maps and checking teams by hand.
+
+## How many event runs until the reward you want?
+
+Choose a target instead of dividing the remaining points by the days left every evening. Planning uses current progress, remaining time, recorded yields, and run times to estimate **remaining runs, daily time, and koban needed for extra passes**. Start with your own estimates when records are sparse, then refine them after a few runs.
+
+Recommended Regiment Battle runs can feed into today's arrangement; enabling them also enables koban-funded ticket refill. Underground Treasure Chest can target the koban you want left at the end, while Edo Castle estimates extra-pass costs from your key target. You choose the goal and spending. Estimates change with your records and do not guarantee each run's yield.
 
 <details>
 <summary>Start later, or refresh an expedition team's sakura first</summary>
@@ -49,9 +59,9 @@ Functions (功能) runs **a standalone task or one custom workflow**. Pick a map
 
 Before departure, Maamaru checks the team, injuries, and equipment, and blocks confirmed critical injuries. When a task stops, check its latest messages and the game screen before continuing. [Supported tasks](docs/user-manual.md#出阵与活动任务) · [Workflows and dailies](docs/user-manual.md#任务流与一键日课)
 
-## Balances without hand-copying, swords with a history
+## Saving for a limited forge? Check what you have
 
-Warehouse brings together your latest recorded balances, resource trends, and transactions. The sword archive keeps level, cumulative experience, Ranbu progress, and acquisition time for each individual sword. Duplicate swords stay separate, and you can mark your favorites.
+Check your savings before a forge, then see what it cost afterward. Keep koban for events and resources for repairs. Whether you enjoy watching the numbers grow or want to understand a sudden drop, Warehouse keeps balances, trends, and transactions together without a daily spreadsheet chore.
 
 <table>
 <tr><th width="50%">Your Honmaru's balances</th><th width="50%">Each sword's archive</th></tr>
@@ -61,7 +71,13 @@ Warehouse brings together your latest recorded balances, resource trends, and tr
 
 On the China server, leave the game at the Honmaru and click Read Game Balances (读取游戏家底); avoid interacting with the emulator during collection. Import an old ledger or add transactions yourself when needed. Incomplete collection can be retried. Records need synchronization, and an expired countdown does not mean something has been collected. [Warehouse](docs/user-manual.md#仓库与成绩单怎么看) · [Sword archive](docs/user-manual.md#刀账与所持名单)
 
-## Save the teams and equipment you use often
+## How far has this sword grown? How many more for Ranbu?
+
+One duplicate is training, another is a keepsake, and others are waiting for fusion. The archive records each individual sword's level, cumulative experience, Ranbu fusion value, and acquisition date. Favorites and training marks stay with the sword you chose.
+
+Open Growth and History to browse recorded changes, estimated copies needed for the next Ranbu level, and HP and scouting gains from internal affairs. Copy counts are estimates; several unchanged internal-affairs readings do not prove a stat is maxed. Confirmed acquisition dates and sources help preserve each sword's story too.
+
+## Remember that event team? Save it for next time
 
 In Swords → Team Presets, select individual swords and save troop, horse, charm, and treasure settings for tasks that support presets. Empty slots stay as they are; missing requested members or equipment stop the operation.
 
@@ -69,9 +85,11 @@ In Swords → Team Presets, select individual swords and save troop, horse, char
 
 Team presets and equipment changes are still in trial. Try a short run with a team you can easily restore, and check the result before using an important arrangement. [Team preset guide](docs/user-manual.md#部队预设试用)
 
-## Come back and browse the day
+## A drop worth remembering, a forge worth recording
 
-Tasks, spending, and gains live in All Records, grouped by date. Expand battle drops and forging notes to find which map brought a sword home, or a forge's recipe and result. Unconfirmed sources remain unknown.
+Which map brought a sword home today? What recipe did you use, who was the attendant, and what did that forge cost? All Records groups tasks and transactions by date; drops are organized by map, and forging notes keep each furnace's recipe, attendant, result, and cost.
+
+Look up a task's results or revisit the day a new sword arrived. Unconfirmed sources remain unknown. Records accumulate as they are collected; missing past history is not invented.
 
 <table>
 <tr><th width="50%">Records by date</th><th width="50%">Drops by map</th></tr>
@@ -79,7 +97,9 @@ Tasks, spending, and gains live in All Records, grouped by date. Expand battle d
 <tr><td>Open a task to see its results and related transactions.</td><td>Browse battle drops and forging records when you need them.</td></tr>
 </table>
 
-Back in My Honmaru, write your own notes, change your avatar, edit your Saniwa profile, or switch between washi-paper and pixel themes. Make it feel like yours.
+Still enjoy your own spreadsheets? Import an old ledger, add transactions yourself, export an Excel workbook with transactions and daily summaries, or export the full transaction history as CSV. Maamaru keeps the records; you can keep arranging them your way.
+
+Back in My Honmaru, write your own notes, change your avatar, edit your Saniwa profile, or switch between washi-paper and pixel themes. Keep a little Honmaru life alongside the numbers.
 
 ## Keep a ledger, or hand over the routine
 
