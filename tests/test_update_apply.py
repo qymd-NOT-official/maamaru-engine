@@ -59,7 +59,7 @@ class UpdateApplyTests(unittest.TestCase):
                     patch.object(update_apply.subprocess, 'Popen') as launch:
                 update_apply.prepare_apply(Path(plan['installer']), plan['sha256'], '0.1.6')
             helper = Path(launch.call_args.args[0][0])
-            self.assertTrue(helper.is_relative_to(updates))
+            self.assertTrue(helper.resolve().is_relative_to(updates.resolve()))
             self.assertEqual((helper.parent / '_internal/python312.dll').read_bytes(), b'native runtime')
             self.assertFalse((helper.parent / 'manifest.json').exists())
 
