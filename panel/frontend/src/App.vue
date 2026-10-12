@@ -23,11 +23,20 @@ import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
 import SwordArchivePanel from './components/SwordArchivePanel.vue'
+import JpSallyCard from './components/JpSallyCard.vue'
 import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
 // 日服入口共用首页、仓库、刀剑和外观设置；不启用国服自动执行。
 const jpMode = appServer === 'jp'
+
+// 日服「功能 · 执务台」：任务清单来自 /api/scripts?server=jp（后端只放行日服脚本），
+// 与国服 scripts/常用功能完全隔离，状态也由日服卡片自己上报。
+const jpScripts = ref<Record<string, ScriptInfo>>({})
+const jpSelected = ref('jp-sally')
+const jpSallyRunning = ref(false)
+const jpSallyStopping = ref(false)
+const jpScriptKeys = computed(() => Object.keys(jpScripts.value))
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
@@ -370,6 +379,7 @@ async function load() {
       tab.value = 'home'
       scripts.value = {}
       params.value = {}
+      try { jpScripts.value = (await api.scripts('jp')).scripts || {} } catch { jpScripts.value = {} }
       return
     }
     const mode = await api.appMode()
@@ -608,6 +618,7 @@ watch(tab, value => {
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else-if="jpMode">
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
+          <button class="nav-workshop" :class="{ active: tab === 'office' }" @click="tab = 'office'">功能</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
@@ -630,7 +641,7 @@ watch(tab, value => {
         <a v-if="!ledgerMode && !jpMode" href="/legacy">旧版备用</a>
       </div>
     </header>
-    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
+    <nav v-if="!ledgerMode && !jpMode && workshopActive" class="workshop-nav" aria-label="功能">
       <div class="workshop-title"><strong>功能</strong><small>看实况、搭流程，需要时再调玩法</small></div>
       <div class="workshop-tabs">
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
@@ -718,7 +729,7 @@ watch(tab, value => {
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && tab === 'home'" variant="single" page-class="single-layout personal-home-page"><HonmaruHome :server="appServer" :activity="jpMode ? null : dashboardRun" :busy="jpMode ? false : running" @office="tab = 'office'" @report="tab = 'report'" @records="reportEntry = 'records'; tab = 'report'" @planning="tab = 'planning'" @resume-raid="openRaidRecovery" /></MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
+    <MaamaruFrame v-else-if="!loading && tab === 'office' && !jpMode" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
       <aside class="home-functions" :class="{ editing: editingHome }">
         <div class="home-functions-head">
           <h2>常用功能</h2>
@@ -792,6 +803,22 @@ watch(tab, value => {
         />
         <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" />
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
+      </section>
+    </MaamaruFrame>
+    <MaamaruFrame v-else-if="!loading && jpMode && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
+      <aside class="home-functions">
+        <div class="home-functions-head"><h2>常用功能</h2></div>
+        <nav>
+          <button v-for="key in jpScriptKeys" :key="key" type="button" :class="{ active: jpSelected === key }" @click="jpSelected = key">
+            <span>{{ jpScripts[key]?.label || key }}</span><small v-if="key === 'jp-sally' && jpSallyRunning">运行中</small>
+          </button>
+        </nav>
+        <p v-if="!jpScriptKeys.length" class="home-functions-hidden-note">日服任务还没备好，稍后再来看看</p>
+      </aside>
+      <section class="home-center">
+        <JpSallyCard v-if="jpScripts[jpSelected]" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
+        <p v-else class="task-empty-state">日服任务还没备好，稍后再来看看</p>
+        <LogPanel :running="jpSallyRunning" :stopping="jpSallyStopping" task-label="日服出阵" only-script="jp-sally" />
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel @open-dismantle-list="openDismantleList" :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>

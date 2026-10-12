@@ -1354,7 +1354,7 @@ register_script("jp-sally", "日服出阵",
                          "default": "1"},
                         {"key": "rounds", "type": "number", "label": "连刷轮数",
                          "default": 1, "min": 1, "max": 200}],
-                hidden=True)
+                hidden=True, server="jp")
 
 
 # ── 自定义工作流（乐高排班）──
@@ -1848,7 +1848,9 @@ def _scripts_with_preset_options(scripts: dict) -> dict:
 
 
 @app.get("/api/scripts")
-async def api_scripts():
+async def api_scripts(server: str = ""):
+    if server not in ("", "cn", "jp"):
+        raise HTTPException(400, "没有这个本丸")
     if _ledger_mode():
         return {
             "scripts": {},
@@ -1860,7 +1862,7 @@ async def api_scripts():
         }
     runner = get_runner()
     return {
-        "scripts": _scripts_with_preset_options(list_scripts()),
+        "scripts": _scripts_with_preset_options(list_scripts(server)),
         "running": runner.is_running,
         "current": runner.current_script,
         "run_id": runner.current_run_id if runner.is_running else None,

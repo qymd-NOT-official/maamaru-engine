@@ -40,7 +40,7 @@ export const api = {
     method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
   }),
   appMode: () => request<{ mode: 'automation' | 'ledger'; automation_enabled: boolean }>('/api/app-mode'),
-  scripts: () => request<ScriptsResponse>('/api/scripts'),
+  scripts: (server = '') => request<ScriptsResponse>(`/api/scripts${server ? `?server=${encodeURIComponent(server)}` : ''}`),
   gameplaySettings: (script: string) => request<{ info: ScriptInfo; params: ScriptParams }>(`/api/gameplay-settings/${encodeURIComponent(script)}`),
   saveGameplaySettings: (script: string, params: ScriptParams) => request<{ params: ScriptParams }>(`/api/gameplay-settings/${encodeURIComponent(script)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ params }),

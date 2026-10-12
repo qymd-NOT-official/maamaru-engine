@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import PixelControl from './PixelControl.vue'
 
-// 日服出阵任务卡：只在 ?server=jp 的「连接」页挂载。
-// 日服模式下 App.vue 不轮询脚本状态、也不挂日志面板，这张卡自己盯状态、自己收日志尾行。
+// 日服出阵任务卡：只在 ?server=jp 的「功能 · 执务台」挂载。
+// 日服模式下 App.vue 不轮询脚本状态，这张卡自己盯状态、自己收日志尾行，
+// 运行/停止状态通过 v-model 同步给外层，喂执务台的日志面板状态栏。
+const emit = defineEmits<{ 'update:running': [value: boolean]; 'update:stopping': [value: boolean] }>()
 const TEAM_NAMES = ['部队一', '部队二', '部队三', '部队四', '部队五']
 const teamNo = ref('1')
 const rounds = ref(1)
@@ -79,6 +81,9 @@ async function stop() {
     note.value = error instanceof Error ? error.message : '停止失败，请重试'
   }
 }
+
+watch(sallyRunning, value => emit('update:running', value))
+watch(stopping, value => emit('update:stopping', value))
 
 function remember(entry: { script?: string; message?: string; ts?: number }) {
   if (entry.script !== 'jp-sally' || !entry.message) return

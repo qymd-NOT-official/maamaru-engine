@@ -47,14 +47,21 @@ EXIT_MAA_DEAD = 43
 
 def register_script(name: str, label: str, desc: str,
                     runner_fn: Callable[[str, dict], Generator[str, None, None]],
-                    params: list | None = None, hidden: bool = False):
+                    params: list | None = None, hidden: bool = False,
+                    server: str = ""):
     _SCRIPTS[name] = {"label": label, "desc": desc, "fn": runner_fn,
-                      "params": params or [], "hidden": hidden}
+                      "params": params or [], "hidden": hidden, "server": server}
 
 
-def list_scripts() -> dict:
+def list_scripts(server: str = "") -> dict:
+    # hidden 只是「不进默认任务列表」；日服列表放行的恰恰是日服脚本（含 hidden），
+    # 默认（国服）列表照旧排除 hidden，也不放行任何日服脚本。
+    if server == "jp":
+        return {k: {"label": v["label"], "desc": v["desc"], "params": v["params"]}
+                for k, v in _SCRIPTS.items() if v.get("server") == "jp"}
     return {k: {"label": v["label"], "desc": v["desc"], "params": v["params"]}
-            for k, v in _SCRIPTS.items() if not v.get("hidden")}
+            for k, v in _SCRIPTS.items()
+            if not v.get("hidden") and v.get("server", "") in ("", "cn")}
 
 
 # —— 运行时状态 ——

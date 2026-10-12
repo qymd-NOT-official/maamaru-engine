@@ -45,6 +45,16 @@ it('keeps JP sally params on the JP settings file', async () => {
   ])
 })
 
+it('routes JP script list to the JP filter', async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
+  vi.stubGlobal('fetch', fetcher)
+  await api.scripts('jp')
+  await api.scripts()
+  expect(fetcher.mock.calls.map(call => String((call as unknown[])[0]))).toEqual([
+    '/api/scripts?server=jp', '/api/scripts',
+  ])
+})
+
 it('routes JP homepage reads and editable profile/notes to JP only', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
   vi.stubGlobal('fetch', fetcher)
