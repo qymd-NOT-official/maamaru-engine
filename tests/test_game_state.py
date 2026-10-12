@@ -35,7 +35,6 @@ def test_complete_hp_is_authoritative(hp, expected):
 
 @pytest.mark.parametrize("body,endpoint", [
     ({"1": {"slot": {"1": {"serial_id": "222"}}}}, "/party/setsword"),
-    ({"sword": {"111": {"hp": 1}}}, "/repair/complete"),
     ({}, "/sally/start"),
 ])
 def test_changes_after_snapshot_require_new_hp(body, endpoint):
@@ -81,6 +80,14 @@ def test_sally_roster_refresh_replaces_old_party_snapshot():
     fresh["endpoint"] = "/sally"
     fresh["payload"]["now_time"] = 1700
     assert game_state.injury_report(team_events() + [fresh], 1, now=1701)["max_injury"] is None
+
+
+def test_partial_hp_update_preserves_instance_and_maximum():
+    events = team_events() + [event({"sword": {"111": {"hp": 1}}}, "/repair/complete", 1001)]
+    report = game_state.injury_report(events, 1, now=1002)
+    assert report["members"][0]["hp_max"] == 45
+    assert report["max_injury"] == "重伤"
+    assert report["observed_epoch"] == 1001
 
 
 def test_same_second_changes_use_event_order():

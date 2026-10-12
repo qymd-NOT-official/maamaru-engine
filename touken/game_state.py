@@ -87,30 +87,117 @@ def expedition_started(events, team_no, field_id, after):
     return result
 
 
-def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
-    """Use complete, current member HP; later changes invalidate older snapshots."""
-    report = youzu_log.party_injury_report(events, team_no)
-    if report is None:
-        return None
-    now = time.time() if now is None else now
-    hp_at, party_at = report["observed_epoch"], report["party_observed_epoch"]
-    if any(at is None or not 0 <= now - at <= max_age for at in (hp_at, party_at)):
-        return None
-    party_index = max(i for i, event in enumerate(events)
-                      if successful_body(event) is not None
-                      and event.get("endpoint") in youzu_log._SWORD_FULL_ENDPOINTS
-                      and isinstance(event["payload"].get("party"), dict))
-    _, pool_event = youzu_log._latest_sword_pool(events)
-    hp_index = next(i for i, event in enumerate(events) if event is pool_event)
-    for i, event in enumerate(events):
+def sword_facts(events):
+    """Reduce full snapshots and sparse updates by instance and field, in event order."""
+    swords, parties = {}, {}
+    hp_times, slot_times, field_times = {}, {}, {}
+    combat_index, combat_at = -1, 0
+    for index, event in enumerate(events):
         body = successful_body(event)
-        if body is None:
+        at = youzu_log._event_epoch(event)
+        if body is None or at is None:
             continue
         endpoint = event.get("endpoint") or ""
-        if i > party_index and endpoint in ("/party/setsword", "/party/dissolution"):
+        full = endpoint in youzu_log._SWORD_FULL_ENDPOINTS
+        rows = body.get("sword") if "sword" in body else body.get("sword_all")
+        # Some updates return a single sword object rather than a keyed pool.
+        if isinstance(rows, dict) and "serial_id" in rows:
+            rows = {str(rows["serial_id"]): rows}
+        if full and at < max((ts for fields in field_times.values() for ts in fields.values()), default=0):
+            rows = None
+        if isinstance(rows, dict):
+            if full:
+                swords, hp_times, field_times = {}, {}, {}
+            for key, row in rows.items():
+                if not isinstance(row, dict):
+                    continue
+                serial = str(row.get("serial_id") or key)
+                if not serial.isdigit() or int(serial) <= 0:
+                    continue
+                current = swords.setdefault(serial, {})
+                times = field_times.setdefault(serial, {})
+                for field, value in row.items():
+                    if at >= times.get(field, 0):
+                        current[field], times[field] = value, at
+                        if field == "hp":
+                            hp_times[serial] = (at, index)
+        teams = body if endpoint == "/party/setsword" else body.get("party")
+        if full and at < max((ts for slots in slot_times.values() for ts in slots.values()), default=0):
+            teams = None
+        if isinstance(teams, dict):
+            if full:
+                parties, slot_times = {}, {}
+            for team, row in teams.items():
+                if not isinstance(row, dict) or not isinstance(row.get("slot"), dict):
+                    continue
+                team = str(team)
+                if team not in {"1", "2", "3", "4", "5"}:
+                    continue
+                if full:
+                    parties[team], slot_times[team] = {}, {}
+                elif team not in parties:
+                    continue  # Partial membership cannot invent the rest of a team.
+                for slot, member in row["slot"].items():
+                    if isinstance(member, dict) and "serial_id" in member:
+                        if at >= slot_times[team].get(str(slot), 0):
+                            parties[team][str(slot)] = member["serial_id"]
+                            slot_times[team][str(slot)] = at
+        if endpoint.startswith(("/battle", "/sally/")):
+            combat_index = index
+            combat_at = max(combat_at, at)
+    return {"swords": swords, "parties": parties, "hp_times": hp_times,
+            "slot_times": slot_times, "combat_index": combat_index, "combat_at": combat_at}
+
+
+def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
+    """Merged member HP is authoritative; missing post-battle HP remains unknown."""
+    from . import sword_db
+    state = sword_facts(events)
+    now = time.time() if now is None else now
+    slots = state["parties"].get(str(team_no))
+    if not slots:
+        return None
+    members, hp_ages, party_ages = [], [], []
+    for slot, serial in slots.items():
+        if serial in (None, "", 0, "0"):
+            continue
+        serial = str(serial)
+        sword = state["swords"].get(serial, {})
+        hp_at, hp_index = state["hp_times"].get(serial, (None, -1))
+        party_at = state["slot_times"][str(team_no)].get(slot)
+        if (hp_at is None or party_at is None or hp_index < state["combat_index"]
+                or hp_at < state["combat_at"]
+                or any(not 0 <= now - at <= max_age for at in (hp_at, party_at))):
             return None
-        if i > hp_index and (isinstance(body.get("sword"), dict)
-                           or isinstance(body.get("sword_all"), dict)
-                           or endpoint.startswith(("/battle", "/sally/"))):
+        hp, maximum = youzu_log._int(sword.get("hp"), -1), youzu_log._int(sword.get("hp_max"), 0)
+        if not 0 <= hp <= maximum or maximum <= 0:
             return None
-    return report
+        name = youzu_log._sword_name(sword.get("sword_id"), sword_db)
+        members.append({"serial_id": int(serial), "name": name, "label": name,
+                        "hp": hp, "hp_max": maximum,
+                        "injury": youzu_log.injury_tier(hp, maximum)})
+        hp_ages.append(hp_at)
+        party_ages.append(party_at)
+    if not members:
+        return None
+    rank = {None: 0, "轻伤": 1, "中伤": 2, "重伤": 3}
+    return {"party_no": team_no, "members": members,
+            "max_injury": max((m["injury"] for m in members), key=rank.get),
+            "observed_epoch": min(hp_ages), "party_observed_epoch": min(party_ages)}
+
+
+def expedition_settlements(events, after, exclude=()):
+    from .expedition_receipts import build_expedition_receipts
+    return filter_settlements(build_expedition_receipts(events), after, exclude)
+
+
+def filter_settlements(receipts, after, exclude=()):
+    seen = set(exclude)
+    result = []
+    for receipt in receipts:
+        key = receipt["payload"]["receipt_key"]
+        if receipt["ts"] < after or key in seen:
+            continue
+        seen.add(key)
+        result.append(receipt)
+    return result

@@ -5,6 +5,26 @@ from touken.sword_receipts import write_receipts
 from touken.telemetry import TelemetryStore
 
 
+def test_link_current_execution_keeps_one_authoritative_receipt(tmp_path, monkeypatch):
+    from touken.expedition_receipts import link_execution
+    store = TelemetryStore(tmp_path / 'events.db')
+    receipt, = build_expedition_receipts([response()])
+    write_receipts(store, [receipt])
+    monkeypatch.setenv('MAAMARU_RUN_ID', 'collection-now')
+    monkeypatch.setenv('MAAMARU_SCRIPT', 'expedition_collect')
+    link_execution([receipt], store)
+    link_execution([receipt], store)
+    rows = store._conn().execute("SELECT run_id, script, payload FROM events WHERE event_type='expedition.settled'").fetchall()
+    assert len(rows) == 1
+    assert rows[0]['run_id'] == 'collection-now'
+    assert rows[0]['script'] == 'youzu_log'
+    assert json.loads(rows[0]['payload'])['execution_script'] == 'expedition_collect'
+    monkeypatch.setenv('MAAMARU_RUN_ID', 'another-run')
+    link_execution([receipt], store)
+    assert store._conn().execute("SELECT run_id FROM events WHERE event_type='expedition.settled'").fetchone()[0] == 'collection-now'
+    store.close()
+
+
 def response():
     return {'endpoint': '/conquest/complete', 'direction': 'S->C', 'status': 200,
             'ts': '2026-10-03 17:10:09', 'payload': {

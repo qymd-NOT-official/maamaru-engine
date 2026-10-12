@@ -45,3 +45,23 @@ def build_expedition_receipts(events):
             'receipt_key': hashlib.sha256(identity.encode()).hexdigest(),
         }})
     return receipts
+
+
+def link_execution(receipts, store):
+    """Attach current collection facts to their run without inserting a second receipt."""
+    run_id, script = store.runtime_context()
+    if not run_id or not receipts:
+        return
+    keys = {receipt['payload']['receipt_key'] for receipt in receipts}
+    conn = store._conn()
+    with conn:
+        for row in conn.execute(
+                "SELECT id, run_id, payload FROM events WHERE event_type='expedition.settled' "
+                "AND script='youzu_log' AND ts BETWEEN ? AND ?",
+                (min(r['ts'] for r in receipts), max(r['ts'] for r in receipts))).fetchall():
+            payload = json.loads(row['payload'])
+            if payload.get('receipt_key') not in keys or row['run_id'] not in (None, run_id):
+                continue
+            payload['execution_script'] = script or 'expedition'
+            conn.execute("UPDATE events SET run_id=?, payload=? WHERE id=?",
+                         (run_id, json.dumps(payload, ensure_ascii=False), row['id']))

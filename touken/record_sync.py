@@ -18,11 +18,16 @@ def collect_game_records(
     extra_consumers: Iterable[Callable[[list], None]] = (),
 ) -> dict:
     """同步同一批游戏事实；各消费方按数据时间和记录编号去重。"""
+    from .game_state import read_events
+    return consume_game_records(read_events(adb_path, adb_address), extra_consumers)
+
+
+def consume_game_records(events, extra_consumers=()):
+    """Persist an already read batch; callers may still use facts if storage fails."""
     from . import youzu_log
-    from .game_state import read_events, resource_facts
+    from .game_state import resource_facts, expedition_settlements
     from .sword_receipts import sync_receipts
 
-    events = read_events(adb_path, adb_address)
     ledger = youzu_log.build_ledger(events)
     store = get_telemetry_store()
     result = youzu_log.write_ledger(store, ledger)
@@ -32,6 +37,7 @@ def collect_game_records(
         events, STATUS_DIR / "youzu_home_situation.json")
     result["resource_facts"] = resource_facts(events)
     result["resources"] = {name: fact["count"] for name, fact in result["resource_facts"].items()}
+    result["expedition_settlements"] = expedition_settlements(events, 0)
     for consumer in extra_consumers or ():
         consumer(events)
     return result

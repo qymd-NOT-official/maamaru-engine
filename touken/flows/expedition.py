@@ -339,6 +339,11 @@ class ExpeditionMixin:
         tap = cfg["collect_tap"]
         home_tpl = cfg["home_ui"]["template"]
 
+        baseline = self._collection_facts(0) or []
+        excluded = {receipt["payload"]["receipt_key"] for receipt in baseline}
+        started_at = int(time.time())
+        screen_unresolved = False
+
         # ========== 1. 换场景回本丸，触发归来动画 ==========
         yield "[收菜] 🧺 先绕去远征界面再回本丸，勾一下归来动画..."
         for nav_msg in self.navigate_to_stream("远征"):
@@ -367,7 +372,7 @@ class ExpeditionMixin:
             obs = None
             if self.maa.ocr(expected=title_ocr["expected"], roi=title_roi):
                 obs = self.observe_expedition_settlement(
-                    via="collect", seen=settle_seen, sequence=collected + 1)
+                    via="collect", seen=settle_seen, sequence=collected + 1, record=False)
             if obs is not None:
                 if not obs["new"]:
                     # 同一屏没翻动（转场慢半拍），再点一下，不重复记账
@@ -375,25 +380,8 @@ class ExpeditionMixin:
                     time.sleep(1.2)
                     continue
                 collected += 1
-                if obs["team_no"]:
-                    settlements.append(obs)
-                    bits = []
-                    if obs["result"] == "失败":
-                        bits.append("游戏判定「失败」，不是翻车，照实记账")
-                    elif obs["result"] == "unknown":
-                        bits.append("结果字样没看清，记 unknown")
-                    unk = [r for r, s in obs["rewards_status"].items()
-                           if s == "unknown"]
-                    if unk:
-                        bits.append(f"{'、'.join(unk)}的数字没看清，记 unknown")
-                    if obs["special_status"] == "unknown":
-                        bits.append("道具栏有内容认不出，记 unknown")
-                    tail = f"（{'；'.join(bits)}）" if bits else ""
-                    yield (f"[收菜] 远征结果结算（第{collected}份）："
-                           f"部队{obs['team_no']} 从 {obs['header'] or '未知地图'} "
-                           f"回来{tail}")
-                else:
-                    yield f"[收菜] 远征结果结算（第{collected}份），翻页"
+                settlements.append(obs)
+                yield f"[收菜] 已翻过第{collected}份远征结算"
                 self._click_point(tap)
                 home_streak = 0
                 unknown_streak = 0
@@ -421,10 +409,27 @@ class ExpeditionMixin:
             home_streak = 0
             unknown_streak += 1
             if unknown_streak > 5:
-                yield "[收菜] ⚠️ 连续认不出画面，停，你去看看卡哪了"
-                return
+                screen_unresolved = True
+                break
             self._click_point(tap)
             time.sleep(1.0)
+        else:
+            screen_unresolved = True
+
+        receipts = self._collection_facts(started_at, excluded)
+        if receipts:
+            settlements = [{**receipt["payload"], "map_name": None} for receipt in receipts]
+            collected = len(settlements)
+            self._forget_collected_records(receipts)
+            yield f"[收菜] 游戏已确认 {collected} 份结算的部队、地图和奖励"
+            if getattr(self, "_collection_sync_failed", False):
+                yield "[收菜] 账房同步未完成，可稍后同步近况；本次结算已确认"
+        else:
+            for sequence, obs in enumerate(settlements, 1):
+                self._record_visual_settlement(obs, sequence)
+        if screen_unresolved:
+            yield "[收菜] ⚠️ 当前页面未确认回到本丸，结算记录已保留，暂不再派"
+            return
 
         if collected > 0:
             yield f"[收菜] ✅ 收了 {collected} 份远征奖励"
@@ -468,6 +473,46 @@ class ExpeditionMixin:
         yield f"[收菜] 再派完毕，共处理 {len(dispatched)} 支队"
         return
 
+    def _collection_facts(self, after, exclude=()):
+        if not getattr(self.maa, "adb_address", None):
+            return None
+        from ..game_state import read_events, expedition_settlements
+        from ..record_sync import consume_game_records
+        try:
+            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            facts = expedition_settlements(events, after, exclude)
+            try:
+                consume_game_records(events)
+                if after > 0:
+                    from ..expedition_receipts import link_execution
+                    from ..telemetry import get_telemetry_store
+                    link_execution(facts, get_telemetry_store())
+                self._collection_sync_failed = False
+            except Exception:
+                self._collection_sync_failed = True
+            return facts
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return None
+
+    @staticmethod
+    def _forget_collected_records(receipts):
+        from ..youzu_log import _event_epoch
+        records = _load_exp_record()
+        if not isinstance(records, dict):
+            return
+        for receipt in receipts:
+            team = str(receipt["payload"]["team_no"])
+            record = records.get(team)
+            if not isinstance(record, dict):
+                continue
+            stamp = record.get("dispatched_at")
+            if not isinstance(stamp, str):
+                continue
+            started = _event_epoch({"ts": stamp})
+            if started is not None and receipt["ts"] > started:
+                records.pop(team, None)
+        _save_exp_record(records)
+
     # ==================== 收菜辅助 ====================
 
     def _confirm_map_selected(self, expect_name: str) -> bool:
@@ -490,7 +535,7 @@ class ExpeditionMixin:
     # ==================== 结算观察哨（收菜/扫地/导航共用） ====================
 
     def observe_expedition_settlement(self, via: str, seen: list = None,
-                                      sequence: int = None) -> dict | None:
+                                      sequence: int = None, record: bool = True) -> dict | None:
         """
         远征结算屏观察哨。当前画面是「远征结果」结算屏时，把能读的事实全部
         读下来并照实记账，返回观察记录；不是结算屏返回 None。
@@ -543,40 +588,44 @@ class ExpeditionMixin:
         if special_ink is not None:
             obs["special_ink"] = special_ink
 
+        if record:
+            self._record_visual_settlement(obs, sequence)
+        if fingerprint and seen is not None:
+            seen.append(fingerprint)
+        return obs
+
+    def _record_visual_settlement(self, obs, sequence):
         if hasattr(self, "record_event"):
             payload = {k: v for k, v in obs.items() if k != "new"}
             payload["sequence"] = sequence
             self.record_event("expedition.settled", **payload)
-            note = (info["header"] or info["map_name"]
+            note = (obs["header"] or obs["map_name"]
                     or f"第{sequence}份远征结算")
-            for resource, amount in rewards.items():
+            for resource, amount in obs["rewards"].items():
                 self.record_event("resource.change", resource=resource,
                                   delta=amount, source="expedition.settlement",
                                   attribution="confirmed",
                                   evidence="settlement_ocr", note=note,
                                   settlement_sequence=sequence,
-                                  team_no=info["team_no"], result=result,
-                                  via=via)
-            for entry in special:
+                                  team_no=obs["team_no"], result=obs["result"],
+                                  via=obs["via"])
+            for entry in obs["special_rewards"]:
                 self.record_event("resource.change", resource=entry["name"],
                                   delta=entry["amount"],
                                   source="expedition.settlement",
                                   attribution="confirmed",
                                   evidence="settlement_special_ocr", note=note,
                                   settlement_sequence=sequence,
-                                  team_no=info["team_no"], result=result,
-                                  via=via)
+                                  team_no=obs["team_no"], result=obs["result"],
+                                  via=obs["via"])
         # 这支队回来了，派遣记录销掉（看板倒计时用）
-        if info["team_no"]:
+        if obs["team_no"]:
             try:
                 rec = _load_exp_record()
-                if rec.pop(str(info["team_no"]), None) is not None:
+                if rec.pop(str(obs["team_no"]), None) is not None:
                     _save_exp_record(rec)
             except Exception:
                 pass
-        if fingerprint and seen is not None:
-            seen.append(fingerprint)
-        return obs
 
     @staticmethod
     def _settlement_fingerprint(cfg, img):

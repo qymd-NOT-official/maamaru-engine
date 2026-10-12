@@ -3,8 +3,8 @@
 上层业务：手入（修复）——黑名单版
 
 规矩（用户亲授）：
-  1. 修复列表里每把刀的名字都是文字，OCR 认名字，不认图标
-     （中伤/重伤的章会盖住极化樱花，图标路线天生残废）
+  1. 游戏数据确认实例、血量与部队；画面文字用于定位列表行。
+     游戏数据缺失时保留原来的画面读取。
   2. 黑名单 = 碰瓷队的极化太刀——他们带伤上班是故意的
      （中伤挨打触发真剑必杀），看到名字就跳过，绝对不修
   3. speedup_teams 里的部队（默认部队三=挖地队）：
@@ -16,6 +16,7 @@
 """
 
 import re
+import subprocess
 import time
 
 from ..maa_adapter import roi_4to4, Point
@@ -49,7 +50,7 @@ class RepairMixin:
             str: 执行状态消息
         """
         # 给连续出阵等上层流程读取；每次调用都重新开始统计。
-        self.last_repair_stats = {"repaired": 0, "speedups": 0, "skipped": 0}
+        self.last_repair_stats = {"repaired": 0, "speedups": 0, "skipped": 0, "unresolved": 0}
         cfg = self.config.get("repair", {})
         if not cfg:
             yield "[手入] 未配置手入"
@@ -95,14 +96,34 @@ class RepairMixin:
 
         for page in range(10):  # 安全上限
             page_new = 0
+            facts = self._repair_game_facts()
             rows, junk = self._scan_page(cfg)
             if junk:
                 yield f"[手入] （本页过滤掉的乱码/伤势章：{junk}）"
             for row in rows:
                 prefix, name, name_y = row["prefix"], row["name"], row["y"]
                 injury = row.get("injury")
+                fact = self._repair_row_fact(row, facts)
+                if fact is False:
+                    unresolved_key = f"unresolved:{prefix}|{name}|{name_y}"
+                    if unresolved_key in seen:
+                        continue
+                    seen.add(unresolved_key)
+                    page_new += 1
+                    self.last_repair_stats["unresolved"] += 1
+                    yield f"[手入] {prefix} {name} 的实例无法对应，跳过这一行"
+                    continue
+                serial = fact.get("serial_id") if fact else None
+                if fact:
+                    hp, hp_max = fact["hp"], fact["hp_max"]
+                    if hp == hp_max:
+                        continue
+                    # Tiny scratches keep their original no-ticket meaning.
+                    game_injury = fact["injury"]
+                    injury = (game_injury if game_injury != "轻伤"
+                              or injury == "轻伤" else None)
 
-                key = f"{prefix}|{name}"
+                key = f"serial:{serial}" if serial else f"{prefix}|{name}"
                 if key in seen:
                     continue
                 seen.add(key)
@@ -111,11 +132,14 @@ class RepairMixin:
                 # ---- 决策 ----
                 hit = sword_db.find_by_name(name)
                 sid = hit[0] if hit else None
+                if fact:
+                    sid = fact["catalog_id"]
                 std_name = hit[1]["name_zh"] if hit else name
                 is_black = (sid in bl_ids) or any(b in name for b in blacklist)
-                # 加速符只给带伤势章的刀：加速部队的擦伤刀也老实慢修，
+                # 已确认的伤势用于加速决策；加速部队的擦伤刀也慢修，
                 # 十几个资源几分钟的事，不配烧一张符（老大原话精神）
-                in_speed_team = any(mark in prefix for mark in speedup_marks)
+                in_speed_team = (fact["team_no"] in speedup_teams if fact
+                                 else any(mark in prefix for mark in speedup_marks))
                 need_speed = in_speed_team and bool(injury)
 
                 if is_black:
@@ -153,6 +177,7 @@ class RepairMixin:
                     if hasattr(self, "record_event"):
                         self.record_event("repair.queued", name=std_name,
                                           sword_id=sid, team_mark=prefix,
+                                          serial_id=serial,
                                           speedup=need_speed, injury=injury)
                     if need_speed:
                         # 游戏的奇怪缓存：加速手入已经完成，但如果立刻去编队，
@@ -202,11 +227,62 @@ class RepairMixin:
         if dry_run:
             yield f"[手入] 演习结束：共认出 {len(seen)} 把待修刀，" \
                   f"黑名单跳过 {skipped} 把"
+        elif self.last_repair_stats["unresolved"]:
+            yield (f"[手入] ✗ 修了 {repaired} 把，另有 "
+                   f"{self.last_repair_stats['unresolved']} 行未能确认身份，已跳过")
         else:
             yield f"[手入] ✅ 完事：修了 {repaired} 把，黑名单跳过 {skipped} 把"
         return
 
     # ==================== 内部 ====================
+
+    def _repair_game_facts(self):
+        if not getattr(self.maa, "adb_address", None):
+            return None
+        from ..game_state import read_events, sword_facts
+        try:
+            return sword_facts(read_events(self.maa.adb_path, self.maa.adb_address))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return None
+
+    @staticmethod
+    def _repair_row_fact(row, state):
+        """A screen row locates an instance; JSON supplies HP and team membership."""
+        if not state:
+            return None
+        from ..game_state import FACT_MAX_AGE
+        from ..youzu_log import _int, injury_tier
+        hit = sword_db.find_by_name(row["name"])
+        if not hit:
+            return None
+        now = time.time()
+        candidates = []
+        for serial, sword in state["swords"].items():
+            at, index = state["hp_times"].get(serial, (0, -1))
+            found = sword_db.find_game_sword(_int(sword.get("sword_id")))
+            hp, maximum = _int(sword.get("hp"), -1), _int(sword.get("hp_max"), 0)
+            if (not found or found[0] != hit[0] or not 0 <= now - at <= FACT_MAX_AGE
+                    or index < state["combat_index"] or at < state["combat_at"]
+                    or maximum <= 0 or not 0 <= hp <= maximum):
+                continue
+            memberships = [(int(team), slot) for team, slots in state["parties"].items()
+                           for slot, member in slots.items() if str(member) == serial
+                           and 0 <= now - state["slot_times"][team][slot] <= FACT_MAX_AGE]
+            candidates.append({"serial_id": int(serial), "catalog_id": found[0],
+                               "hp": hp, "hp_max": maximum, "injury": injury_tier(hp, maximum),
+                               "team_no": memberships[0][0] if len(memberships) == 1 else None,
+                               "memberships": memberships})
+        if not candidates:
+            return None
+        prefix = row.get("prefix", "")
+        match = re.fullmatch(r"([一二三四五])之([一二三四五六])", prefix)
+        if match:
+            numerals = "一二三四五六"
+            position = (numerals.index(match[1]) + 1, str(numerals.index(match[2]) + 1))
+            candidates = [fact for fact in candidates if position in fact["memberships"]]
+        else:
+            candidates = [fact for fact in candidates if fact["hp"] < fact["hp_max"]]
+        return candidates[0] if len(candidates) == 1 else False
 
     def _open_select_screen(self, cfg) -> bool:
         """在修复状况页点空闲槽，等刀剑男士选择界面打开"""
