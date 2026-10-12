@@ -88,7 +88,7 @@ export const api = {
   saveScenery: (scenery: string, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenery }),
   }),
-  saveSettings: (params: Record<string, ScriptParams>) => request<{ ok: boolean }>('/api/saved-settings', {
+  saveSettings: (params: Record<string, ScriptParams>, server = '') => request<{ ok: boolean }>(`/api/saved-settings${server ? `?server=${encodeURIComponent(server)}` : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ params }),
