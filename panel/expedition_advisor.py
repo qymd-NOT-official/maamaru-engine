@@ -480,33 +480,20 @@ def _known_lock(entry: dict) -> bool | None:
     return {"locked": True, "unlocked": False}.get(entry.get("lock_status"))
 
 
+def _instance_id(entry: dict) -> str | None:
+    serial = entry.get("serial_id")
+    observed = str(entry.get("observation_id") or "")
+    if serial:
+        return f"youzu:{serial}"
+    return observed or None
+
+
 def expedition_formation_options(team: int, parties: dict | None, rejections: dict | None = None) -> list[dict]:
-    """只用已保存且能核清身份、等级、刀种的预设，不借其他队的刀。"""
+    """按预设的实际人选核条件；历史队伍名单不能阻止玩家换队。"""
     from touken.custom_formations import load_formations, resolve_formation_slots, _current_candidate_pool
     if rejections is None:
         rejections = {}
-    if not parties or team not in parties:
-        rejections["*"] = "还没读到这支队伍的现有成员，先同步本丸近况"
-        return []
-    other_names = {name.removesuffix("·极").strip()
-                   for number, party in parties.items() if number != team
-                   for name in party.get("names", []) if name}
     formations = load_formations()
-    # 已采纳的其他队换队班也保留人选，避免两班同时争用同一振。
-    from .expedition_choices import load_choice_sets, adhoc_planned_date
-    from datetime import date
-    from touken import sword_db
-    _, forced = load_choice_sets()
-    by_id = {record.get("id"): record for record in formations}
-    for booking in forced.values():
-        if not isinstance(booking, dict) or booking.get("team_no") == team or (adhoc_planned_date(booking) or "") < date.today().isoformat():
-            continue
-        reserved = by_id.get(booking.get("formation_id"), {})
-        for entry in reserved.get("slots", {}).values():
-            info = sword_db.all_swords().get(entry.get("sword_catalog_id"), {})
-            name = entry.get("name_zh") or info.get("name_zh") or info.get("name") or ""
-            if name:
-                other_names.add(name.removesuffix("·极").strip())
     options = []
     for record in formations:
         if record.get("target_team") != team:
@@ -552,12 +539,10 @@ def expedition_formation_options(team: int, parties: dict | None, rejections: di
             continue
         party = {"sum": sum(entry["level"] for entry in entries),
                  "max": max(entry["level"] for entry in entries), "count": len(entries),
+                 "instance_ids": [identity for entry in entries if (identity := _instance_id(entry))],
                  "names": [str(entry.get("name_zh") or entry.get("name") or "") for entry in entries]}
         if not all(party_sword_types(party)):
             rejections[record["id"]] = "预设人选的刀种尚未核清，请更新刀帐"
-            continue
-        if any(name.removesuffix("·极").strip() in other_names for name in party["names"]):
-            rejections[record["id"]] = "预设人选已在其他部队或已被另一班远征预留，不能借来换队"
             continue
         options.append({"formation_id": record["id"], "formation_name": record["name"],
                         "formation_signature": formation_signature(record), "party": party, "record": applied_record})
@@ -579,7 +564,7 @@ def build_expedition_suggestions(prefs: dict, *,
     - 班次轮转：各队第 1 班依次取缺口榜第 1、2… 种资源的对口图，
       第 2 班接着往后排；榜轮完从头再轮（越缺的资源出现越勤）。
     - 图：该资源时薪从高到低试，次日 03:59 前能出发即可，归来可跨日；
-      occupied_maps（待收菜占图）不入选，其余班按时间段核对撞图
+      occupied_maps 是调用方明确排除的地图，其余班按估计时间排布建议
       （游戏机制一张图同时只能一队在跑）。
     - 队：滤图的等级条件（total_level/level_req）和刀种条件
       （required_types「含有」语义 / min_distinct_types，有近况才核）。
@@ -656,7 +641,7 @@ def build_expedition_suggestions(prefs: dict, *,
             reason = rejections.get(fid) or rejections.get("*") or "预设已删除或覆盖的是另一支部队，请重新选择"
             selection_notes.append(f"部队{TEAM_NAMES[team]}指定预设未能安排：{reason}；不会改用现有编队。")
     misses = []
-    reserved_names = {}
+    reserved_instances = {}
     placed_retry_notes = []  # 班排上了但撞过拉黑组合，如实知会一声
     busy: dict[int, int] = {}
     for team, until in (team_busy_until or {}).items():
@@ -705,7 +690,8 @@ def build_expedition_suggestions(prefs: dict, *,
                 candidates = ([(code, meta, preset) for preset in preset_options[team] for code, meta in ranked]
                               if team in preset_options else [(code, meta, None) for code, meta in ranked])
                 for map_code, meta, preset in candidates:
-                    if preset and any(name.removesuffix("·极").strip() in reserved_names and reserved_names[name.removesuffix("·极").strip()] != team for name in preset["party"]["names"]):
+                    if preset and any(identity in reserved_instances and reserved_instances[identity] != team
+                                      for identity in preset["party"].get("instance_ids", [])):
                         miss["detail"] = "指定预设的人选已被另一支远征队预留"
                         continue
                     def blocked(detail):
@@ -770,7 +756,7 @@ def build_expedition_suggestions(prefs: dict, *,
                         reason += (f"；本轮的{assigned[0]}排不出，"
                                    f"顺延补{resource}")
                     if preset:
-                        reserved_names.update({name.removesuffix("·极").strip(): team for name in preset["party"]["names"]})
+                        reserved_instances.update({identity: team for identity in preset["party"].get("instance_ids", [])})
                         reason += f"；先换成「{preset['formation_name']}」再派出"
                     suggestions.append({
                         **({key: preset[key] for key in ("formation_id", "formation_name", "formation_signature")} if preset else {}),

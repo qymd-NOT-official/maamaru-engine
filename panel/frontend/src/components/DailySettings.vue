@@ -146,7 +146,7 @@ async function stopToday() {
     <header class="daily-heading"><div><small>本丸执务单</small><h3>今日安排</h3></div><span class="daily-count">日课已选 {{ enabledCount }} 项</span></header>
     <p v-if="loading">正在取出日课设置…</p>
     <section v-if="!loading && preset" class="daily-planned-expeditions">
-      <div class="daily-expedition-title"><label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> <strong>规划远征</strong></label><details class="daily-help"><summary aria-label="规划远征说明">?</summary><p>先派出到点的远征，再执行日课；后续班次到点接班。已单独开启的远征排班仍按原安排运行。</p></details></div>
+      <div class="daily-expedition-title"><label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> <strong>规划远征</strong></label><details class="daily-help"><summary aria-label="规划远征说明">?</summary><p>远征与日课分别执行；派遣占用游戏时先等它让出位置，失败、暂停或取消不会连带停掉日课。已单独开启的远征排班仍按原安排运行。</p></details></div>
       <label>优先攒什么 <select :value="timeline.expedition_help.resource_focus || ''" :disabled="busy || running" @change="setResourceFocus"><option value="">交给狐之助建议</option><option v-for="resource in ['小判','木炭','玉钢','冷却材','砥石','委托符','加速符']" :key="resource" :value="resource">{{ resource }}</option></select></label>
       <label>每队 <select :value="timeline.expedition_help.rounds_per_team" :disabled="busy || running" @change="setRounds"><option v-for="n in [0,1,2,3,4,5]" :value="n" :key="n">{{ n }} 次</option></select></label>
       <div class="daily-team-picker"><span>部队</span> <button v-for="team in [1,2,3,4,5]" :key="team" :aria-pressed="timeline.expedition_help.available_teams.includes(team)" :disabled="busy || running" @click="toggleTeam(team)" :aria-label="`规划远征部队${team}`">{{ ['一','二','三','四','五'][team - 1] }}</button></div>

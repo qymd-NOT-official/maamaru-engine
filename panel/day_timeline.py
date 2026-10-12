@@ -541,7 +541,7 @@ def suggest_round_windows(now_min: float, occupied: list[dict],
 
 
 def _occupied_segments(expedition_items: list[dict], cfg: dict,
-                       activity_team_no: int | None) -> list[dict]:
+                       activity_team_no: int | None, *, include_estimated: bool = True) -> list[dict]:
     """避开刷新、派遣动作和活动队外出；队伍未知时保守避开全部远征。
 
     v2：上轴的只有 forced 班和远征中/待收——待收的队已到家门口不占窗。
@@ -561,6 +561,8 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
         start = e["time_min"]
         when = f"{start // 60:02d}:{start % 60:02d}"
         if e.get("state") == "running":
+            if not include_estimated:
+                continue
             # 队在外面：活动队是这支（或不知道活动队）时整段避让
             if activity_team_no is None \
                     or int(e.get("team_no") or 0) == activity_team_no:
@@ -569,6 +571,7 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
                     "end_min": start + int(e.get("duration_min") or 0)
                     if e.get("duration_min") else DAY_MINUTES,
                     "label": f"{when} {team}远征",
+                    "estimated": True,
                 })
             continue
         if e.get("state") in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED):
@@ -586,6 +589,7 @@ def _occupied_segments(expedition_items: list[dict], cfg: dict,
                 "end_min": start + int(e.get("duration_min") or 0)
                 if e.get("duration_min") else DAY_MINUTES,
                 "label": f"{when} {team}远征",
+                "estimated": True,
             })
     return occupied
 
@@ -650,7 +654,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
     committed_counts = _expedition_counts(cfg, expedition_forced, raw_records, store, day_start, now)
     team_busy_until: dict[int, int] = {}
     for item in expeditions:
-        if item["kind"] == "running" \
+        if (item["kind"] == "running" and item["state"] != "awaiting_collect") \
                 or (item["will_run"]
                     and item["state"] not in scheduler.TERMINAL_STATES):
             team_no = int(item.get("team_no") or 0)
@@ -659,18 +663,15 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                     item.get("duration_min") or 0)
                 team_busy_until[team_no] = max(
                     team_busy_until.get(team_no, 0), end_min)
-    # 一张图同时只能一队在跑：未完结班（running/待收/已点且时段没过完）
-    # 占住的图不再给新建议；expired/failed 的班 will_run=False，不占图
+    # 归来时间仅用于建议排布；旧记录到点后不要求收菜证明来释放地图。
     occupied_maps = set()
     occupied_windows = []
     for item in expeditions:
         code = str(item.get("map_code") or "")
         if not code:
             continue
-        if item["kind"] == "running":  # 远征中/待收都算没完结
-            if item["state"] == "awaiting_collect":
-                occupied_maps.add(code)  # 未确认收菜，不能让别队抢同图
-            else:
+        if item["kind"] == "running":
+            if item["state"] != "awaiting_collect":
                 occupied_windows.append((code, item["time_min"], item["time_min"] + item["duration_min"]))
         elif item.get("will_run") and now_min < item["time_min"] + int(
                 item.get("duration_min") or 0):

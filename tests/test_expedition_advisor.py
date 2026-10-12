@@ -807,8 +807,8 @@ class TimelineIntegrationTests(unittest.TestCase):
         self.assertEqual(suggestions[0]["map_code"], "B1")
         self.assertEqual(suggestions[0]["team_no"], 4)
 
-    def test_awaiting_collect_expedition_occupies_its_map(self):
-        """跑完待收也算没完结：图仍被占，建议不往 D4 塞。"""
+    def test_overdue_dispatch_record_does_not_require_collection_to_offer_map(self):
+        """旧记录到点后照常建议 D4，不等玩家手动收菜的证明。"""
         now = self._today_at(6, 0)
         cfg = {"entries": [], "automation": {"enabled": False,
                                              "mode": "custom"}}
@@ -823,7 +823,7 @@ class TimelineIntegrationTests(unittest.TestCase):
         self.assertEqual(out["expeditions"][0]["state"], "awaiting_collect")
         suggestions = out["expedition_suggestions"]
         self.assertEqual(len(suggestions), 1)
-        self.assertEqual(suggestions[0]["map_code"], "B1")
+        self.assertEqual(suggestions[0]["map_code"], "D4")
 
     def test_expired_shift_frees_its_map(self):
         """过点作废的班不占图不计班：D4 的班 expired → 建议照常给 D4。"""
@@ -1270,16 +1270,17 @@ def test_recommendation_uses_explicit_preset_even_when_current_team_can_go(tmp_p
     assert out["suggestions"][0]["formation_id"] == "f5"
 
 
-def test_preset_rejects_borrowing_other_teams_and_unknown_levels():
+def test_preset_allows_same_name_copies_and_manual_moves_but_still_checks_levels():
     from touken import custom_formations as cf
     record = {"id": "f5", "name": "远征五", "target_team": 5,
               "slots": {"1": {"name_zh": "药研藤四郎", "level": 99}}}
     parties = {5: {"names": ["小豆长光"]}, 1: {"names": ["药研藤四郎"]}}
     with patch.object(cf, "load_formations", return_value=[record]), patch.object(
             cf, "resolve_formation_slots", return_value={"ok": True, "slots": record["slots"]}):
-        assert ea.expedition_formation_options(5, parties) == []
+        assert ea.expedition_formation_options(5, parties)[0]["party"]["sum"] == 99
         parties[1]["names"] = []
         assert ea.expedition_formation_options(5, parties)[0]["party"]["sum"] == 99
+        assert ea.expedition_formation_options(5, None)[0]["party"]["sum"] == 99
         record["slots"]["1"].pop("level")
         assert ea.expedition_formation_options(5, parties) == []
 
@@ -1350,7 +1351,7 @@ def test_explicit_ineligible_preset_never_falls_back_to_eligible_current_team(tm
 
 def test_same_team_can_reuse_selected_preset_after_return_but_other_team_cannot(tmp_path):
     preset = {"formation_id": "f5", "formation_name": "远征五", "formation_signature": "sig",
-              "party": {"sum": 120, "max": 60, "names": ["药研藤四郎"]}}
+              "party": {"sum": 120, "max": 60, "names": ["药研藤四郎"], "instance_ids": ["youzu:123"]}}
     maps = {"A1": {"duration_min": 20, "砥石": 30, "rules": {}},
             "A2": {"duration_min": 20, "玉钢": 30, "rules": {}}}
     with patch.object(ea, "expedition_formation_options", return_value=[preset]):
@@ -1364,6 +1365,20 @@ def test_same_team_can_reuse_selected_preset_after_return_but_other_team_cannot(
             planning=_planning(), maps=maps, situation_path=tmp_path / "missing.json")
     assert len(out["suggestions"]) == 1
     assert "预留" in out["note"]
+
+
+@pytest.mark.parametrize('same_instance', [False, True])
+def test_same_name_swords_are_reserved_by_instance_instead_of_name(tmp_path, same_instance):
+    maps = {"A1": {"duration_min": 20, "砥石": 30, "rules": {}},
+            "A2": {"duration_min": 20, "玉钢": 30, "rules": {}}}
+    def options(team, *args):
+        return [{"formation_id": f"f{team}", "formation_name": "药研队", "formation_signature": "sig",
+                 "party": {"sum": 99, "max": 99, "names": ["药研藤四郎"],
+                           "instance_ids": [f"youzu:{100 if same_instance else team}"]}}]
+    with patch.object(ea, "expedition_formation_options", side_effect=options):
+        out = ea.build_expedition_suggestions({**_prefs(available_teams=(4, 5)), "team_formations": {"4": "f4", "5": "f5"}},
+            planning=_planning(), maps=maps, situation_path=tmp_path / "missing.json")
+    assert len(out["suggestions"]) == (1 if same_instance else 2)
 
 
 def test_team_preferences_migrate_preserve_other_fields_backup_and_rollback(tmp_path):

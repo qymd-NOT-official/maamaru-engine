@@ -102,7 +102,9 @@ def issues(block: dict, timeline: dict, *, check_settings: bool = False) -> list
     from .day_timeline import _occupied_segments
     # 没有圈速时只核对开工附近的保守占用，真实出阵仍由既有安全流程把关。
     start = max(block["start_min"], (timeline.get("now", start_at) - timeline["day_start"]) / 60)
-    for occupied in _occupied_segments(timeline.get("expeditions", []), {}, current["team_no"]):
+    for occupied in _occupied_segments(timeline.get("expeditions", []), {}, current["team_no"], include_estimated=False):
+        if occupied.get("estimated"):
+            continue
         if start < occupied["end_min"] and start + 30 > occupied["start_min"]:
             return [f"会撞上{occupied['label']}"]
     return []

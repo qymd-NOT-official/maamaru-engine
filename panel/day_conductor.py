@@ -215,6 +215,8 @@ def _block_issues(block: dict, timeline: dict) -> list[str]:
     if runs > int(activity.get("remaining_runs") or 0):
         issues.append("安排圈数超过本期剩余圈数")
     for occupied in activity.get("occupied", []):
+        if occupied.get("estimated"):
+            continue
         if start < occupied["end_min"] and end > occupied["start_min"]:
             issues.append(f"会撞上{occupied['label']}")
             break
@@ -589,17 +591,9 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
             if runner.is_running:
                 # 到点的块保持 pending 排队等，远征或其他任务优先，不抢位置
                 break
-            if state.get('unified_today') and state.get('initial_expedition_keys'):
+            if state.get('unified_today'):
                 from . import scheduler
-                slots = scheduler.load_config().get('automation', {}).get('slot_states', {})
-                initial = [slots.get(key, {}) for key in state['initial_expedition_keys']]
-                if any(slot.get('state') in {scheduler.SLOT_FAILED, scheduler.SLOT_EXPIRED} for slot in initial):
-                    block.update(status='blocked', reason='先行远征未完成，请检查远征排班后重新安排')
-                    state['enabled'] = False
-                    emit_fn('conductor', '[大总管] 先行远征未完成，日课和结束后行为未执行')
-                    changed = True
-                    break
-                if any(slot.get('state') != scheduler.SLOT_DISPATCHED for slot in initial):
+                if scheduler.has_pending_dispatch(scheduler.load_config(), now):
                     break
             started = _start_block(block, state, runner, timeline_fn,
                                    raid_settings_fn, plan, config_path, now,

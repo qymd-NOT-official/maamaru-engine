@@ -200,12 +200,20 @@ def test_changed_formation_requires_new_authorization():
         assert gp.spec("raid")["signature"] != signature
 
 
-def test_selected_gameplay_team_avoids_its_expedition():
+def test_old_expedition_estimate_does_not_block_selected_gameplay_team():
     current = timeline()
     current["expeditions"] = [{"team_no": 2, "time_min": 590, "duration_min": 90,
                                "state": "running", "will_run": True}]
     saved = {"params": {"hanafuda": {"team_no": "2"}}}
     with patch.object(server, "_load_panel_settings", return_value=saved):
-        assert any("远征" in problem for problem in gp.issues(block(), current))
+        assert gp.issues(block(), current) == []
         saved["params"]["hanafuda"]["team_no"] = "3"
         assert gp.issues(block(), current) == []
+
+
+def test_planned_dispatch_still_reserves_its_actual_action_window():
+    current = timeline()
+    current["expeditions"] = [{"team_no": 2, "time_min": 600, "duration_min": 90,
+                               "state": "pending", "will_run": True}]
+    with patch.object(server, "_load_panel_settings", return_value={"params": {"hanafuda": {"team_no": "2"}}}):
+        assert any("派遣" in problem for problem in gp.issues(block(), current))

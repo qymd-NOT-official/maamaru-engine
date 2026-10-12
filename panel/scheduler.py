@@ -643,6 +643,17 @@ def clear_takeover_flag():
         pass
 
 
+def has_pending_dispatch(cfg: dict, now: float) -> bool:
+    """只等正在排队接管的派遣，不把旧失败或取消记录当作前置任务。"""
+    auto = cfg.get("automation", {})
+    if auto.get("paused_until", "") > time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)):
+        return False
+    return any(slot.get("state") in {SLOT_READY, SLOT_WAITING_BUSY}
+               and now <= float(slot.get("expires_at", now) or 0)
+               and (slot.get("state") == SLOT_READY or now >= float(slot.get("next_retry_at", 0) or 0))
+               for slot in auto.get("slot_states", {}).values())
+
+
 def sync_takeover_flag(cfg: dict, now: float | None = None) -> bool:
     """仅为未过期、已结束冷却的 waiting_busy 班次更新旗标，否则清掉。"""
     now = time.time() if now is None else now

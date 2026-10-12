@@ -126,9 +126,10 @@ class TodayExecutionTests(unittest.TestCase):
             plan = dp.load_plan(self.paths['plan_path'])
             self.assertEqual(plan['blocks'], [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': 600}])
             state = dc.load_state(self.paths['state_path'])
-            keys = state['initial_expedition_keys']
-            self.assertEqual(len(keys), 1)
-            with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}):
+            keys = list(ec.load_choice_sets(self.paths['choices_path'])[1])
+            with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}), patch(
+                    'panel.scheduler.load_config', return_value={'automation': {'slot_states': {
+                        keys[0]: {'state': 'ready', 'expires_at': self.day['now'] + 30}}}}):
                 dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
                         lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
                 self.assertEqual(self.runner.calls, [])
@@ -139,17 +140,22 @@ class TodayExecutionTests(unittest.TestCase):
             self.assertEqual(self.runner.calls[0][0], 'workflow')
             self.assertEqual(self.runner.calls[0][2]['workflow_id'], 'builtin-daily')
 
-    def test_unified_failed_departure_never_runs_daily_or_ending(self):
+    def test_unified_failed_departure_does_not_stop_daily(self):
         preset = {'id': 'builtin-daily', 'name': '一键日课', 'nodes': [{'type': 'signin', 'params': {}}]}
         with patch.object(dc.workflow, 'find_preset', return_value=preset):
             execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
-        key = dc.load_state(self.paths['state_path'])['initial_expedition_keys'][0]
+        state = dc.load_state(self.paths['state_path'])
+        key = next(iter(ec.load_choice_sets(self.paths['choices_path'])[1]))
+        # 老版本的等待名单也不能连带停止无关任务。
+        state['initial_expedition_keys'] = [key]
+        dc._save(state, self.paths['state_path'])
         with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}), patch(
-                'panel.scheduler.load_config', return_value={'automation': {'slot_states': {key: {'state': 'failed_unknown'}}}}):
+                'panel.scheduler.load_config', return_value={'automation': {'slot_states': {key: {'state': 'failed_unknown'}}}}), patch.object(
+                dc.workflow, 'find_preset', return_value=preset):
             dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',
                     lambda *args: None, self.paths['state_path'], self.paths['plan_path'])
-        self.assertFalse(dc.load_state(self.paths['state_path'])['enabled'])
-        self.assertEqual(self.runner.calls, [])
+        self.assertTrue(dc.load_state(self.paths['state_path'])['enabled'])
+        self.assertEqual(self.runner.calls[0][0], 'workflow')
 
     def test_unified_daily_start_time_and_opt_out_preserve_existing_departures(self):
         from panel.today_execution import compose_daily_plan
@@ -159,7 +165,7 @@ class TodayExecutionTests(unittest.TestCase):
         with patch.object(dc.workflow, 'find_preset', return_value=preset):
             execute_today(self.runner, lambda: self.day, lambda: {}, daily_preset=preset, **self.paths)
         self.assertEqual(ec.load_choice_sets(self.paths['choices_path'])[1], {})
-        self.assertEqual(dc.load_state(self.paths['state_path'])['initial_expedition_keys'], [])
+        self.assertNotIn('initial_expedition_keys', dc.load_state(self.paths['state_path']))
 
     def test_recommended_runs_are_refreshed_when_today_is_armed(self):
         preset = {'id': 'builtin-daily', 'name': '日课', 'nodes': [{'type': 'raid', 'params': {'runs': 3}}],
@@ -208,12 +214,14 @@ class TodayExecutionTests(unittest.TestCase):
         plan = compose_plan(self.day, old, {}, state)
         self.assertEqual(plan['blocks'], [{'kind': 'daily', 'start_min': 600}])
 
-    def test_paused_expeditions_and_new_raid_collision_do_not_save(self):
+    def test_paused_expeditions_do_not_prevent_todays_arrangements(self):
         with patch('panel.scheduler.load_config', return_value={
                 'automation': {'paused_until': '2999-01-01 00:00:00'}}):
-            with self.assertRaisesRegex(ValueError, '暂停'):
-                self.execute()
-        self.assertFalse(any(p.exists() for p in self.paths.values()))
+            self.execute()
+        self.assertTrue(dc.load_state(self.paths['state_path'])['enabled'])
+        self.assertTrue(self.paths['choices_path'].exists())
+
+    def test_new_raid_collision_with_planned_dispatch_does_not_save(self):
         dp.save_plan(DAY, DAY + 24 * 3600,
                      [{'start_min': 600, 'kind': 'raid', 'runs': 8}], self.paths['plan_path'])
         with self.assertRaisesRegex(ValueError, '会撞上'):

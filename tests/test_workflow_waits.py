@@ -113,8 +113,7 @@ def test_raid_resume_waits_for_expedition_preview_and_stops_at_deadline(tmp_path
     slots.clear()
     (tmp_path / "flag.json").write_text(json.dumps({"requested_at": 100}))
     waits.resume_due(110, runner)
-    runner.start.assert_not_called()
-    # 派遣完成清旗后仅续跑一次。
+    runner.start.assert_called_once()  # 旧旗标没有对应待派班，不再拦续跑。
     (tmp_path / "flag.json").write_text("{}")
     waits.resume_due(110, runner)
     runner.start.assert_called_once()
@@ -332,17 +331,19 @@ def test_untracked_takeover_cannot_turn_green_or_execute_later_actions(tmp_path,
     assert report['steps'][0]['status'].startswith('✗')
 
 
-def test_failed_expedition_interrupts_waiting_daily_instead_of_resuming(tmp_path, monkeypatch):
+@pytest.mark.parametrize('outcome', ['failed_unknown', 'expired', 'waiting_unknown'])
+def test_failed_expired_or_cancelled_expedition_releases_waiting_daily(tmp_path, monkeypatch, outcome):
     from panel import scheduler
     slots = {'one': {'state':'waiting_busy','expires_at':200}}
     monkeypatch.setattr(waits.time,'time',lambda:100)
     monkeypatch.setattr(scheduler,'load_config',lambda:{'automation':{'slot_states':slots}})
     waits.park('root','qa',{},100,{**state(),'reason':'expedition','remaining_runs':3},'日课')
-    slots['one']['state']='failed_unknown'
-    runner = SimpleNamespace(is_running=False,start=Mock())
+    slots['one']['state']=outcome
+    runner = SimpleNamespace(is_running=False,start=Mock(return_value='continued'))
     waits.resume_due(110,runner)
-    runner.start.assert_not_called()
-    assert waits.load()['root']['status']=='interrupted'
+    runner.start.assert_called_once()
+    assert runner.start.call_args.args[2]['workflow_resume']['remaining_runs'] == 3
+    assert waits.load()['root']['status']=='launching'
 
 
 def test_pending_expedition_defers_ending_without_repeating_finished_steps(monkeypatch):

@@ -141,8 +141,6 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
                 raise ValueError('暂时没有可用的建议圈数，请同步活动进度或改为手动圈数')
         cfg = scheduler.load_config()
         paused = cfg.get("automation", {}).get("paused_until", "")
-        if records and paused and paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
-            raise ValueError("远征排班正在暂停，先恢复远征再接今日安排")
         workflow_id = old.get("workflow_id", dc.BUILTIN_ID) if same_day and plan["uses_saved_raid"] else dc.BUILTIN_ID
         # Validate every gameplay step before enabling any new expedition.
         validation_timeline = {**timeline, "expeditions": [*timeline.get("expeditions", []),
@@ -159,21 +157,7 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
             candidate['blocks'][0]['daily_recommended_runs'] = recommended_runs
         candidate["today_execution"] = True
         if daily_preset is not None:
-            cutoff = plan['blocks'][0]['start_min']
-            existing_skipped, existing_forced = ec.load_choice_sets(choices_path)
-            keys = {key for key, item in {**existing_forced, **records}.items()
-                    if key not in existing_skipped
-                    and cfg.get('automation', {}).get('slot_states', {}).get(key, {}).get('state') not in scheduler.TERMINAL_STATES
-                    and item.get('start_min', dt.DAY_MINUTES) <= cutoff
-                    and str(item.get('planned_at', '')).startswith(datetime.fromtimestamp(
-                        timeline['day_start'] + cutoff * 60, timezone(timedelta(hours=8))).date().isoformat())}
-            keys.update(item['key'] for item in timeline.get('expeditions', [])
-                        if item.get('will_run') and item.get('kind') != 'running' and item.get('time_min', dt.DAY_MINUTES) <= cutoff
-                        and item.get('state') not in scheduler.TERMINAL_STATES)
-            candidate['initial_expedition_keys'] = sorted(keys)
             candidate['unified_today'] = True
-            if keys and paused and paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
-                raise ValueError("远征排班正在暂停，先恢复远征再接今日安排")
         skipped, forced = ec.load_choice_sets(choices_path)
         for key, record in records.items():
             if key in forced and forced[key] != record:
@@ -197,9 +181,10 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         daily = any(b["kind"] == "daily" and b["status"] == "pending" for b in candidate["blocks"])
         pieces = []
         if daily_preset is not None:
-            return {'ok': True, 'message': ('今日安排已接班：先处理到点远征，再执行一键日课，最后按设置收工。'
+            return {'ok': True, 'message': ('今日安排已接班：远征与日课分别执行，最后按设置收工。'
                     if not (daily_preset.get('daily_ui') or {}).get('startTime') else
-                    '今日安排已接班，将按设置的开始时间执行。')}
+                    '今日安排已接班，将按设置的开始时间执行。') +
+                    ('远征仍在暂停，日课可以照常开工。' if paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else '')}
         if records:
             pieces.append(f"远征 {len(records)} 班")
         if raid_runs:

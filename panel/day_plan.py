@@ -135,6 +135,8 @@ def review_plan(plan: dict, timeline: dict) -> list[str]:
             if deadline is not None and end > deadline:
                 issues.append(f"第{i}段预计赶不上今天的收摊时间")
             for occupied in activity.get("occupied", []):
+                if occupied.get("estimated"):
+                    continue
                 if start < occupied["end_min"] and end > occupied["start_min"]:
                     issues.append(f"第{i}段会撞上{occupied['label']}")
                     break
