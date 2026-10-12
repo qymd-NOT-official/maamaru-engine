@@ -27,11 +27,12 @@ MARCH_TIMEOUT = 1500.0              # 一轮行军总上限
 STUCK_SECONDS = 120.0               # 画面纹丝不动的熔断线
 
 # 画面分类：按优先级从上到下
+# 注意 shiki_menu 必须排在 home 前面：指挥菜单是盖在本丸上的浮层，
+# 本丸绿标依然可见，先认 home 会永远看不见菜单。
 SCREENS = (
     ('loading', ('loading/sakura',)),
     ('automarch_dialog', ('dialog/automarch-request',)),
     ('dialog', ('dialog/yes', 'dialog/no')),      # 两个按钮都中才算弹窗
-    ('home', ('home/badge',)),
     ('shiki_menu', ('menu/sally',)),
     ('era', ('era/decide',)),
     ('map', ('map/team-select',)),
@@ -40,10 +41,11 @@ SCREENS = (
     ('field', ('march/advance',)),
     ('battle', ('battle/start',)),
     ('mapview', ('map/label',)),
+    ('home', ('home/badge',)),
 )
-# 行军途中允许路过的画面；弹窗和回家单独处理
+# 行军途中允许路过的画面；弹窗和回家单独处理。team 是出发按钮点完后的残留帧。
 MARCH_PASSABLE = frozenset(
-    {'loading', 'battle', 'result', 'field', 'mapview', 'unknown'})
+    {'loading', 'battle', 'result', 'field', 'mapview', 'team', 'unknown'})
 
 
 class SallyStop(RuntimeError):
@@ -120,15 +122,40 @@ class Sally:
     # ---- 出阵流程 ----
 
     def _navigate_to_team(self) -> None:
-        self._wait(frozenset({'home'}), NAV_TIMEOUT, frozenset({'loading'}), '回到本丸')
-        self.b.click(*SHIKI_TAB)
-        self._wait(frozenset({'shiki_menu'}), NAV_TIMEOUT, frozenset({'loading', 'home'}), '打开指挥菜单')
-        self._click_hit('menu/sally', '出阵入口')
-        self._wait(frozenset({'era'}), NAV_TIMEOUT, frozenset({'loading'}), '进入时代选择')
-        self._click_hit('era/decide', '时代决定')
-        self._wait(frozenset({'map'}), NAV_TIMEOUT, frozenset({'loading'}), '进入地域选择')
-        self._click_hit('map/team-select', '部队选择入口')
-        self._wait(frozenset({'team'}), NAV_TIMEOUT, frozenset({'loading'}), '进入部队选择')
+        """走到部队选择页。支持从本丸/指挥菜单/时代/地域任意一层接续。"""
+        deadline = time.monotonic() + NAV_TIMEOUT * 5
+        last = (None, None)
+        last_change = time.monotonic()
+        while time.monotonic() < deadline:
+            image = self.b.screenshot()
+            screen = self.classify(image)
+            if screen == 'team':
+                return
+            if screen == 'dialog':
+                raise SallyStop('前往出阵时出现了确认弹窗，已停止；请人工查看游戏')
+            if screen == 'loading':
+                time.sleep(self.poll)
+                continue
+            if screen == 'home':
+                self.b.click(*SHIKI_TAB)
+            elif screen == 'shiki_menu':
+                self._click_hit('menu/sally', '出阵入口')
+            elif screen == 'era':
+                self._click_hit('era/decide', '时代决定')
+            elif screen == 'map':
+                self._click_hit('map/team-select', '部队选择入口')
+            else:
+                self._save_debug(image)
+                raise SallyStop('前往出阵时遇到了不认识的画面，已停止（截图已存到 debug）')
+            digest = _digest(image)
+            if (screen, digest) != last:
+                last = (screen, digest)
+                last_change = time.monotonic()
+            elif time.monotonic() - last_change > self.stuck_seconds:
+                self._save_debug(image)
+                raise SallyStop('导航时画面卡住不动了，已停止；请人工查看游戏')
+            time.sleep(self.poll)
+        raise SallyStop('前往出阵超时，已停止；请人工查看游戏')
 
     def _select_team(self, team_no: int) -> None:
         self.b.click(*TEAM_TABS[team_no])
@@ -144,7 +171,8 @@ class Sally:
         self.b.click(*AUTOMARCH_CONFIRM)
         time.sleep(1.0)
         self.b.click(*DIALOG_CLOSE)
-        self._wait(frozenset({'team'}), NAV_TIMEOUT, frozenset({'loading'}), '返回部队选择')
+        self._wait(frozenset({'team'}), NAV_TIMEOUT,
+                   frozenset({'loading', 'automarch_dialog'}), '返回部队选择')
 
     def _watch_march(self) -> None:
         """盯行军：回家即完成；弹窗/卡死/超时立即停。"""
@@ -207,13 +235,20 @@ class Sally:
 
 
 def run_script(config_path=None, params: dict | None = None):
-    """面板脚本入口：generator[str]，复用 worker 子进程骨架。"""
+    """面板脚本入口：generator[str]，复用 worker 子进程骨架。
+
+    SallyStop 转成 FlowAborted，让面板按「安全停止」（退出码 42）收尾，
+    而不是报「脚本崩了」。"""
+    from .flow_control import FlowAborted
     params = params or {}
     try:
         team_no = int(params.get('team_no', 1))
         rounds = int(params.get('rounds', 1))
     except (TypeError, ValueError):
         raise ValueError('参数格式不正确')
-    with jp_browser.JpBrowser() as browser:
-        sally = Sally(browser)
-        yield from sally.run(team_no=team_no, rounds=rounds)
+    try:
+        with jp_browser.JpBrowser() as browser:
+            sally = Sally(browser)
+            yield from sally.run(team_no=team_no, rounds=rounds)
+    except SallyStop as exc:
+        raise FlowAborted(str(exc)) from exc

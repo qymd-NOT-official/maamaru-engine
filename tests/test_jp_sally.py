@@ -98,6 +98,15 @@ def test_happy_path_single_round():
     assert depart, '出阵按钮没被点'
 
 
+def test_menu_already_open_skips_shiki_tab():
+    frames = happy_frames()[1:]  # 指挥菜单已开着（上次中断留下的现场）
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1)
+    assert (0.94, 0.728) not in browser.clicks  # 没再点指揮（会把菜单关上）
+    assert any('出阵完成' in line for line in logs)
+
+
 def test_dialog_during_march_stops_everything():
     frames = happy_frames()[:11] + [fake_screen('dialog/yes', 'dialog/no')]
     browser = FakeBrowser(frames)

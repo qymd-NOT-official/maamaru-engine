@@ -1338,6 +1338,24 @@ register_script("formation", "编队换人",
                 hidden=True)
 
 
+# ── 日服 ──
+# 浏览器画面识别 + 点击的出阵：走 jp_sally 状态机，与国服 MAA 链路完全分离。
+def _build_jp_sally(config_path, params):
+    from touken import jp_sally
+    return jp_sally.run_script(config_path, params)
+
+
+register_script("jp-sally", "日服出阵",
+                "日服浏览器出阵：当前记忆的图 + 自动行军。只在认得出的画面上点击，"
+                "行军中任何弹窗（包括重伤警告）一律停等人工，绝不点继续行军",
+                _build_jp_sally,
+                params=[{"key": "team_no", "type": "select", "label": "部队",
+                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "rounds", "type": "number", "label": "连刷轮数",
+                         "default": 1, "min": 1, "max": 200}])
+
+
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
 # 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
@@ -4247,8 +4265,15 @@ async def api_save_settings(request: Request, server: str = ""):
     existing = _load_panel_settings(server)
     if not isinstance(body, dict):
         raise HTTPException(400, "设置格式不正确")
-    if server == "jp" and set(body) - {"theme", "scenery", "companion", "backdrop"}:
-        raise HTTPException(400, "日服暂不支持自动执行设置")
+    if server == "jp":
+        allowed = {"theme", "scenery", "companion", "backdrop"}
+        extra = set(body) - allowed
+        if extra == {"params"}:
+            params = body.get("params")
+            if not isinstance(params, dict) or set(params) - {"jp-sally"}:
+                raise HTTPException(400, "日服只能保存日服出阵的参数")
+        elif extra:
+            raise HTTPException(400, "日服暂不支持自动执行设置")
     existing.pop("_saved_at", None)
     # body 格式: {"params": {"daily": {...}, ...}, "theme": "pixel"}
     params = body.get("params")
