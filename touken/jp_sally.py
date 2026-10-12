@@ -15,13 +15,17 @@ import time
 
 from . import jp_browser, jp_browser_probe as frames, jp_vision
 
-SHIKI_TAB = (0.940, 0.728)          # 本丸右侧「指揮」拉页
-BACK_ARROW = (0.138, 0.115)         # 编成等子页左上「↩」回本丸
-TEAM_TABS = {1: (0.142, 0.168), 2: (0.229, 0.168), 3: (0.316, 0.168),
-             4: (0.403, 0.168), 5: (0.490, 0.168)}
-AUTOMARCH_BUTTON = (0.907, 0.490)   # 部队选择页「自動行軍」
-AUTOMARCH_CONFIRM = (0.600, 0.687)  # 自动行军弹窗「依頼する」
-DIALOG_CLOSE = (0.788, 0.116)       # 弹窗右上 ✕
+# 点击目标一律「锚点模板 + 基准分辨率像素偏移」：固定归一化坐标在窗口
+# 高度变化后会漂（2026-10-12 事故：窗口 1088→944，指揮标签点歪到编成），
+# 锚点找得到，偏移就跟着对。偏移量都是基准空间（1508x1088）像素。
+TEAM_TAB_OFFSETS = {                  # 部队页签，相对 team/depart 按钮
+    1: (-1151, -593), 2: (-1018, -593), 3: (-884, -593),
+    4: (-750, -593), 5: (-616, -593),
+}
+AUTOMARCH_OFFSET = (1, -239)          # 部队选择页「自動行軍」，相对 team/depart
+AUTOMARCH_CONFIRM_OFFSET = (151, 582) # 弹窗「依頼する」，相对弹窗标题
+DIALOG_CLOSE_OFFSET = (434, -40)      # 弹窗右上 ✕，相对弹窗标题
+BACK_ARROW_OFFSET = (118, -36)        # 编成页左上「↩」，相对 formation/label
 
 NAV_TIMEOUT = 25.0                  # 每步导航认画面的上限
 MARCH_TIMEOUT = 1500.0              # 一轮行军总上限
@@ -29,6 +33,7 @@ STUCK_SECONDS = 120.0               # 画面纹丝不动的熔断线
 RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷新一次页面自愈
 BOOT_TIMEOUT = 300.0                # 刷新后重进本丸的上限（数据加载可能很慢）
 GREET_STABLE = 4.0                  # 登录问候画面稳定这么久才点中央跳过
+UNKNOWN_STABLE = 8.0                # 起手未知画面稳定这么久就刷新页面重来
 
 # 画面分类：按优先级从上到下
 # 注意 shiki_menu 必须排在 home 前面：指挥菜单是盖在本丸上的浮层，
@@ -130,6 +135,22 @@ class Sally:
             raise SallyStop(f'{what}的按钮没认出来，已停止；请人工查看游戏')
         self.b.click(hit.nx, hit.ny)
 
+    def _click_near(self, anchor: str, offset: tuple[float, float],
+                    what: str, image=None) -> None:
+        """点锚点模板中心 + 基准分辨率像素偏移处。
+
+        用于没有独立模板价值的固定按钮（页签、弹窗按钮、返回箭头）：
+        窗口高度变化只是视口裁剪，内容相对位置不变，锚点命中偏移就对。"""
+        if image is None:
+            image = self.b.screenshot()
+        normalized = jp_vision.normalize_frame(image)
+        hit = jp_vision.match(normalized, jp_vision.load_template(anchor),
+                              name=anchor)
+        if not hit:
+            raise SallyStop(f'{what}没认出来，已停止；请人工查看游戏')
+        w, h = normalized.size
+        self.b.click(hit.nx + offset[0] / w, hit.ny + offset[1] / h)
+
     # ---- 出阵流程 ----
 
     def _boot_to_home(self) -> None:
@@ -194,11 +215,14 @@ class Sally:
 
         黑屏加载（转场/挂起后页面重载）是正常路过的画面；但持续黑屏超过
         RELOAD_AFTER 说明游戏多半挂在加载上（闲置掉线、渲染上下文丢失），
-        自动刷新一次页面让它重进本丸。刷新后仍认不出画面则安全停止。"""
+        自动刷新一次页面让它重进本丸。起手就认不出的画面（登录问候、滞留
+        陌生页）同理等 UNKNOWN_STABLE 后刷新一次。刷新后仍认不出则安全停止。"""
         deadline = time.monotonic() + NAV_TIMEOUT * 5
         last = (None, None)
         last_change = time.monotonic()
         loading_since: float | None = None
+        unknown_since: float | None = None
+        progressed = False              # 已经点过东西（导航有进展）
         reloaded = False
         while time.monotonic() < deadline:
             image = self.b.screenshot()
@@ -208,6 +232,7 @@ class Sally:
             if screen == 'dialog':
                 raise SallyStop('前往出阵时出现了确认弹窗，已停止；请人工查看游戏')
             if screen == 'loading':
+                unknown_since = None
                 if loading_since is None:
                     loading_since = time.monotonic()
                 elif not reloaded and time.monotonic() - loading_since > RELOAD_AFTER:
@@ -220,20 +245,46 @@ class Sally:
                     continue
                 time.sleep(self.poll)
                 continue
-            loading_since = None
+            if screen == 'unknown' and not progressed:
+                # 起手就认不出（登录问候/滞留陌生页）：原地等一小会儿，
+                # 还不认识就刷新一次重走启动序列；导航有进展后再撞见
+                # 未知画面仍按安全停车处理。
+                loading_since = None
+                if unknown_since is None:
+                    unknown_since = time.monotonic()
+                    time.sleep(self.poll)
+                    continue
+                if time.monotonic() - unknown_since <= UNKNOWN_STABLE:
+                    time.sleep(self.poll)
+                    continue
+                if not reloaded:
+                    self.log('当前画面认不出，刷新一次页面重来…')
+                    self.b.reload()
+                    reloaded = True
+                    self._boot_to_home()
+                    deadline = time.monotonic() + NAV_TIMEOUT * 5
+                    unknown_since = None
+                    time.sleep(self.poll)
+                    continue
+                # 刷新后依旧认不出 → 落到下面安全停车
+            else:
+                loading_since = None
+                unknown_since = None
             if screen == 'home':
-                self.b.click(*SHIKI_TAB)
+                self._click_hit('menu/shiki-tab', '指挥标签', image=image)
             elif screen == 'formation':
-                self.b.click(*BACK_ARROW)
+                self._click_near('formation/label', BACK_ARROW_OFFSET,
+                                 '编成页返回箭头', image=image)
             elif screen == 'shiki_menu':
-                self._click_hit('menu/sally', '出阵入口')
+                self._click_hit('menu/sally', '出阵入口', image=image)
             elif screen == 'era':
-                self._click_hit('era/decide', '时代决定')
+                self._click_hit('era/decide', '时代决定', image=image)
             elif screen == 'map':
-                self._click_hit('map/team-select', '部队选择入口')
+                self._click_hit('map/team-select', '部队选择入口', image=image)
             else:
                 self._save_debug(image)
                 raise SallyStop('前往出阵时遇到了不认识的画面，已停止（截图已存到 debug）')
+            progressed = True
             digest = _digest(image)
             if (screen, digest) != last:
                 last = (screen, digest)
@@ -245,19 +296,22 @@ class Sally:
         raise SallyStop('前往出阵超时，已停止；若游戏一直黑屏请手动刷新页面后重试')
 
     def _select_team(self, team_no: int) -> None:
-        self.b.click(*TEAM_TABS[team_no])
+        self._click_near('team/depart', TEAM_TAB_OFFSETS[team_no],
+                         f'部队{"一二三四五"[team_no - 1]}页签')
         time.sleep(1.0)
 
     def _enable_automarch(self) -> None:
-        self.b.click(*AUTOMARCH_BUTTON)
+        self._click_near('team/depart', AUTOMARCH_OFFSET, '自动行军按钮')
         try:
             self._wait(frozenset({'automarch_dialog'}), NAV_TIMEOUT,
                        frozenset({'loading', 'team'}), '打开自动行军')
         except SallyStop:
             raise SallyStop('自动行军设置没打开；如果是第一次用，请手动点一次「自動行軍」看完说明')
-        self.b.click(*AUTOMARCH_CONFIRM)
+        self._click_near('dialog/automarch-request', AUTOMARCH_CONFIRM_OFFSET,
+                         '自动行军依頼する')
         time.sleep(1.0)
-        self.b.click(*DIALOG_CLOSE)
+        self._click_near('dialog/automarch-request', DIALOG_CLOSE_OFFSET,
+                         '关闭自动行军弹窗')
         self._wait(frozenset({'team'}), NAV_TIMEOUT,
                    frozenset({'loading', 'automarch_dialog'}), '返回部队选择')
 
@@ -291,9 +345,9 @@ class Sally:
             time.sleep(self.poll)
         raise SallyStop('行军超过 25 分钟仍未回本丸，已停止；请人工查看游戏')
 
-    def run(self, team_no: int = 1, rounds: int = 1):
-        """generator：逐步产出日志行。team_no 1-5，rounds ≥1。"""
-        if team_no not in TEAM_TABS:
+    def run(self, team_no: int = 1, rounds: int = 1) -> None:
+        """跑 rounds 轮出阵；日志经 self.log 回调输出，返回值无意义。"""
+        if team_no not in TEAM_TAB_OFFSETS:
             raise ValueError('部队番号应在 1-5 之间')
         if not 1 <= rounds <= 200:
             raise ValueError('连刷轮数应在 1-200 之间')
@@ -324,6 +378,8 @@ class Sally:
 def run_script(config_path=None, params: dict | None = None):
     """面板脚本入口：generator[str]，复用 worker 子进程骨架。
 
+    Sally 的日志走 print（worker 捕获 stdout），run() 本身不产出日志行，
+    所以这里 yield from () 只为保持 generator 形态。
     SallyStop 转成 FlowAborted，让面板按「安全停止」（退出码 42）收尾，
     而不是报「脚本崩了」。"""
     from .flow_control import FlowAborted
@@ -335,7 +391,7 @@ def run_script(config_path=None, params: dict | None = None):
         raise ValueError('参数格式不正确')
     try:
         with jp_browser.JpBrowser() as browser:
-            sally = Sally(browser)
-            yield from sally.run(team_no=team_no, rounds=rounds)
+            Sally(browser).run(team_no=team_no, rounds=rounds)
     except SallyStop as exc:
         raise FlowAborted(str(exc)) from exc
+    yield from ()

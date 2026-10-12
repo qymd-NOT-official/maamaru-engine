@@ -6,6 +6,7 @@ from touken import jp_sally, jp_vision
 # 各模板在 1508x1088 基准帧上的实测中心（标定帧模板匹配结果）
 KNOWN = {
     'home/badge': (0.062, 0.129),
+    'menu/shiki-tab': (0.939, 0.726),
     'menu/sally': (0.845, 0.709),
     'era/decide': (0.909, 0.726),
     'map/team-select': (0.908, 0.728),
@@ -74,24 +75,48 @@ def make_sally(browser, **kwargs):
 
 
 def happy_frames():
+    """一轮完整出阵的帧序列。导航点击复用分类帧不额外取帧；部队页签/
+    自动行军/弹窗按钮/出发按钮各重新取一帧。"""
+    home = fake_screen('home/badge', 'menu/shiki-tab')
+    team = fake_screen('team/depart')
+    dialog = fake_screen('dialog/automarch-request')
     return [
-        fake_screen('home/badge'),                 # 回本丸
-        fake_screen('menu/sally'),                 # 指挥菜单
-        fake_screen('menu/sally'),                 # _click_hit 取帧
-        fake_screen('era/decide'),
+        home,                            # classify → 本丸，点指挥标签
+        fake_screen('menu/sally'),       # 指挥菜单
         fake_screen('era/decide'),
         fake_screen('map/team-select'),
-        fake_screen('map/team-select'),
-        fake_screen('team/depart'),
-        fake_screen('dialog/automarch-request'),   # 自动行军弹窗
-        fake_screen('team/depart'),                # 弹窗关闭回部队页
-        fake_screen('team/depart'),                # 出阵按钮取帧
+        team,                            # classify → 部队选择页
+        team,                            # 选部队页签取帧
+        team,                            # 点自动行军取帧
+        dialog,                          # _wait 命中弹窗
+        dialog,                          # 依頼する 取帧
+        dialog,                          # 关弹窗 ✕ 取帧
+        team,                            # _wait 回部队页
+        team,                            # 出阵按钮取帧
         fake_screen('loading/sakura'),
         fake_screen('battle/start'),
         fake_screen('battle/result'),
         fake_screen('march/advance'),
-        fake_screen('home/badge'),                 # 回城
+        fake_screen('home/badge'),       # 回城
     ]
+
+
+def click_near(clicks, nx, ny, tol=0.01):
+    return any(abs(c[0] - nx) < tol and abs(c[1] - ny) < tol for c in clicks)
+
+
+# 锚点 + 偏移算出的期望点击位置（锚点即 KNOWN 里的粘贴中心）
+SHIKI_CLICK = KNOWN['menu/shiki-tab']
+TAB1_CLICK = (0.905 + jp_sally.TEAM_TAB_OFFSETS[1][0] / 1508,
+              0.714 + jp_sally.TEAM_TAB_OFFSETS[1][1] / 1088)
+AUTOMARCH_CLICK = (0.905 + jp_sally.AUTOMARCH_OFFSET[0] / 1508,
+                   0.714 + jp_sally.AUTOMARCH_OFFSET[1] / 1088)
+CONFIRM_CLICK = (0.500 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[0] / 1508,
+                 0.154 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[1] / 1088)
+CLOSE_CLICK = (0.500 + jp_sally.DIALOG_CLOSE_OFFSET[0] / 1508,
+               0.154 + jp_sally.DIALOG_CLOSE_OFFSET[1] / 1088)
+BACK_CLICK = (0.060 + jp_sally.BACK_ARROW_OFFSET[0] / 1508,
+              0.134 + jp_sally.BACK_ARROW_OFFSET[1] / 1088)
 
 
 def test_happy_path_single_round():
@@ -99,12 +124,12 @@ def test_happy_path_single_round():
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert any('出阵完成' in line for line in logs)
-    # 关键点击：指挥标签、出阵入口、决定、部队选择、部队一、自动行军、依頼、关窗、出发
-    assert (0.94, 0.728) in browser.clicks                    # 指揮标签
-    assert jp_sally.TEAM_TABS[1] in browser.clicks
-    assert jp_sally.AUTOMARCH_BUTTON in browser.clicks
-    assert jp_sally.AUTOMARCH_CONFIRM in browser.clicks
-    assert jp_sally.DIALOG_CLOSE in browser.clicks
+    # 关键点击：指挥标签、出阵入口、决定、部队选择、部队一页签、自动行军、依頼、关窗、出发
+    assert click_near(browser.clicks, *SHIKI_CLICK)
+    assert click_near(browser.clicks, *TAB1_CLICK)
+    assert click_near(browser.clicks, *AUTOMARCH_CLICK)
+    assert click_near(browser.clicks, *CONFIRM_CLICK)
+    assert click_near(browser.clicks, *CLOSE_CLICK)
     depart = [c for c in browser.clicks if abs(c[0] - 0.905) < 0.01 and abs(c[1] - 0.714) < 0.01]
     assert depart, '出阵按钮没被点'
 
@@ -114,7 +139,7 @@ def test_menu_already_open_skips_shiki_tab():
     browser = FakeBrowser(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
-    assert (0.94, 0.728) not in browser.clicks  # 没再点指揮（会把菜单关上）
+    assert not click_near(browser.clicks, *SHIKI_CLICK)  # 没再点指揮（会把菜单关上）
     assert any('出阵完成' in line for line in logs)
 
 
@@ -125,13 +150,12 @@ def test_navigation_continues_from_formation():
     browser = FakeBrowser(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
-    assert browser.clicks[0] == (round(jp_sally.BACK_ARROW[0], 3),
-                                 round(jp_sally.BACK_ARROW[1], 3))
+    assert click_near(browser.clicks[:1], *BACK_CLICK)
     assert any('出阵完成' in line for line in logs)
 
 
 def test_dialog_during_march_stops_everything():
-    frames = happy_frames()[:11] + [fake_screen('dialog/yes', 'dialog/no')]
+    frames = happy_frames()[:12] + [fake_screen('dialog/yes', 'dialog/no')]
     browser = FakeBrowser(frames)
     sally, logs = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='弹窗'):
@@ -140,12 +164,30 @@ def test_dialog_during_march_stops_everything():
     assert len(browser.clicks) == 9
 
 
-def test_unknown_screen_in_navigation_stops():
-    browser = FakeBrowser([Image.new('RGB', (1508, 1088), (10, 200, 10))])
+def test_unknown_screen_mid_navigation_stops(monkeypatch):
+    """起手认得、点了东西之后才撞见未知画面：立即安全停车，不刷新。"""
+    monkeypatch.setattr(jp_sally, 'UNKNOWN_STABLE', -1.0)
+    weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
+    frames = [fake_screen('home/badge', 'menu/shiki-tab'), weird]
+    browser = FakeBrowser(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
         sally.run(team_no=1, rounds=1)
-    assert browser.clicks == []  # 什么都还没点
+    assert browser.reloads == 0
+
+
+def test_unknown_at_start_reloads_once(monkeypatch):
+    """起手就认不出（如登录问候残留）：等一拍后刷新一次，还不认识就停车。"""
+    monkeypatch.setattr(jp_sally, 'UNKNOWN_STABLE', -1.0)
+    monkeypatch.setattr(jp_sally, 'BOOT_TIMEOUT', 0.05)
+    weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
+    browser = FakeBrowser([weird])
+    sally, logs = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop):
+        sally.run(team_no=1, rounds=1)
+    assert browser.reloads == 1
+    assert any('刷新一次页面重来' in line for line in logs)
+    assert browser.clicks == []  # 直到停车都没盲点过
 
 
 def test_stuck_march_blows_fuse():
@@ -221,6 +263,23 @@ def test_boot_ignores_stale_home_frame(monkeypatch):
     # 残留帧没骗过它：箭头与本丸按钮都被点过
     assert len(browser.clicks) == 2
     assert any('重新进入本丸' in line for line in logs)
+
+
+def test_run_script_success_path(monkeypatch):
+    """run_script 成功跑完一轮：不抛错、产出空日志迭代器（日志走 print）。"""
+    fake = FakeBrowser(happy_frames())
+
+    class FakeJpBrowser:
+        def __enter__(self):
+            return fake
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(jp_sally.jp_browser, 'JpBrowser', lambda: FakeJpBrowser())
+    lines = list(jp_sally.run_script(params={'team_no': 1, 'rounds': 1}))
+    assert lines == []
+    assert any(abs(c[0] - 0.905) < 0.01 for c in fake.clicks)  # 出发键按过
 
 
 @pytest.mark.parametrize('team_no', [0, 6, '二'])
