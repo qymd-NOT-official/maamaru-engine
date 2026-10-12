@@ -30,6 +30,7 @@
 
 import json
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -281,13 +282,19 @@ class SmithMixin:
         # 点火前把配比设成配置配方；游戏会记住上次值，一致时自动跳过
         if not self._apply_recipe(recipe):
             return False
+        from ..game_state import begin_operation, confirm_operation
+        boundary = begin_operation(self.maa)
+        boundary.update(forge_slot=_SLOT_CY.index(cy) + 1,
+                        forge_recipe=self._forge_recipe(recipe))
         self.maa.click(Point(1146, 608))  # 锻刀（不勾加速符）
-        # 点火后回状况界面有过场，没等到就当作没点成（防连锁误操作）
+        # 过场与确认弹窗按原流程处理，随后统一核对游戏结果
+        returned = False
         for _ in range(12):
             time.sleep(1.5)
             self.maa.screenshot(force=True)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
-                return True
+                returned = True
+                break
             # 限锻期间拦一道确认窗：「当前的资源数无法增加显现积分。
             # 是否进行锻刀？」（issue#7 用户现场）。窗不关，状况页回不来，
             # 后面的刀解/合成也全被它挡死——认出就点【是】继续锻。
@@ -299,7 +306,12 @@ class SmithMixin:
                     self.maa.click(yes)
                     time.sleep(1.0)
                     continue
-        return False
+        outcome = confirm_operation(self.maa, boundary, "forge")
+        if outcome is not None:
+            return outcome
+        # Returning to the page alone is not proof; the chosen furnace must be running.
+        countdown = self._read_countdown(cy) if returned else None
+        return bool(countdown and countdown[1] > 0)
 
     def _forge_recipe(self, override: list | None = None) -> list:
         """点火配方：运行时覆盖 > 配置 forge.recipe（顺序 木炭/玉钢/冷却材/砥石），
@@ -540,8 +552,14 @@ class SmithMixin:
             yield f"[限锻] 第 {batch + 1}/{batches} 发十连，点火！"
             out = {"ok": False, "swords": [], "board_seen": False,
                    "uncertain": False}
+            from ..game_state import begin_operation, confirm_operation
+            boundary = begin_operation(self.maa)
             for msg in self._tenren_batch(cap, out):
                 yield msg
+            outcome = confirm_operation(self.maa, boundary, "forge_ten")
+            if outcome is not None:
+                out["ok"] = outcome
+                out["uncertain"] = False
             batch_swords = list(out["swords"])
             left_status = False
             if not out["ok"]:
@@ -624,17 +642,34 @@ class SmithMixin:
                 or sword.get("name") in watch_raw
                 or sword.get("name_jp") in watch_raw)
 
+    def _forge_events(self):
+        if not getattr(self.maa, "adb_address", None):
+            return []
+        from ..game_state import read_events
+        try:
+            return read_events(self.maa.adb_path, self.maa.adb_address)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return []
+
     def _read_capacity(self):
-        """读顶栏「所持刀剣 196 / 200」，返回 (当前, 上限)；读不出 None"""
+        """Use current game roster/limit; missing evidence falls back to the screen."""
+        from ..game_state import forge_capacity
+        capacity = forge_capacity(self._forge_events())
+        if capacity is not None:
+            return capacity
         tokens = self.maa.ocr_all(roi_4to4(*self._CAPACITY_ROI))
         m = re.search(r"(\d+)\s*/\s*(\d+)", "".join(str(t) for t, _ in tokens))
         return (int(m.group(1)), int(m.group(2))) if m else None
 
     def _read_sidebar_counts(self):
-        """状况页右侧栏读委托符/加速符库存 → {"委托符": n, "加速符": n}（读不出为 None）"""
-        self.maa.screenshot(force=True)
-        counts = {}
+        """Game balances first; OCR fills only missing ticket counts."""
+        from ..game_state import fresh_resources, resource_facts
+        resources = fresh_resources(resource_facts(self._forge_events()))
+        counts = {name: resources.get(name) for name, _ in self._SIDE_COUNT_ROIS}
         for name, roi in self._SIDE_COUNT_ROIS:
+            if counts[name] is not None:
+                continue
+            self.maa.screenshot(force=True)
             tokens = self.maa.ocr_all(roi_4to4(*roi))
             m = re.search(r"\d+", "".join(str(t) for t, _ in tokens))
             counts[name] = int(m.group()) if m else None

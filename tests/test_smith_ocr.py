@@ -214,6 +214,8 @@ class _LimitedForgeMaa:
         # 配比页四行当前值都是 700（与默认配方一致 → _apply_recipe 全部跳过）
         if 690 <= roi.to_list()[0] <= 700:
             return [("700", Point(800, 200))]
+        if roi.to_list() == [150, 150, 630, 110] and not self.popup:
+            return [("01:30:00", Point(400, 205))]
         return []
 
 

@@ -249,7 +249,8 @@ def begin_operation(maa):
 
 def operation_result(events, boundary, operation, serial=None):
     """True=confirmed, False=rejected, None=unknown; a click alone is never success."""
-    endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many"}.get(operation)
+    endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many",
+                "forge": "/forge/startmultiple", "forge_ten": "/forge/fastmultiple"}.get(operation)
     pending = []
     outcome = None
     for event in events:
@@ -289,6 +290,24 @@ def operation_result(events, boundary, operation, serial=None):
             continue
         request = pending.pop()
         params = request.get("payload") or {}
+        if operation in ("forge", "forge_ten"):
+            body = successful_body(event)
+            if body is None:
+                if (event.get("status", 0) >= 400 or isinstance(event.get("payload"), dict)
+                        and str(event["payload"].get("status", "0")) != "0"):
+                    outcome = False
+                continue
+            if operation == "forge":
+                slot = youzu_log._int(params.get("slot_no"))
+                recipe = [youzu_log._int(params.get(field), -1)
+                          for field in ("charcoal", "steel", "coolant", "file")]
+                outcome = ((slot == boundary.get("forge_slot")
+                            and recipe == boundary.get("forge_recipe"))
+                           if slot > 0 and all(value >= 0 for value in recipe) else None)
+            else:
+                count = youzu_log._int(body.get("finish_count"), -1)
+                outcome = count == 10 if count >= 0 else None
+            continue
         raw = params.get("material_serial_id" if operation == "union" else "serial_ids")
         ids = str(raw).split(",") if raw is not None else []
         if (not ids or len(set(ids)) != len(ids)
@@ -320,3 +339,71 @@ def confirm_operation(maa, boundary, operation, serial=None):
         return operation_result(read_events(maa.adb_path, maa.adb_address), boundary, operation, serial)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         return None
+
+
+def forge_capacity(events, *, now=None):
+    """Current forge roster/limit, with confirmed arrivals and consumed instances."""
+    now = time.time() if now is None else now
+    snapshots = [(youzu_log._event_epoch(e), i, successful_body(e))
+                 for i, e in enumerate(events) if e.get("endpoint") == "/forge"
+                 and successful_body(e) is not None]
+    snapshots = [(at, i, body) for at, i, body in snapshots if at is not None]
+    if not snapshots:
+        return None
+    observed, index, body = max(snapshots, key=lambda row: (row[0], row[1]))
+    raw_maximum = body.get("sword_max")
+    if isinstance(raw_maximum, bool) or isinstance(raw_maximum, float) and not raw_maximum.is_integer():
+        return None
+    maximum = youzu_log._int(raw_maximum, -1)
+
+    def members(rows):
+        if not isinstance(rows, dict):
+            return None
+        ids = {str(row.get("serial_id")) for row in rows.values() if isinstance(row, dict)}
+        return ids if len(ids) == len(rows) and all(s.isdigit() and int(s) > 0 for s in ids) else None
+
+    ids = members(body.get("sword"))
+    if ids is None or maximum <= 0:
+        return None
+    pending = {}
+    consume = {"/sword/dismantle_many": "serial_ids", "/composition/union": "material_serial_id",
+               "/composition/compose": "material_id"}
+    arrivals = {"/forge/complete", "/forge/completemultiple", "/forge/fastmultiple"}
+    for event in events[index + 1:]:
+        endpoint = event.get("endpoint")
+        if endpoint in consume and event.get("direction") == "C->S":
+            pending[endpoint] = None if endpoint in pending else event.get("payload")
+            continue
+        request = pending.pop(endpoint, None) if endpoint in consume and event.get("direction") == "S->C" else None
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        if body is None or at is None or at < observed:
+            continue
+        if endpoint in consume:
+            raw = request.get(consume[endpoint]) if isinstance(request, dict) else None
+            removed = str(raw).split(",") if raw is not None else []
+            if not removed or not all(s.isdigit() and int(s) > 0 for s in removed):
+                return None
+            ids.difference_update(removed)
+            observed = at
+        elif endpoint in arrivals:
+            rows = body.get("sword")
+            rows = [rows] if isinstance(rows, dict) else rows
+            if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) and r.get("serial_id") for r in rows):
+                return None
+            added = [str(row["serial_id"]) for row in rows]
+            if (len(set(added)) != len(added) or not all(s.isdigit() and int(s) > 0 for s in added)
+                    or youzu_log._int(body.get("finish_count"), len(added)) != len(added)):
+                return None
+            ids.update(added)
+            observed = at
+        elif endpoint in ("/party/list", "/sally"):
+            rows = body.get("sword") if "sword" in body else body.get("sword_all")
+            if rows is not None:
+                current = members(rows)
+                if current is None:
+                    return None
+                ids, observed = current, at
+        elif endpoint == "/shop/buy" or endpoint and endpoint.startswith(("/receive/", "/battle/")):
+            return None
+    return (len(ids), maximum) if 0 <= now - observed <= FACT_MAX_AGE else None
