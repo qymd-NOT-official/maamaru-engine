@@ -1,3 +1,4 @@
+import pytest
 import json
 import tempfile
 import unittest
@@ -580,6 +581,7 @@ class _FlowHost(RepairMixin):
     def _repair_one(self, cfg, name_y, need_speed):
         self.speed_calls.append(need_speed)
         yield "[手入] 已开工"
+        return True
 
 
 class SpeedupDecisionTests(unittest.TestCase):
@@ -834,3 +836,10 @@ class StalePopupRetryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.fixture(autouse=True)
+def confirmed_operations_for_accounting_tests(monkeypatch):
+    """Accounting tests assume a confirmed operation; outcome gates are tested separately."""
+    monkeypatch.setattr("touken.game_state.begin_operation", lambda maa: {})
+    monkeypatch.setattr("touken.game_state.confirm_operation", lambda *args: True)

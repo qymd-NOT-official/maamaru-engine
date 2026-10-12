@@ -164,12 +164,9 @@ class RepairMixin:
 
                 # ---- 真修 ----
                 yield f"[手入] {prefix} {std_name} → {tag}"
-                ok = False
-                for fix_msg in self._repair_one(cfg, name_y, need_speed):
-                    yield fix_msg
-                    if fix_msg.endswith("已开工"):
-                        ok = True
-                if ok:
+                self._repair_target_serial = serial
+                ok = yield from self._repair_one(cfg, name_y, need_speed)
+                if ok is True:
                     repaired += 1
                     self.last_repair_stats["repaired"] = repaired
                     if need_speed:
@@ -202,6 +199,8 @@ class RepairMixin:
                         return
                     break
                 else:
+                    if ok is None:
+                        return
                     yield f"[手入] {std_name} 没能修成，跳过它继续"
             else:
                 # 本页 5 行都处理完没被打断 → 翻页
@@ -375,6 +374,7 @@ class RepairMixin:
 
     def _repair_one(self, cfg, name_y: int, need_speed: bool):
         """点选择 → （可选）勾加速符 → 修复开始 → 确认"""
+        from ..game_state import begin_operation, confirm_operation
         sx = cfg["select_btn_x"]
         self.maa.click(Point(sx, name_y + cfg["select_offset_y"]))
         time.sleep(1.2)
@@ -400,7 +400,8 @@ class RepairMixin:
         start = self.maa.template_match(cfg["start_button"]["template"])
         if not start:
             yield "[手入] 找不到修复开始按钮"
-            return
+            return False
+        boundary = begin_operation(self.maa)
         self.maa.click(start)
         time.sleep(1.2)
 
@@ -413,8 +414,14 @@ class RepairMixin:
                 time.sleep(1.0)
                 break
 
+        confirmed = confirm_operation(self.maa, boundary, "repair",
+                                      getattr(self, "_repair_target_serial", None))
+        if confirmed is not True:
+            yield "[手入] 未确认手入结果，本次不再重复点击" if confirmed is None else "[手入] 手入失败：游戏拒绝本次操作，未开工"
+            return confirmed
         self._emit_repair_costs(costs, need_speed)
         yield "[手入] 已开工"
+        return True
 
     def _read_repair_costs(self, cfg):
         """OCR 选人界面左面板「所需资源」四个成本数字（黑框，顺序固定）。

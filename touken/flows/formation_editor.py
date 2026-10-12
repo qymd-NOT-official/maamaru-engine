@@ -900,15 +900,15 @@ class FormationEditorMixin:
 
         # 3) 换前观察：三态验收——确认是目标才零点击；证据不足不冒充正确，
         #    但可以继续打开名单寻找明确目标
-        team_before = self._formation_read_team()
-        slot_before = team_before[slot_no - 1] if team_before else None
-        if slot_before is None:
-            yield f"[编队] {slot_no}号位读不出（失明页？），停"
-            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
-                                "换前观察失败：整页读不出", entry_shell=shell)
         if client_serial is not None and not ranked:
             from ..selection_identity import client_events, identity_target, selected_serial, identity_unique
             events = client_events(self.maa)
+            # 进入编队时的完整回传已能确认现有成员；同一振再次点决定
+            # 不会产生 setsword，不能要求它晚于本槽换人流程的开始时间。
+            if selected_serial(events, team_no, slot_no, time.time() - 300) == client_serial:
+                yield f"[编队] {slot_no}号位客户端编号已是目标，无需换人"
+                return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
+                                    "本次客户端部队编号与目标一致", entry_shell=shell)
             evidence = identity_target(events, client_serial, time.time() - 300)
             if (not evidence or evidence['level'] is None or evidence['tou_level'] is None
                     or evidence['sword_catalog_id'] != tgt['sword_catalog_id']):
@@ -920,20 +920,20 @@ class FormationEditorMixin:
                                  ('name', 'level', 'tou_level', 'survival_max', 'recon')
                                  if field == 'name' or tgt.get(field) is not None)
             self._selection_identity_target = tgt
-            # 进入编队时的完整回传已能确认现有成员；同一振再次点决定
-            # 不会产生 setsword，不能要求它晚于本槽换人流程的开始时间。
-            if selected_serial(events, team_no, slot_no, time.time() - 300) == client_serial:
-                yield f"[编队] {slot_no}号位客户端编号已是目标，无需换人"
-                return self._finish(ALREADY_CORRECT, team_no, slot_no, tgt,
-                                    "本次客户端部队编号与目标一致", entry_shell=shell)
             if not identity_unique(events, client_serial, time.time() - 300):
                 yield '[编队] 客户端同名刀的可见数值无法区分，本次跳过，不扫描到底'
                 return self._finish(AMBIGUOUS, team_no, slot_no, tgt,
                                     '客户端身份数值不能唯一对应列表中的刀', entry_shell=shell)
+        team_before = None if client_serial is not None and not ranked else self._formation_read_team()
+        slot_before = team_before[slot_no - 1] if team_before else {}
+        if not slot_before and not (client_serial is not None and not ranked):
+            yield f"[编队] {slot_no}号位读不出（失明页？），停"
+            return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
+                                "换前观察失败：整页读不出", entry_shell=shell)
         m = slot_matches_target(slot_before, tgt, match_fields)
         nonlevel_fields = tuple(field for field in match_fields if field != "level")
         nonlevel_match = slot_matches_target(slot_before, tgt, nonlevel_fields)
-        if nonlevel_match is not False and tgt.get("observation_id"):
+        if client_serial is None and nonlevel_match is not False and tgt.get("observation_id"):
             link = self._formation_link_visible_slot(slot_no, slot_before)
             slot_before["visible_link"] = link
             m = (True if link.get("status") == "linked" and
@@ -948,7 +948,7 @@ class FormationEditorMixin:
                                 entry_shell=shell,
                                 before=slot_before,
                                 team_before=team_before)
-        if m is None:
+        if m is None and client_serial is None:
             yield (f"[编队] {slot_no}号位读数与目标不足以互相确认"
                    "（形态/等级/实例证据缺口），不能零点击宣称正确——"
                    "打开名单寻找明确目标")

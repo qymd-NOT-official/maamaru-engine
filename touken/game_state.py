@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
+import subprocess
 import threading
 import time
 
@@ -201,3 +204,119 @@ def filter_settlements(receipts, after, exclude=()):
         seen.add(key)
         result.append(receipt)
     return result
+
+
+def _request_key(event):
+    value = [event.get("endpoint"), event.get("ts"), event.get("payload")]
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _repair_entries(body):
+    rows = body.get("repair")
+    rows = rows.values() if isinstance(rows, dict) else rows if isinstance(rows, list) else ()
+    return {(str(row["serial_id"]), str(row["finished_at"])) for row in rows
+            if isinstance(row, dict) and row.get("serial_id")
+            and row.get("finished_at")}
+
+
+def begin_operation(maa):
+    """Capture the pre-click boundary; never change the game to obtain evidence."""
+    events = []
+    if getattr(maa, "adb_address", None):
+        try:
+            events = read_events(maa.adb_path, maa.adb_address)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            pass
+    repairs, repair_at = set(), None
+    for event in events:
+        body = successful_body(event)
+        if body is not None and "repair" in body:
+            repairs = _repair_entries(body)
+            repair_at = youzu_log._event_epoch(event)
+    now = time.time()
+    state = sword_facts(events)
+    swords = {serial: sword for serial, sword in state["swords"].items()
+              if serial in state["hp_times"]
+              and 0 <= now - state["hp_times"][serial][0] <= FACT_MAX_AGE
+              and state["hp_times"][serial][0] >= state["combat_at"]
+              and state["hp_times"][serial][1] >= state["combat_index"]}
+    return {"after": int(time.time()),
+            "requests": {_request_key(e) for e in events if e.get("direction") == "C->S"},
+            "repairs": repairs,
+            "repair_known": repair_at is not None and 0 <= now - repair_at <= FACT_MAX_AGE,
+            "swords": swords}
+
+
+def operation_result(events, boundary, operation, serial=None):
+    """True=confirmed, False=rejected, None=unknown; a click alone is never success."""
+    endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many"}.get(operation)
+    pending = []
+    outcome = None
+    for event in events:
+        at = youzu_log._event_epoch(event)
+        if at is None or at < boundary["after"]:
+            continue
+        if operation == "repair":
+            body = successful_body(event)
+            if body is None:
+                continue
+            added = _repair_entries(body) - boundary["repairs"]
+            if boundary.get("repair_known", False) and any(serial is None or member == str(serial) for member, _ in added):
+                return True
+            if serial is not None:
+                rows = body.get("sword") if "sword" in body else body.get("sword_all")
+                if isinstance(rows, dict) and "serial_id" in rows:
+                    rows = {str(rows["serial_id"]): rows}
+                row = rows.get(str(serial)) if isinstance(rows, dict) else None
+                old = boundary["swords"].get(str(serial), {})
+                if isinstance(row, dict) and "hp" in row:
+                    maximum = youzu_log._int(row.get("hp_max", old.get("hp_max")), 0)
+                    before = youzu_log._int(old.get("hp"), -1)
+                    if maximum > 0 and 0 <= before < maximum and youzu_log._int(row["hp"], -1) == maximum:
+                        return True
+            continue
+        if event.get("endpoint") != endpoint:
+            continue
+        if event.get("direction") == "C->S":
+            if _request_key(event) not in boundary["requests"]:
+                pending.append(event)
+            continue
+        if event.get("direction") != "S->C" or not pending:
+            continue
+        if len(pending) != 1:
+            pending.clear()
+            outcome = None
+            continue
+        request = pending.pop()
+        params = request.get("payload") or {}
+        raw = params.get("material_serial_id" if operation == "union" else "serial_ids")
+        ids = str(raw).split(",") if raw is not None else []
+        if (not ids or len(set(ids)) != len(ids)
+                or not all(value.isdigit() and int(value) > 0 for value in ids)):
+            continue
+        if operation == "union" and (youzu_log._int(params.get("base_serial_id")) <= 0
+                                     or str(params.get("base_serial_id")) in ids):
+            continue
+        body = successful_body(event)
+        if body is not None:
+            sword = body.get("sword")
+            if (operation == "union" and isinstance(sword, dict) and "serial_id" in sword
+                    and str(sword["serial_id"]) != str(params["base_serial_id"])):
+                outcome = None
+                continue
+            boundary["serial_ids"] = [int(value) for value in ids]
+            outcome = True
+        elif (event.get("status", 0) >= 400
+              or isinstance(event.get("payload"), dict) and "status" in event["payload"]
+              and str(event["payload"]["status"]) != "0"):
+            outcome = False
+    return outcome
+
+
+def confirm_operation(maa, boundary, operation, serial=None):
+    if not getattr(maa, "adb_address", None):
+        return None
+    try:
+        return operation_result(read_events(maa.adb_path, maa.adb_address), boundary, operation, serial)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return None

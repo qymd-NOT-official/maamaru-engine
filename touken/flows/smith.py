@@ -885,13 +885,20 @@ class SmithMixin:
             if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
                 yield "[刀解] 确认弹窗没出现，放弃"
                 return
+            from ..game_state import begin_operation, confirm_operation
+            boundary = begin_operation(self.maa)
             self.maa.click(Point(785, 630))  # 确认
             time.sleep(2.5)
-            dismantled += 1
+            outcome = confirm_operation(self.maa, boundary, "dismantle")
+            if outcome is not True:
+                yield "[刀解] 未确认刀解结果，本次停止，不再重复消耗刀剑" if outcome is None else "[刀解] 游戏拒绝本次刀解，本次停止"
+                return
+            dismantled += len(boundary.get("serial_ids", [None]))
             _mark_dismantled_today()
             if hasattr(self, "record_event"):
                 completed_id = self.record_event(
                     "dismantle.completed", sword=name,
+                    serial_ids=boundary.get("serial_ids"),
                     resource_preview=resource_preview)
                 self._emit_dismantle_resources(resource_preview, completed_id)
             yield f"[刀解] 分解完成: {name}（{dismantled}/{max_dismantle}）"

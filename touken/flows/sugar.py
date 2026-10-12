@@ -275,8 +275,17 @@ class SugarMixin:
                 in_materials = False
                 stalled += 1
                 continue
+            from ..game_state import begin_operation, confirm_operation
+            boundary = begin_operation(self.maa)
             self.maa.click(Point(785, 630))
 
+            outcome = confirm_operation(self.maa, boundary, "union")
+            if outcome is not True:
+                yield "[炼糖·习合] 未确认习合结果，本轮停止，不再重复消耗素材" if outcome is None else "[炼糖·习合] 游戏拒绝本次习合，本轮停止"
+                break
+            stalled = 0
+            successes += 1
+            yield f"[炼糖·习合] 完成第 {successes} 轮习合"
             for _ in range(12):
                 time.sleep(1.5)
                 self.maa.screenshot(force=True)
@@ -284,11 +293,8 @@ class SugarMixin:
                     break
                 self.maa.click(Point(290, 550))
             else:
-                yield "[炼糖·习合] 习合后一直回不到素材界面，本轮收工（这轮没计入成功）"
+                yield "[炼糖·习合] 习合已完成，但回不到素材界面，本轮收工"
                 break
-            stalled = 0
-            successes += 1
-            yield f"[炼糖·习合] 完成第 {successes} 轮习合"
             # 留在当前本体，下一轮继续一键选择，不往返本体列表。
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"

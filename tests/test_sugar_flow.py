@@ -81,6 +81,15 @@ class Flow(SugarMixin):
 
 
 class SugarFlowTests(unittest.TestCase):
+    def setUp(self):
+        # These tests cover UI transitions after an independently confirmed operation.
+        begin = patch("touken.game_state.begin_operation", return_value={})
+        confirm = patch("touken.game_state.confirm_operation", return_value=True)
+        begin.start()
+        confirm.start()
+        self.addCleanup(begin.stop)
+        self.addCleanup(confirm.stop)
+
     @patch("touken.flows.sugar.time.sleep")
     def test_feed_current_body_then_pick_next_without_name_filter(self, sleep):
         flow = Flow()
@@ -90,11 +99,11 @@ class SugarFlowTests(unittest.TestCase):
         self.assertIn("炼了 3 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
-    def test_animation_timeout_does_not_count_success(self, sleep):
+    def test_confirmed_operation_survives_animation_timeout(self, sleep):
         flow = Flow(timeout=True)
         messages = list(flow._shugo_loop_stream(False))
-        self.assertFalse(any("完成第" in message for message in messages))
-        self.assertIn("收工：炼了 0 轮", messages[-1])
+        self.assertTrue(any("完成第" in message for message in messages))
+        self.assertIn("收工：炼了 1 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
     def test_dry_run_does_not_feed(self, sleep):

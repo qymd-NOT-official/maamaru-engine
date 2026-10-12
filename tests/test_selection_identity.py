@@ -93,8 +93,9 @@ def test_existing_client_member_skips_replacement_without_new_set_response():
     evidence = {'sword_catalog_id': HASEBE, 'form': 'normal', 'level': 35, 'tou_level': 9}
     with patch('touken.selection_identity.client_events', return_value=[existing]), \
          patch('touken.selection_identity.youzu_log._event_epoch', side_effect=lambda e: e['epoch_test']), \
-         patch('touken.selection_identity.identity_target', return_value=evidence), \
-         patch.object(host, '_apply_list_filter', side_effect=AssertionError('already selected')):
+         patch('touken.selection_identity.identity_target', side_effect=AssertionError('serial already confirms member')), \
+         patch.object(host, '_apply_list_filter', side_effect=AssertionError('already selected')), \
+         patch.object(host, '_formation_read_team', side_effect=AssertionError('JSON already confirms member')):
         result = _run(host, target=_target(observation_id='youzu:456'))
     assert result['result'] == 'already_correct'
     cleared = event({'party': {'2': {'slot': {'3': {'serial_id': None}}}}}, '/party/dissolution', now-10)
@@ -121,6 +122,7 @@ def test_number_verification_failure_prevents_changed_result():
         maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
         read = host._read_list_page
         with patch.object(host, '_read_list_page', side_effect=enriched), \
+                patch.object(host, '_formation_read_team', side_effect=AssertionError('use client identity')), \
                 patch('touken.selection_identity.client_events', return_value=[]), \
                 patch('touken.selection_identity.identity_target', return_value=evidence), \
                 patch('touken.selection_identity.identity_unique', return_value=True), \
