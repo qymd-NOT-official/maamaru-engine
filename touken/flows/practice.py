@@ -10,7 +10,8 @@
   5. 出战用部队二（极短队），阵形选逆行阵（抢机动先手）
 
 技术要点（血泪校准）：
-  - 极短判定 = 名册刀种是短刀 + 机动 >= 100
+  - 游戏编号优先确定刀种与极化；以下机动判定仅用于画面回退：
+    名册刀种是短刀 + 机动 >= 100
     （普刀全数值封顶两位数；极短机动 110+，隔了一个数量级）
   - 极化樱花在情报界面会被白底肖像骗（一文字则宗的花瓣背景 0.84 误报），
     所以在情报界面不靠樱花，只信名册 + 机动
@@ -24,6 +25,7 @@ import time
 
 from ..maa_adapter import roi_4to4, Point
 from .. import sword_db
+from ..game_state import available_events, begin_operation, practice_list, practice_rank, practice_receipt, practice_members
 
 # 情报界面 6 个成员行的图标中心 y
 _ROW_CY = [152, 246, 340, 434, 528, 622]
@@ -43,7 +45,7 @@ class PracticeMixin:
                         team_no: int = None, formation_mode: str = None,
                         formation: str = None):
         """
-        流式演练：扫描 5 个对手，逐个认人，挑软柿子打
+        流式演练：扫描 5 个对手，逐个读取阵容，挑软柿子打
 
         Args:
             dry_run: True=只认人报决策，不动手（认人考试模式）
@@ -81,6 +83,7 @@ class PracticeMixin:
         # 游戏会把本轮已经打过的结果章一直留在五名对手的行末。它比本地
         # 时间/进程记录更可靠：3 点、15 点换一批对手时，章也会自然清空。
         # 先把已有胜场算进去，避免同一刷新周期内二次触发又从 0 开始打。
+        self._practice_rows = practice_list(available_events(self.maa))
         existing_results = self._scan_existing_results()
         existing_wins = sum(result.startswith("win")
                             for result in existing_results.values())
@@ -135,8 +138,13 @@ class PracticeMixin:
             if wins >= max_wins:
                 break
             # 扫描阶段已经退回列表；开战前重新进入该对手情报页。
-            if self._inspect_opponent(row_idx) is None:
+            current = self._inspect_opponent(row_idx)
+            if current is None:
                 yield f"[演练] 对手{row_idx + 1}: 再次进入失败，跳过"
+                continue
+            if self._judge(current["members"])[0] != "打":
+                yield f"[演练] 对手{row_idx + 1}: 当前阵容不适合挑战，跳过"
+                self._back_to_list()
                 continue
             result = yield from self._fight_one(cfg, row_idx)
             won = result.startswith("win")
@@ -168,8 +176,17 @@ class PracticeMixin:
         这里只认明确的“胜利/败北”文字；OCR 不清时宁可不计，不能把一个
         仍可挑战的对手误当成已经获胜。
         """
+        rows = getattr(self, "_practice_rows", None)
         results = {}
         for i, cy in enumerate(_LIST_CY):
+            if rows is not None:
+                rank = rows[i]["rank"]
+                if str(rank) == "0":
+                    continue
+                known = practice_rank(rank)
+                if known is not None:
+                    results[i] = known
+                    continue
             tokens = self.maa.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
             text = "".join(t for t, _ in tokens)
             if "胜利" in text:
@@ -180,6 +197,9 @@ class PracticeMixin:
 
     def _scan_list_order(self):
         """返回扫描顺序（行号列表）：没打过的行才扫，队长没樱花的优先"""
+        rows = getattr(self, "_practice_rows", None)
+        if rows is not None:
+            return [i for i in range(5) if str(rows[i]["rank"]) == "0"]
         no_sakura, has_sakura = [], []
         for i, cy in enumerate(_LIST_CY):
             # 打过的行没有挑战按钮（盖着结算章），直接跳过
@@ -220,12 +240,24 @@ class PracticeMixin:
             {"title": 对手名, "members": [...]} 或 None（没进去）
         """
         cy = _LIST_CY[row_idx]
+        boundary = begin_operation(self.maa)
         self.maa.click(Point(190, cy))  # 队长卡
         time.sleep(2.5)
         self.maa.screenshot(force=True)
         if not self.maa.ocr("演练对手情报", roi_4to4(450, 10, 830, 60)):
             return None
 
+        rows = getattr(self, "_practice_rows", None)
+        enemy = rows[row_idx]["enemy_id"] if rows else None
+        body = practice_receipt(available_events(self.maa), boundary, "/practice/offer", enemy, "enemy_id")
+        if body is False:
+            return None
+        if isinstance(body, dict):
+            members = practice_members(body)
+            if members is not None:
+                self._practice_enemy_id = boundary.get("practice_enemy_id", enemy)
+                return {"title": rows[row_idx]["title"] if rows else "对手", "members": members}
+        self._practice_enemy_id = boundary.get("practice_enemy_id", enemy)
         # 对手名（审神者 xxx级 名字）
         title_tokens = self.maa.ocr_all(roi_4to4(400, 90, 750, 120))
         title = " ".join(t for t, _ in title_tokens)
@@ -246,11 +278,11 @@ class PracticeMixin:
         """
         name_tokens = self.maa.ocr_all(roi_4to4(95, cy + 38, 250, cy + 65))
         if not name_tokens:
-            return None
+            return {"name": "未识别成员", "type": "未知", "mobility": None, "id": None}
         # 取最长 token 当名字（防碎字）
         raw = max((t for t, _ in name_tokens), key=len)
         if len(raw) < 2:
-            return None
+            return {"name": "未识别成员", "type": "未知", "mobility": None, "id": None}
 
         found = sword_db.find_by_name(raw)
         if not found:
@@ -306,11 +338,8 @@ class PracticeMixin:
                 dodge.append(f"有丙子椒林剑（第1出手无效，无解）")
             if m["type"] == "短刀":
                 mob = m.get("mobility")
-                if mob is None:
+                if mob is None and "extreme" not in m:
                     dodge.append(f"{m['name']}是短刀但机动读不出，当极短处理")
-                elif mob >= 100:
-                    # 极短不再一票否决；五队都有极短时仍要比较出相对最弱者。
-                    pass
             if m["type"] == "未知":
                 dodge.append(f"{m['name']} 名册查无此人，认不清不敢打")
 
@@ -323,7 +352,7 @@ class PracticeMixin:
         else:
             extreme_count = sum(
                 1 for m in members
-                if m.get("type") == "短刀" and (m.get("mobility") or 0) >= 100
+                if m.get("type") == "短刀" and m.get("extreme", (m.get("mobility") or 0) >= 100)
             )
             reasons.append(
                 f"满编队，检测到{extreme_count}把极短，加入候选后统一比强度"
@@ -336,7 +365,7 @@ class PracticeMixin:
         levels = [m["level"] for m in members if m.get("level") is not None]
         average_level = (sum(levels) / len(levels)) if levels else 999.0
         extreme = [m for m in members
-                   if m.get("type") == "短刀" and (m.get("mobility") or 0) >= 100]
+                   if m.get("type") == "短刀" and m.get("extreme", (m.get("mobility") or 0) >= 100)]
         strongest_mobility = max((m.get("mobility") or 999 for m in extreme), default=0)
         strongest_level = max((m.get("level") or 999 for m in extreme), default=0)
         return (len(members), len(extreme), strongest_mobility,
@@ -372,6 +401,7 @@ class PracticeMixin:
         formation_mode = cfg.get("formation_mode", "manual")
         yield f"[演练] 动手！（部队{_CN_NUM.get(team_no, team_no)}，{formation}）"
 
+        boundary = begin_operation(self.maa)
         # ---- 部队选择 ----
         self.maa.click(Point(1200, 630))  # 进入演练
         time.sleep(2.5)
@@ -431,10 +461,22 @@ class PracticeMixin:
             time.sleep(3.0)
         else:
             yield "[演练] 等战斗结束超时"
+            body = practice_receipt(available_events(self.maa), boundary, "/battle/practicebattle",
+                                    getattr(self, "_practice_enemy_id", None), "enemy_user_id")
+            if isinstance(body, dict):
+                return practice_rank((body.get("result") or {}).get("rank")) or "unknown"
             return "unknown"
 
         # ---- 读结算章 ----
         time.sleep(1.0)
+        body = practice_receipt(available_events(self.maa), boundary, "/battle/practicebattle",
+                                getattr(self, "_practice_enemy_id", None), "enemy_user_id")
+        if body is False:
+            return "unknown"
+        if isinstance(body, dict):
+            result = practice_rank((body.get("result") or {}).get("rank"))
+            if result is not None:
+                return result
         return self._read_result(row_idx)
 
     def _read_result(self, row_idx: int):

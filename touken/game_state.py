@@ -532,3 +532,141 @@ def team_member_matches(events, team, slot, expected, *, now=None):
         return None
     found = sword_db.find_game_sword(youzu_log._int(sword.get("sword_id")))
     return found[0] == expected["sword_catalog_id"] if found else None
+
+
+def practice_rank(rank):
+    """Only calibrated CN ranks; other grades keep their screen fallback."""
+    # CN rank 2 matched to the same battle's recorded victory stamp (2026-10-07).
+    return "win" if str(rank) == "2" else None
+
+
+def practice_list(events, *, now=None):
+    now = time.time() if now is None else now
+    def period(at):
+        return int((at + 5 * 3600) // (12 * 3600))  # CN refresh at 03:00 / 15:00 (+08).
+    for event in reversed(events):
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        if body is None or event.get("endpoint") != "/practice":
+            continue
+        if at is None or not 0 <= now - at <= FACT_MAX_AGE or period(at) != period(now):
+            return None
+        rows = body.get("summary")
+        if not isinstance(rows, dict) or set(rows) != set("12345"):
+            return None
+        if not all(isinstance(r, dict) and youzu_log._int(r.get("enemy_id")) > 0 and "rank" in r for r in rows.values()):
+            return None
+        result = {int(k)-1: {"enemy_id": str(r["enemy_id"]), "title": str(r.get("name") or ""),
+                            "rank": r["rank"]} for k,r in rows.items()}
+        boundary = {"after": at, "requests": set()}
+        subsequent = events[events.index(event)+1:]
+        for row in result.values():
+            receipt = practice_receipt(subsequent, boundary, "/battle/practicebattle", row["enemy_id"], "enemy_user_id", ignore_other=True)
+            if isinstance(receipt, dict) and isinstance(receipt.get("result"), dict) and "rank" in receipt["result"]:
+                row["rank"] = receipt["result"]["rank"]
+        return result
+    return None
+
+
+def practice_receipt(events, boundary, endpoint, enemy_id, parameter, *, ignore_other=False):
+    pending = []
+    result = None
+    for event in events:
+        at = youzu_log._event_epoch(event)
+        if event.get("endpoint") != endpoint or at is None or at < boundary["after"]:
+            continue
+        if event.get("direction") == "C->S":
+            if _request_key(event) not in boundary["requests"]:
+                pending.append(event)
+            continue
+        if event.get("direction") != "S->C" or not pending:
+            continue
+        if len(pending) != 1:
+            pending.clear()
+            result = None
+            continue
+        request = pending.pop()
+        if enemy_id is not None and str((request.get("payload") or {}).get(parameter)) != str(enemy_id):
+            if not ignore_other:
+                result = False
+            continue
+        body = successful_body(event)
+        if body is not None:
+            boundary["practice_enemy_id"] = (request.get("payload") or {}).get(parameter)
+            result = body
+        elif event.get("status", 0) >= 400 or isinstance(event.get("payload"), dict) and "status" in event["payload"] and str(event["payload"]["status"]) != "0":
+            result = False
+    return result
+
+
+def practice_members(body):
+    from . import sword_db
+    rows = body.get("enemy_sword")
+    parties = body.get("enemy_party")
+    party = parties.get("1") if isinstance(parties, dict) else None
+    slots = party.get("slot") if isinstance(party, dict) else None
+    if not isinstance(rows, dict) or not isinstance(slots, dict) or set(slots) != set("123456"):
+        return None
+    members = []
+    seen = set()
+    for slot in map(str, range(1,7)):
+        entry = slots[slot]
+        if not isinstance(entry, dict) or "serial_id" not in entry:
+            return None
+        serial = entry["serial_id"]
+        if serial in (None, 0, "0", ""):
+            continue
+        if str(serial) in seen:
+            return None
+        seen.add(str(serial))
+        row = rows.get(str(serial))
+        if not isinstance(row, dict) or "serial_id" in row and str(row["serial_id"]) != str(serial):
+            return None
+        found = sword_db.find_game_sword(youzu_log._int(row.get("sword_id")))
+        if not found:
+            members.append({"name": "未识别成员", "type": "未知", "id": None, "mobility": None, "level": None})
+            continue
+        sid, info, form = found
+        mobile = youzu_log._int(row.get("mobile"), None)
+        members.append({"id": sid, "name": info.get("name_zh") or info["name"],
+                        "type": info.get("type", "未知"), "level": youzu_log._int(row.get("level"), None),
+                        "mobility": mobile, "extreme": form == "kiwame"})
+    return members
+
+
+def furnace_facts(events, *, now=None):
+    from datetime import datetime, timedelta, timezone
+    now = time.time() if now is None else now
+    for event in reversed(events):
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        if body is None:
+            continue
+        endpoint = event.get("endpoint") or ""
+        if endpoint.startswith("/forge/") and "forge" not in body:
+            return None
+        if (endpoint not in ("/home/situation", "/forge") and not endpoint.startswith("/forge/")) or "forge" not in body:
+            continue
+        if at is None or not 0 <= now - at <= FACT_MAX_AGE or not isinstance(body["forge"], dict):
+            return None
+        result = []
+        for slot, row in body["forge"].items():
+            if not isinstance(row, dict) or "finished_at" not in row:
+                return None
+            finish = row["finished_at"]
+            state, remain = "空闲中", None
+            if finish:
+                try:
+                    end = datetime.strptime(str(finish), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone(timedelta(hours=8))).timestamp()
+                except ValueError:
+                    return None
+                left = max(0, int(end-now))
+                state = "锻造中" if left else "完成"
+                if left:
+                    remain = f"{left//3600}:{left%3600//60:02d}:{left%60:02d}"
+            number = youzu_log._int(row.get("slot_no", slot))
+            if number <= 0 or number in [r["slot"] for r in result]:
+                return None
+            result.append({"slot": number, "state": state, "remain": remain})
+        return sorted(result, key=lambda r:r["slot"]) or None
+    return None

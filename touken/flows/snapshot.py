@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-上层业务：库存快照——日课收尾时把家底 OCR 一遍落盘，给看板吃
+上层业务：库存快照——日课收尾优先同步游戏数据，缺字段时读画面补齐
 
 抓什么：
   锻刀界面：顶栏整条 木炭/玉钢/冷却材/砥石/甲州金（按 x 顺序认）
@@ -26,6 +26,7 @@ from pathlib import Path
 from ..runtime_paths import STATUS_DIR
 
 from ..maa_adapter import roi_4to4
+from ..game_state import available_events, resource_facts, fresh_resources, RESOURCE_NAMES, forge_capacity, furnace_facts
 
 _STATUS_DIR = STATUS_DIR
 _SLOT_CY = [205, 345, 475]
@@ -59,11 +60,18 @@ class SnapshotMixin:
 
     def status_snapshot_stream(self, phase=None):
         """
-        流式库存快照：导航锻刀 → OCR 家底 → 落盘 status/inventory.json
+        流式库存快照：游戏数据优先，缺数据才导航盘点，沿用 status/inventory.json
 
         Yields:
             str: 执行状态消息
         """
+        events = available_events(self.maa)
+        resources = fresh_resources(resource_facts(events))
+        if RESOURCE_NAMES.issubset(resources):
+            capacity = forge_capacity(events)
+            yield from self._save_inventory(resources, f"{capacity[0]}/{capacity[1]}" if capacity else None,
+                                            furnace_facts(events) or [], phase)
+            return
         # 收工回城可能在长时间挂机后加载几十秒。即使战斗流程自己的回城
         # 确认先超时了，盘点也要独立等到目录真正可用，不能马上撞导航失败。
         if phase == "after":
@@ -99,18 +107,25 @@ class SnapshotMixin:
         家底拍摄核心：人已经站在锻刀页面上时直接调（零导航）。
         锻刀步骤收工时被顺手调用，免了专程跑一趟（7-27 日课超时两次的教训）。
         """
+        events = available_events(self.maa)
+        resources = fresh_resources(resource_facts(events))
+        if RESOURCE_NAMES.issubset(resources):
+            capacity = forge_capacity(events)
+            yield from self._save_inventory(resources, f"{capacity[0]}/{capacity[1]}" if capacity else None,
+                                            furnace_facts(events) or [], phase)
+            return
         time.sleep(1.5)
         self.maa.screenshot(force=True)
 
         # ---- 顶栏五资源：整条 OCR，数字按 x 升序对应 木炭/玉钢/冷却材/砥石/甲州金 ----
-        tokens = self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+        tokens = [] if set(_RES_NAMES).issubset(resources) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
         nums = sorted(
             ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
             key=lambda p: p[1])
-        resources = {}
         for i, name in enumerate(_RES_NAMES):
-            resources[name] = _to_int(nums[i][0]) if i < len(nums) else None
-        if len(nums) < 5:
+            if name not in resources:
+                resources[name] = _to_int(nums[i][0]) if len(nums) == 5 else None
+        if len(nums) < 5 and any(resources.get(name) is None for name in _RES_NAMES):
             yield f"[快照] 顶栏只读出 {len(nums)}/5 个数字，部分资源缺失"
 
         # ---- 右栏：委托符/加速符/所持 ----
@@ -122,19 +137,23 @@ class SnapshotMixin:
                     return v
             return None
 
-        resources["委托符"] = first_number((1145, 355, 1255, 390))
-        resources["加速符"] = first_number((1145, 510, 1255, 550))
+        if "委托符" not in resources:
+            resources["委托符"] = first_number((1145, 355, 1255, 390))
+        if "加速符" not in resources:
+            resources["加速符"] = first_number((1145, 510, 1255, 550))
 
-        doko = None
-        ts = self.maa.ocr_all(roi_4to4(840, 45, 1080, 85))
+        capacity = forge_capacity(events)
+        doko = f"{capacity[0]}/{capacity[1]}" if capacity else None
+        ts = [] if doko is not None else self.maa.ocr_all(roi_4to4(840, 45, 1080, 85))
         # OCR 会在数字间吃出杂物（"200./200"），允许斜杠两边夹非数字
         m = re.search(r"(\d+)\D{0,3}/\D{0,2}(\d+)", "".join(t for t, _ in ts))
-        if m:
+        if m and doko is None:
             doko = f"{m.group(1)}/{m.group(2)}"
 
         # ---- 三炉状态 ----
         furnaces = []
-        for i, cy in enumerate(_SLOT_CY, 1):
+        game_furnaces = furnace_facts(events)
+        for i, cy in (() if game_furnaces is not None else enumerate(_SLOT_CY, 1)):
             ts = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             text = "".join(t for t, _ in ts)
             if "完成" in text:
@@ -142,17 +161,23 @@ class SnapshotMixin:
             elif "空闲" in text:
                 furnaces.append({"slot": i, "state": "空闲中", "remain": None})
             else:
-                furnaces.append({"slot": i, "state": "锻造中",
-                                 "remain": _parse_furnace_remain(text)})
+                remain = _parse_furnace_remain(text)
+                furnaces.append({"slot": i, "state": "锻造中" if remain else "未知",
+                                 "remain": remain})
 
         # ---- 所持道具界面读真小判（顶栏那个是甲州金，真小判只在这看）----
-        koban = self._read_koban()
-        self._last_full_snapshot_complete = koban is not None
+        koban = resources.get("小判")
+        if koban is None:
+            koban = self._read_koban()
         if koban is not None:
             resources["小判"] = koban
         else:
             yield "[快照] 小判读取失败（不影响其他数据）"
 
+        yield from self._save_inventory(resources, doko, game_furnaces if game_furnaces is not None else furnaces, phase)
+
+    def _save_inventory(self, resources, doko, furnaces, phase):
+        self._last_full_snapshot_complete = resources.get("小判") is not None
         payload = {
             "captured_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "phase": phase,
@@ -172,6 +197,9 @@ class SnapshotMixin:
 
     def _read_koban(self):
         """目录→所持道具→右上 OCR 所持小判。失败返回 None，绝不抛异常。"""
+        known = fresh_resources(resource_facts(available_events(self.maa))).get("小判")
+        if known is not None:
+            return known
         opened_items = False
         try:
             # 打开目录
@@ -232,17 +260,18 @@ class SnapshotMixin:
             now = time.monotonic()
             if not force and now - getattr(self, "_last_peek", 0.0) < self.PEEK_INTERVAL_S:
                 return False
-            tokens = self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+            known = fresh_resources(resource_facts(available_events(self.maa)))
+            tokens = [] if set(_RES_NAMES).issubset(known) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
             nums = sorted(
                 ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
                 key=lambda p: p[1])
-            if len(nums) < 4:
+            if len(nums) != 5 and not known:
                 return False
             self._last_peek = now
 
-            peeked = {}
+            peeked = dict(known)
             for i, name in enumerate(_RES_NAMES):
-                if i < len(nums):
+                if len(nums) == 5 and name not in peeked:
                     v = _to_int(nums[i][0])
                     if v is not None:
                         peeked[name] = v
