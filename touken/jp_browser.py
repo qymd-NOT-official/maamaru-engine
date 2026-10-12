@@ -93,6 +93,20 @@ class JpBrowser:
             raise BrowserError('游戏窗口尺寸已变化，已停止操作；请恢复窗口后重新开始')
         return current
 
+    def _send(self, method: str, params: dict | None = None) -> None:
+        """只发不等应答（ack 进 backlog，后续 _call 会自动收掉）。
+
+        输入通道专用：游戏嵌在跨源 iframe 里，熄屏/后台时 dispatch 的应答
+        会被浏览器压到 5 秒后才回，但事件本身即刻送达——等 ack 纯属自残。
+        """
+        if self._socket is None:
+            raise BrowserError('尚未连接游戏页面')
+        try:
+            self._socket.send(method, params or {})
+        except ConnectionError:
+            self.close()
+            raise BrowserError('与游戏页面的连接已断开，请确认浏览器仍在运行')
+
     # ---- 画面与输入 ----
 
     def screenshot(self):
@@ -107,7 +121,7 @@ class JpBrowser:
             return picture.convert('RGB')
 
     def click(self, nx: float, ny: float, settle: float = 0.1) -> None:
-        """按画面归一化坐标点击一次（移动-按下-松开完整序列）。"""
+        """按画面归一化坐标点击一次（移动-按下-松开完整序列，只发不等应答）。"""
         if (isinstance(nx, bool) or isinstance(ny, bool)
                 or not isinstance(nx, (int, float)) or not isinstance(ny, (int, float))
                 or not (0 < nx < 1 and 0 < ny < 1)):
@@ -115,13 +129,21 @@ class JpBrowser:
         view = self.check_view()
         point = {'x': nx * view['clientWidth'], 'y': ny * view['clientHeight'],
                  'button': 'left', 'clickCount': 1}
-        self._call('Input.dispatchMouseEvent',
+        self._send('Input.dispatchMouseEvent',
                    {**point, 'type': 'mouseMoved', 'button': 'none', 'buttons': 0})
         time.sleep(settle)
+        error = None
         try:
-            self._call('Input.dispatchMouseEvent',
+            self._send('Input.dispatchMouseEvent',
                        {**point, 'type': 'mousePressed', 'buttons': 1})
             time.sleep(settle)
+        except BrowserError as exc:
+            error = exc
         finally:
-            self._call('Input.dispatchMouseEvent',
-                       {**point, 'type': 'mouseReleased', 'buttons': 0})
+            try:
+                self._send('Input.dispatchMouseEvent',
+                           {**point, 'type': 'mouseReleased', 'buttons': 0})
+            except BrowserError:
+                pass  # 松开是善后，连接已死时不盖掉按下的原始错误
+        if error:
+            raise error

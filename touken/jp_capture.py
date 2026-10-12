@@ -25,6 +25,8 @@ def capture(label: str) -> dict:
     with jp_browser.JpBrowser() as browser:
         image = browser.screenshot()
         view = browser.base_view or {}
+    if jp_vision.base_size() == jp_vision.FALLBACK_BASE:
+        jp_vision.lock_base_size(image.width, image.height)
     directory = frames.JP_DATA_DIR / 'debug' / 'frames'
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{label}-{time.strftime('%Y%m%d-%H%M%S')}.png"

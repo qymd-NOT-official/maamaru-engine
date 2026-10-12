@@ -31,13 +31,18 @@ class FakeSocket:
         if self.broken:
             raise ConnectionError('CDP 连接已断开')
         self.calls.append((method, params or {}))
-        if self.fail_on and (params or {}).get('type') == self.fail_on:
-            raise TimeoutError()
         if method == 'Page.getLayoutMetrics':
             return {'cssLayoutViewport': dict(self.state['view'])}
         if method == 'Page.captureScreenshot':
             return {'data': _png_b64()}
         return {}
+
+    def send(self, method, params=None):
+        if self.broken:
+            raise ConnectionError('CDP 连接已断开')
+        self.calls.append((method, params or {}))
+        if self.fail_on and (params or {}).get('type') == self.fail_on:
+            raise ConnectionError('CDP 连接已断开')
 
     def close(self):
         self.closed = True
@@ -107,15 +112,17 @@ def test_click_rejects_point_outside_frame(fake, x, y):
         browser.click(x, y)
 
 
-def test_press_failure_still_releases_button(fake):
+def test_press_failure_surfaces_original_error(fake):
     browser = jp_browser.JpBrowser().connect()
     socket = fake['sockets'][0]
     socket.fail_on = 'mousePressed'
-    with pytest.raises(TimeoutError):
+    with pytest.raises(jp_browser.BrowserError, match='连接已断开'):
         browser.click(.5, .5)
     events = [params['type'] for method, params in socket.calls
               if method == 'Input.dispatchMouseEvent']
-    assert events == ['mouseMoved', 'mousePressed', 'mouseReleased']
+    # 连接已死，松开只能尽力而为；关键是不盖掉按下的原始错误
+    assert events == ['mouseMoved', 'mousePressed']
+    assert socket.closed
 
 
 def test_connection_drop_becomes_readable_error(fake):

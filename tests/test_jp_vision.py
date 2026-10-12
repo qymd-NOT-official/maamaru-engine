@@ -5,6 +5,11 @@ from touken import jp_vision
 pytest.importorskip('cv2')
 
 
+@pytest.fixture(autouse=True)
+def isolated_baseline(monkeypatch, tmp_path):
+    monkeypatch.setattr(jp_vision, '_baseline_path', lambda: tmp_path / 'vision.json')
+
+
 @pytest.fixture
 def scene():
     """1280x720 密集噪声底 + 一块有内部结构的醒目矩形作为「按钮」。

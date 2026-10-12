@@ -13,8 +13,35 @@ from typing import NamedTuple
 from .runtime_paths import RESOURCE_DIR
 
 TEMPLATE_DIR = RESOURCE_DIR / 'image' / 'jp'
-BASE_SIZE = (1280, 720)  # 标定基准（宽, 高）；P1 标定时锁死，出阵前校验画面同比例
+FALLBACK_BASE = (1280, 720)
 DEFAULT_THRESHOLD = 0.85
+
+
+def _baseline_path():
+    from .runtime_paths import JP_DATA_DIR
+    return JP_DATA_DIR / 'vision.json'
+
+
+def base_size() -> tuple[int, int]:
+    """标定基准分辨率（宽, 高）：优先读 jp_capture 标定时锁存的值。"""
+    import json
+    try:
+        data = json.loads(_baseline_path().read_text(encoding='utf-8'))
+        w, h = data['base']
+        if w > 0 and h > 0:
+            return (w, h)
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return FALLBACK_BASE
+
+
+def lock_base_size(width: int, height: int) -> None:
+    """标定采集时锁存基准分辨率；之后窗口尺寸变了会被出阵熔断拦住。"""
+    import json
+    path = _baseline_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'base': [width, height]}, ensure_ascii=False),
+                    encoding='utf-8')
 
 
 class TemplateNotFound(FileNotFoundError):
@@ -42,7 +69,8 @@ def load_template(name: str):
         return picture.convert('RGB')
 
 
-def normalize_frame(image, base: tuple[int, int] = BASE_SIZE):
+def normalize_frame(image, base: tuple[int, int] | None = None):
+    base = base or base_size()
     """把运行帧缩到基准分辨率；已是基准尺寸则原样返回。"""
     if image.size == tuple(base):
         return image
@@ -107,7 +135,8 @@ def matches(frame, names: list[str],
     return found
 
 
-def base_size_ok(image, base: tuple[int, int] = BASE_SIZE, tolerance: float = 0.02) -> bool:
+def base_size_ok(image, base: tuple[int, int] | None = None, tolerance: float = 0.02) -> bool:
+    base = base or base_size()
     """画面宽高比与基准一致才允许跑（窗口拖变形了模板会全线漂移）。"""
     w, h = image.size
     if w <= 0 or h <= 0:
