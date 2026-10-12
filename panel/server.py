@@ -580,14 +580,6 @@ def _resolve_team(params, default=3) -> tuple[int | None, dict | None, str | Non
     return _i(params, "team_no", default), None, None
 
 
-def _preset_busy_by_schedule(team_no: int) -> bool:
-    """预设要覆盖的队正被排班托管、且当前还在外面远征 → 别去动它。"""
-    from .scheduler import expedition_records, load_config, managed_teams, team_available
-    cfg = load_config()
-    return (team_no in managed_teams(cfg)
-            and not team_available(team_no, expedition_records(), time.time()))
-
-
 def _team_with_preset_stream(agent, params, default=3):
     """玩法 builder 共用的部队解析：选了预设就先把它套进游戏再出阵。
     返回解析后的 team_no；被拒/应用失败时已如实播报并返回 None。"""
@@ -597,11 +589,6 @@ def _team_with_preset_stream(agent, params, default=3):
         return None
     if preset is not None:
         from touken.custom_formations import apply_formation_preset_stream
-        from .scheduler import TEAM_NAMES
-        if _preset_busy_by_schedule(team_no):
-            yield (f"[预设编队] {TEAM_NAMES.get(team_no, f'部队{team_no}')}"
-                   "正被远征排班用着，无法覆盖；换个队覆盖，或去排班那里调整")
-            return None
         ok = yield from apply_formation_preset_stream(agent, preset)
         if not ok:
             return None
@@ -807,7 +794,7 @@ def _dispatch_failure_detail(message: str) -> str:
 
 
 def _build_dispatch(agent, config_path, params):
-    """排班派遣：刷新结算；临近归来最多等十分钟；绝不启动模拟器。
+    """领取当前归来奖励，再按游戏实际情况派遣。
 
     scheduled（排班触发）先过接管门卫：只读认当前位置，认得出本丸才继续；
     认不出（战斗中/未知界面 = 多半主人在手动玩）写 refused 结果文件后正常退出。
@@ -828,19 +815,6 @@ def _build_dispatch(agent, config_path, params):
             _write_dispatch_result(slot_key, "refused", detail)
             yield f"[远征] {detail}，这班交回排班"
             return
-    records = _read_expedition_records()
-    remain = _expedition_remaining(records.get(str(team_no), {}))
-    if params.get("scheduled") and remain > 0:
-        _write_dispatch_result(slot_key, "refused", "队伍仍在外面远征")
-        yield "[远征] 队伍仍在外面，交回排班等待，不占用任务位置"
-        return
-    if remain > 600:
-        yield f"[远征] 部队{team_no}还剩 {remain // 60} 分钟，超过十分钟，本次跳过"
-        return
-    while remain > 0:
-        yield f"[远征等待] 部队{team_no}还剩 {remain // 60:02d}:{remain % 60:02d}（紧急停止可取消）"
-        time.sleep(min(5, remain))
-        remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
     yield from agent.collect_expedition_stream(redispatch=None)
     # 历史派遣记录用于估计归来时间，不能要求额外的收菜记录才能开工。
     # 收菜后由远征流程检查游戏里的队伍、重伤、开始按钮与出发结果。
@@ -894,7 +868,7 @@ def _build_dispatch(agent, config_path, params):
         terminal = dispatch_messages[-1] if dispatch_messages else ""
         if "✅" in terminal and "已出发" in terminal:
             _write_dispatch_result(slot_key, "done", "已看到部队出发")
-            # 确认仍以 expeditions.json 的 dispatched_at 变化为准，结果文件只是辅助
+            # 出发确认即完成；派遣记录用于倒计时，不再要求之后的收菜记录。
         else:
             # 流程自己已经明确停下时，不能再伪装成「流程走完」交给排班反复重试。
             # 这里保留最后一句具体原因，排班将本班终止并醒目提醒玩家。
@@ -921,7 +895,7 @@ def _read_expedition_records() -> dict:
 
 
 def _build_expedition_manager(agent, config_path, params):
-    """收取归来队伍，最多等十分钟，再按“常用安排”派遣。"""
+    """收取当前归来奖励，再按“常用安排”尝试派遣；不按旧记录等待。"""
     from .scheduler import find_map, load_config, managed_teams
 
     plan = [p for p in (params["_routes"] if "_routes" in params else load_config().get("common_plan", []))
@@ -936,44 +910,8 @@ def _build_expedition_manager(agent, config_path, params):
     if not (yield from recover_stream(agent)):
         return
 
-    records = _read_expedition_records()
-    waitable = []
-    skipped = set()
     for row in plan:
         team = str(row["team_no"])
-        remain = _expedition_remaining(records.get(team, {})) if team in records else 0
-        if 0 < remain <= 600:
-            waitable.append((team, remain))
-            yield f"[远征管理] 部队{team}还剩 {remain // 60}分{remain % 60:02d}秒，进入等待"
-        elif remain > 600:
-            skipped.add(team)
-            yield (f"[远征管理] 部队{team}还剩 {remain // 60}分{remain % 60:02d}秒，"
-                   "超过十分钟，本次跳过")
-        else:
-            yield f"[远征管理] 部队{team}已归来或空闲，可以派遣"
-
-    if waitable:
-        deadline = time.time() + max(remain for _, remain in waitable)
-        while time.time() < deadline:
-            left_lines = []
-            for team, original in waitable:
-                left = max(0, int(deadline - time.time()
-                                 - (max(r for _, r in waitable) - original)))
-                left_lines.append(f"部队{team} {left // 60:02d}:{left % 60:02d}")
-            yield "[远征等待] " + " · ".join(left_lines) + "（紧急停止可取消）"
-            time.sleep(min(5, max(0.2, deadline - time.time())))
-        yield "[远征管理] 等待结束，再回本丸结算"
-        yield from agent.collect_expedition_stream(redispatch=None)
-        records = _read_expedition_records()
-
-    for row in plan:
-        team = str(row["team_no"])
-        if team in skipped:
-            continue
-        remain = _expedition_remaining(records.get(team, {})) if team in records else 0
-        if remain > 0:
-            yield f"[远征管理] 部队{team}仍显示远征中，本次不碰"
-            continue
         m = find_map(row["map_code"])
         if not m:
             yield f"[远征管理] 部队{team}的地图 {row['map_code']} 不存在，跳过"
@@ -1313,7 +1251,7 @@ register_script("practice", "演练", "",
                                   "鹤翼阵", "方阵", "逆行阵"]],
                      "default": "逆行阵"},
                 ])
-register_script("expedition", "远征", "收菜、等待临近归来，并按常用安排派遣",
+register_script("expedition", "远征", "收取归来奖励，并按常用安排尝试派遣",
                 _wrap_inventory("远征管理", _build_expedition_manager))
 
 

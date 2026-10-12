@@ -376,16 +376,6 @@ def expedition_records():
         return {}
 
 
-def team_available(team, records, now):
-    record = records.get(str(team), {})
-    try:
-        end = time.mktime(time.strptime(record["dispatched_at"], "%Y-%m-%d %H:%M:%S"))
-        end += int(record["duration_min"]) * 60
-        return now >= end
-    except (KeyError, TypeError, ValueError):
-        return True
-
-
 class DeferredDispatches:
     """Keep one outstanding departure per team while the shared runner is busy."""
     def __init__(self):
@@ -532,6 +522,17 @@ def resolve_inflight(cfg: dict, slot_key: str, before, now: float,
                            f"{slot['blocked_reason']}，5 分钟后再来看")], True
     if _finalize_dispatched(cfg, slot, records, now, before=before):
         return [(slot_key, _msg_dispatched(slot, now))], True
+    # 游戏已确认出发就完成本班；计时记录缺失不能让已经派出的队重复派遣。
+    if (isinstance(result, dict) and result.get("key") == slot_key
+            and result.get("outcome") == "done"):
+        try:
+            confirmed_at = datetime.strptime(result["at"], "%Y-%m-%d %H:%M:%S").timestamp()
+        except (KeyError, TypeError, ValueError):
+            confirmed_at = 0
+        if confirmed_at and max(_planned_ts(slot) - 60, float(slot.get("observed_at", 0)) - 1) <= confirmed_at <= now:
+            proof = {str(slot["team_no"]): {"map_code": slot["map_code"], "dispatched_at": result["at"]}}
+            if _finalize_dispatched(cfg, slot, proof, now):
+                return [(slot_key, _msg_dispatched(slot, now))], True
     slot["attempts"] = int(slot.get("attempts", 0)) + 1
     if slot["attempts"] >= MAX_DISPATCH_ATTEMPTS:
         slot["state"] = SLOT_FAILED
@@ -551,7 +552,7 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
     """推进全部班次状态机一格（纯函数风格：只改 cfg，返回要播报/要起的事）。
 
     返回 {"events": [(key, msg)], "start": slot|None, "changed": bool}。
-    转移顺序：记录确认 > 过期 > 未安排 > 冷却中 > runner 忙 > 游戏没跑 > 部队没回 > ready。
+    转移顺序：记录确认 > 过期 > 未安排 > 冷却中 > runner 忙 > 游戏没跑 > ready。
     """
     auto = cfg["automation"]
     slots = auto.setdefault("slot_states", {})
@@ -606,8 +607,6 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
             new_state, reason = SLOT_WAITING_BUSY, "等自家任务收工"
         elif not emulator_ok:
             new_state, reason = SLOT_WAITING_UNKNOWN, "游戏没在跑"
-        elif not team_available(slot["team_no"], records, now):
-            new_state, reason = SLOT_WAITING_UNKNOWN, "部队还在外面远征"
         elif prev == SLOT_READY and now >= retry_at:
             if to_start is None:
                 to_start = slot

@@ -57,7 +57,6 @@
   - 翻页有指纹停滞/绕圈检测与页数上限，不在死循环里翻名单。
 """
 
-import json
 import re
 import time
 
@@ -66,7 +65,6 @@ import numpy as np
 from .. import sword_db
 from ..maa_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
-from ..runtime_paths import STATE_DIR
 from .team_roster import _match_name, _ROW_CY, _TEAM_TAB, link_visible_slot
 
 RESULT_SCHEMA_VERSION = 1
@@ -670,28 +668,6 @@ def slot_matches_target(slot, target, match_fields=DEFAULT_MATCH_FIELDS):
     return True
 
 
-# ==================== 远征占用预检（预设编队用） ====================
-
-def _expedition_busy(team_no):
-    """目标队此刻是否还在远征（读 STATE_DIR/expeditions.json）。
-    口径同 panel.scheduler.team_available：dispatched_at + duration_min
-    没过完就算占用；文件缺失/损坏/字段缺一律当作没占用，不拦。
-    （touken 层不 import panel，故口径在此复写一份，别反向依赖。）"""
-    try:
-        records = json.loads(
-            (STATE_DIR / "expeditions.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    record = records.get(str(team_no), {}) if isinstance(records, dict) else {}
-    try:
-        end = time.mktime(time.strptime(record["dispatched_at"],
-                                        "%Y-%m-%d %H:%M:%S"))
-        end += int(record["duration_min"]) * 60
-        return time.time() < end
-    except (KeyError, TypeError, ValueError):
-        return False
-
-
 def _slot_no(key):
     """槽位键转 int；认不出的键返回 0——ensure 会按 INVALID_REQUEST 收拾它。"""
     try:
@@ -1102,7 +1078,7 @@ class FormationEditorMixin:
                                       name: str = "预设编队"):
         """把预设编队套到游戏内部队 team_no(1~5)：逐槽 ensure 换人。
 
-        先预检目标队远征占用（占用直接停，不做还原），导航到编队页切队后
+        导航到编队页并核对当前游戏里的目标队，不根据历史派遣记录拦截。
         按槽位号升序逐槽 ensure（entry_context="formation"）。任何一槽结果
         不是 changed/already_correct 就停：队伍是半套状态，如实汇报，
         不还原、不装绿。
@@ -1115,11 +1091,6 @@ class FormationEditorMixin:
             yield ("[预设编队] 这套预设一个位置都没指定，"
                    "无法应用：去编队页编辑一下")
             return False
-        if _expedition_busy(team_no):
-            yield (f"[预设编队] 部队{team_no}还在远征没回来，"
-                   "换不了人，等收远征再说")
-            return False
-
         for msg in self.navigate_to_stream("编队"):
             yield msg
         if self.current_location != "编队":

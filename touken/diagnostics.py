@@ -166,9 +166,9 @@ def _expedition_schedule_summary(data_root: Path, now: float | None = None) -> s
     except (OSError, ValueError):
         pass
     lines.append("")
-    lines.append("派遣记录（判断队伍是否在外远征的依据）:")
+    lines.append("派遣记录（仅估计归来时间，实际状态以游戏为准）:")
     if not records:
-        lines.append("- （无派遣记录，所有队伍视为空闲）")
+        lines.append("- （无派遣记录，无法估计归来时间）")
 
     def _sort_key(key):
         text = str(key)
@@ -190,9 +190,9 @@ def _expedition_schedule_summary(data_root: Path, now: float | None = None) -> s
             if remaining > 0:
                 lines.append(f"- {label}: {map_code}，派出于 {dispatched_at}，预计 {back} 归来（还剩约 {remaining} 分钟）")
             else:
-                lines.append(f"- {label}: {map_code}，派出于 {dispatched_at}，已到点归来（可再派）")
+                lines.append(f"- {label}: {map_code}，派出于 {dispatched_at}，预计已归来（以游戏为准）")
         except (TypeError, ValueError):
-            lines.append(f"- {label}: 记录不完整（派出于 {dispatched_at}，地图 {map_code}，时长 {duration}），按已归来处理")
+            lines.append(f"- {label}: 记录不完整（派出于 {dispatched_at}，地图 {map_code}，时长 {duration}），无法估计归来时间")
     return "\n".join(lines) + "\n"
 
 

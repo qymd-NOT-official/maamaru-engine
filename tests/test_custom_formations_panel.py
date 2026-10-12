@@ -345,16 +345,14 @@ class ScheduleConflictTests(PanelTestCase):
                    "duration_min": 30}}, ensure_ascii=False),
             encoding="utf-8")
 
-    def test_managed_and_busy_team_is_rejected(self):
+    def test_old_expedition_countdown_does_not_block_manual_preset(self):
         self._occupy_team3()
         agent = AgentStub()
         messages = list(server._build_sortie(
             agent, "cfg", {"team_no": "preset:pf1"}))
-        self.assertEqual(agent.apply_calls, [])  # 连编队都不去碰
-        self.assertEqual(agent.calls, [])
-        self.assertIn("正被远征排班用着", messages[-1])
-        self.assertIn("换个队覆盖", messages[-1])
-        self.assertTrue(_is_fail(messages[-1]))
+        self.assertEqual(len(agent.apply_calls), 1)
+        self.assertEqual(agent.calls[0][1]["team_no"], 3)
+        self.assertFalse(any(_is_fail(m) for m in messages))
 
     def test_managed_but_available_team_proceeds(self):
         self._occupy_team3()

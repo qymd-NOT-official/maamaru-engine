@@ -48,11 +48,14 @@ class CoordinationTests(unittest.TestCase):
         cfg["automation"]["last_runs"][jobs[0]["key"]] = "done"
         self.assertEqual(s._custom_due(cfg, 600, "2026-09-05"), [])
 
-    def test_departed_team_waits_without_runner(self):
+    def test_old_countdown_does_not_block_next_dispatch(self):
         now = time.time()
-        records = {"2": dict(dispatched_at=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), duration_min=30)}
-        self.assertFalse(s.team_available(2, records, now))
-        self.assertTrue(s.team_available(2, records, now + 1801))
+        records = {"2": dict(map_code="C1", dispatched_at=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)), duration_min=30)}
+        cfg = self.config()
+        due = [self.job()]
+        s.tick(cfg, due, now, runner_busy=False, emulator_ok=True, records=records)
+        out = s.tick(cfg, due, now + 16, runner_busy=False, emulator_ok=True, records=records)
+        self.assertEqual(out["start"]["key"], "first")
 
     def test_disabled_scheduler_releases_teams(self):
         cfg = self.config()

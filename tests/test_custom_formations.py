@@ -8,15 +8,13 @@
 
 import json
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from touken import custom_formations as cf
-from touken.flows import formation_editor as fe
 from touken.flows.formation_editor import (
-    ALREADY_CORRECT, AMBIGUOUS, CHANGED, FormationEditorMixin, _TEAM_TAB)
+    ALREADY_CORRECT, AMBIGUOUS, CHANGED, UNAVAILABLE, FormationEditorMixin, _TEAM_TAB)
 from touken.flows.report_judge import _is_fail
 
 
@@ -670,70 +668,21 @@ class ApplyStreamTests(unittest.TestCase):
         self.assertEqual(host.maa.clicks, [])
 
 
-# ==================== 远征占用预检 ====================
-
-def _write_expeditions(tmp, payload):
-    Path(tmp, "expeditions.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-
-
-class ExpeditionGuardTests(unittest.TestCase):
-    def test_dispatched_team_blocks_before_nav(self):
-        dispatched = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        with tempfile.TemporaryDirectory() as tmp:
-            _write_expeditions(tmp, {
-                "3": {"map_code": "E2", "duration_min": 99999,
-                      "dispatched_at": dispatched}})
-            with patch.object(fe, "STATE_DIR", Path(tmp)):
-                host = _PresetHost({})
-                ok, msgs = _apply(host)
-
-        self.assertFalse(ok)
-        self.assertIn("部队3还在远征", msgs[-1])
-        self.assertTrue(_is_fail(msgs[-1]))
-        self.assertEqual(host.nav_calls, [])        # 没进编队页
-        self.assertEqual(host.ensure_calls, [])
-        self.assertEqual(host.maa.clicks, [])
-
-    def test_expired_record_does_not_block(self):
-        dispatched = time.strftime("%Y-%m-%d %H:%M:%S",
-                                   time.localtime(time.time() - 7200))
-        with tempfile.TemporaryDirectory() as tmp:
-            _write_expeditions(tmp,
-                               {"3": {"duration_min": 60,
-                                      "dispatched_at": dispatched}})
-            with patch.object(fe, "STATE_DIR", Path(tmp)):
-                host = _PresetHost({})
-                ok, _ = _apply(host)
-
+class CurrentGameFormationTests(unittest.TestCase):
+    def test_preset_uses_game_executor_without_reading_old_dispatch_records(self):
+        host = _PresetHost({})
+        with patch.object(Path, "read_text", side_effect=AssertionError("不应读取旧派遣记录")):
+            ok, _ = _apply(host)
         self.assertTrue(ok)
+        self.assertEqual(host.nav_calls, ["编队"])
         self.assertEqual(len(host.ensure_calls), 4)
 
-    def test_corrupt_expeditions_file_does_not_block(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "expeditions.json").write_text("{坏", encoding="utf-8")
-            with patch.object(fe, "STATE_DIR", Path(tmp)):
-                host = _PresetHost({})
-                ok, _ = _apply(host)
-
-        self.assertTrue(ok)
-
-    def test_missing_expeditions_file_does_not_block(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(fe, "STATE_DIR", Path(tmp)):
-                host = _PresetHost({})
-                ok, _ = _apply(host)
-
-        self.assertTrue(ok)
-
-    def test_malformed_record_does_not_block(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            _write_expeditions(tmp, {"3": {"dispatched_at": "不是时间"}})
-            with patch.object(fe, "STATE_DIR", Path(tmp)):
-                host = _PresetHost({})
-                ok, _ = _apply(host)
-
-        self.assertTrue(ok)
+    def test_game_unavailable_stops_preset_before_later_slots(self):
+        host = _PresetHost({1: {"result": UNAVAILABLE, "reason": "游戏内无法更换队员"}})
+        ok, msgs = _apply(host)
+        self.assertFalse(ok)
+        self.assertEqual([c["slot_no"] for c in host.ensure_calls], [1])
+        self.assertTrue(_is_fail(msgs[-1]))
 
 
 if __name__ == "__main__":

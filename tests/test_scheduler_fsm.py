@@ -512,7 +512,7 @@ class MessageWordlistTests(unittest.TestCase):
         normal += [m for _, m in s.tick(
             cfg, due, now + 30, runner_busy=False, emulator_ok=False,
             records={})["events"]]
-        # waiting_unknown：部队还在外面（map 不同，避免触发记录确认）
+        # 旧记录的归来估计不拦开工（map 不同，避免触发出发记录确认）
         away = {"2": {"map_code": "C1", "dispatched_at": _ts_text(now + 40),
                       "duration_min": 600}}
         normal += [m for _, m in s.tick(
@@ -700,20 +700,67 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_old_dispatch_record_does_not_require_collection_evidence(tmp_path):
+@pytest.mark.parametrize("scheduled", [False, True])
+@pytest.mark.parametrize("remaining_min", [5, 30])
+def test_old_countdown_does_not_wait_or_block_dispatch(tmp_path, scheduled, remaining_min):
     from panel import server
     agent = Mock()
     agent.maa.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["没有读到结算"])
     agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
-    record = {"4": {"map_code": "C1", "dispatched_at": "2026-10-02 08:00:00", "duration_min": 60}}
+    record = {"4": {"map_code": "C1", "dispatched_at": _ts_text(time.time()), "duration_min": remaining_min}}
     with patch.object(server, "STATUS_DIR", tmp_path), \
          patch.object(server, "_read_expedition_records", return_value=record):
         messages = list(server._build_dispatch(agent, "unused", {"team_no": 4,
-            "map_code": "C2", "scheduled": True, "slot_key": "second"}))
+            "map_code": "C2", "scheduled": scheduled, "slot_key": "second"}))
     agent.expedition_stream.assert_called_once()
     assert "已出发" in messages[-1]
-    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"
+    if scheduled:
+        assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"
+
+
+@pytest.mark.parametrize("remaining_min", [5, 30])
+def test_common_dispatch_does_not_wait_for_old_countdown(tmp_path, remaining_min):
+    from panel import server
+    cfg = s._defaults()
+    cfg["common_plan"] = [{"team_no": 4, "map_code": "C2", "enabled": True}]
+    agent = Mock()
+    agent.collect_expedition_stream.return_value = iter(["当前没有归来结算"])
+    agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
+    record = {"4": {"map_code": "C1", "dispatched_at": _ts_text(time.time()), "duration_min": remaining_min}}
+    with patch.object(server, "_read_expedition_records", return_value=record), \
+         patch.object(s, "load_config", return_value=cfg), \
+         patch.object(server.time, "sleep", side_effect=AssertionError("不应按旧记录等待")):
+        messages = list(server._build_expedition_manager(agent, "unused", {}))
+    agent.expedition_stream.assert_called_once()
+    assert "[远征] ✅ 部队4已出发" in messages
+
+
+@pytest.mark.parametrize("records", [{}, {"2": {"map_code": "B1", "dispatched_at": "2020-01-01 00:00:00"}}])
+def test_game_confirmed_departure_finishes_without_countdown_record(records):
+    cfg = _custom_cfg()
+    now = _today_at(8, 10)
+    due = _due(cfg)
+    key = due[0]["key"]
+    s.tick(cfg, due, now, runner_busy=False, emulator_ok=True, records=records)
+    events, changed = s.resolve_inflight(cfg, key, None, now + 30, records,
+        {"key": key, "outcome": "done", "at": _ts_text(now + 20)})
+    assert changed
+    assert cfg["automation"]["slot_states"][key]["state"] == s.SLOT_DISPATCHED
+    # 玩家之后手动收菜，旧记录消失也不能重派已经完成的班。
+    assert s.tick(cfg, due, now + 40, runner_busy=False, emulator_ok=True, records={})["start"] is None
+
+
+@pytest.mark.parametrize("at", ["", "无效时间", "2020-01-01 00:00:00", "2999-01-01 00:00:00"])
+def test_invalid_or_old_success_result_does_not_finish_current_dispatch(at):
+    cfg = _custom_cfg()
+    now = _today_at(8, 10)
+    due = _due(cfg)
+    key = due[0]["key"]
+    s.tick(cfg, due, now, runner_busy=False, emulator_ok=True, records={})
+    s.resolve_inflight(cfg, key, None, now + 30, {}, {"key": key, "outcome": "done", "at": at})
+    assert cfg["automation"]["slot_states"][key]["state"] != s.SLOT_DISPATCHED
+    assert key not in cfg["automation"]["last_runs"]
 
 
 def test_next_shift_collects_then_departs(tmp_path):
