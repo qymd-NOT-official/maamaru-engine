@@ -842,14 +842,8 @@ def _build_dispatch(agent, config_path, params):
         time.sleep(min(5, remain))
         remain = _expedition_remaining(_read_expedition_records().get(str(team_no), {}))
     yield from agent.collect_expedition_stream(redispatch=None)
-    from .expedition_observation import load_observations, visible_records
-    remaining_records = visible_records(_read_expedition_records(), load_observations())
-    if str(team_no) in remaining_records:
-        detail = "尚未确认这支部队已收菜，暂不续派"
-        if scheduled:
-            _write_dispatch_result(slot_key, "refused", detail)
-        yield f"[远征] {detail}"
-        return
+    # 历史派遣记录用于估计归来时间，不能要求额外的收菜记录才能开工。
+    # 收菜后由远征流程检查游戏里的队伍、重伤、开始按钮与出发结果。
     from touken.expedition_sakura import recover_stream
     if not (yield from recover_stream(agent)):
         if scheduled:
@@ -2790,6 +2784,9 @@ async def api_save_schedule(request: Request):
     })
     cfg.update({"entries": clean, "common_plan": common, "automation": auto})
     save_config(cfg)
+    if not auto["enabled"]:
+        from .scheduler import clear_takeover_flag
+        clear_takeover_flag()
     return {"ok": True, "count": len(clean)}
 
 
@@ -2808,6 +2805,9 @@ async def api_pause_expedition(request: Request):
                               time.localtime(time.time() + minutes * 60))
     cfg["automation"]["paused_until"] = until
     save_config(cfg)
+    if until:
+        from .scheduler import clear_takeover_flag
+        clear_takeover_flag()
     return {"ok": True, "paused_until": until}
 
 

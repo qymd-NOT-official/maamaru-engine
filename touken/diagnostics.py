@@ -132,7 +132,7 @@ def _expedition_schedule_summary(data_root: Path, now: float | None = None) -> s
     auto = cfg.get("automation")
     auto = auto if isinstance(auto, dict) else {}
     enabled = bool(auto.get("enabled", False))
-    lines.append(f"- 自动排班总开关: {'开' if enabled else '关 —— 关闭时调度永不接管'}")
+    lines.append(f"- 自动排班总开关: {'开' if enabled else '关 —— 今日单独安排的远征仍按安排执行；暂停可停止全部接管'}")
     paused_until = str(auto.get("paused_until", "") or "").strip()
     if paused_until:
         state = "暂停生效中" if paused_until > now_text else "暂停已过期"

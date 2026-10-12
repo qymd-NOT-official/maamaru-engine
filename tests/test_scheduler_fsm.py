@@ -8,18 +8,79 @@
 - 所有正常播报逐条过 report_judge 翻车词表不判红；failed_unknown 必须判红。
 """
 
+import asyncio
 import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from panel import scheduler as s
 from panel import expedition_choices as ec
 from touken.flows.battle import BattleMixin
 from touken.flows.raid import RaidMixin
 from touken.flows.report_judge import _is_fail
+
+
+@pytest.fixture(autouse=True)
+def isolated_schedule(tmp_path, monkeypatch):
+    # 派遣测试也会读取补花配置，不能受本机实际排班设置影响。
+    monkeypatch.setattr(s, "_SCHED_PATH", tmp_path / "expedition.json")
+    monkeypatch.setattr(s, "STATE_DIR", tmp_path)
+
+
+@pytest.mark.parametrize("minutes", [30, 999])
+def test_pause_api_removes_takeover_immediately(minutes):
+    from panel import server
+    s.save_config(_custom_cfg())
+    s.takeover_flag_path().write_text('{"key":"old"}', encoding="utf-8")
+    request = Mock(json=AsyncMock(return_value={"minutes": minutes}))
+    result = asyncio.run(server.api_pause_expedition(request))
+    assert result["paused_until"]
+    assert not s.takeover_flag_path().exists()
+    assert s.load_config()["automation"]["paused_until"] == result["paused_until"]
+
+
+def test_disable_api_removes_takeover_immediately():
+    from panel import server
+    s.save_config(_custom_cfg())
+    s.takeover_flag_path().write_text('{"key":"old"}', encoding="utf-8")
+    request = Mock(json=AsyncMock(return_value={"automation": {"enabled": False}}))
+    asyncio.run(server.api_save_schedule(request))
+    assert not s.load_config()["automation"]["enabled"]
+    assert not s.takeover_flag_path().exists()
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_scheduler_releases_pending_slots_when_disabled_or_paused(paused):
+    now = _today_at(8, 10)
+    cfg = _custom_cfg()
+    due = _due(cfg)
+    s.tick(cfg, due, now, runner_busy=True, emulator_ok=True, records={})
+    assert s.sync_takeover_flag(cfg, now)
+    cfg["automation"].update(enabled=paused, paused_until="2999-01-01 00:00:00" if paused else "")
+
+    class EndTick(BaseException):
+        pass
+
+    # 跑真实巡检一轮；暂停时即使存在今日单独安排，也必须全部交还位置。
+    with patch.object(s, "load_config", return_value=cfg), \
+         patch.object(s, "load_choice_sets", return_value=({}, {due[0]["key"]: due[0]} if paused else {})), \
+         patch.object(s, "_custom_due", return_value=due), \
+         patch.object(s, "adhoc_due", return_value=[]), \
+         patch.object(s, "expedition_records", return_value={}), \
+         patch.object(s.time, "time", return_value=now), \
+         patch.object(s.time, "sleep", side_effect=EndTick), \
+         patch.object(s.threading, "Thread") as thread, \
+         patch("panel.script_runner.get_runner", return_value=Mock(is_running=False)):
+        s.start_scheduler("unused", Mock())
+        with pytest.raises(EndTick):
+            thread.call_args.kwargs["target"]()
+    assert not s.takeover_flag_path().exists()
+    assert cfg["automation"]["slot_states"][due[0]["key"]]["state"] == s.SLOT_WAITING_UNKNOWN
 
 
 def _today_at(hour, minute=0, second=0):
@@ -126,6 +187,50 @@ class SlotFsmTests(unittest.TestCase):
         out = s.tick(cfg, due, now + 330, runner_busy=False,
                      emulator_ok=True, records={})
         self.assertEqual(slot["state"], "ready")
+
+    def test_refused_cooldown_does_not_interrupt_gameplay(self):
+        cfg = _custom_cfg()
+        now = _today_at(8, 10)
+        due = _due(cfg)
+        key = due[0]["key"]
+        s.tick(cfg, due, now, runner_busy=False, emulator_ok=True, records={})
+        s.resolve_inflight(cfg, key, None, now, {},
+                           {"key": key, "outcome": "refused", "detail": "画面不在本丸"})
+        for elapsed in (5, 100, 299):
+            out = s.tick(cfg, due, now + elapsed, runner_busy=True,
+                         emulator_ok=True, records={})
+            self.assertIsNone(out["start"])
+            self.assertFalse(s.sync_takeover_flag(cfg, now + elapsed))
+            self.assertEqual(cfg["automation"]["slot_states"][key]["state"], s.SLOT_WAITING_UNKNOWN)
+        s.tick(cfg, due, now + 300, runner_busy=True, emulator_ok=True, records={})
+        self.assertTrue(s.sync_takeover_flag(cfg, now + 300))
+
+    def test_cancelled_shift_releases_gameplay_and_flag(self):
+        cfg = _custom_cfg()
+        now = _today_at(8, 10)
+        due = _due(cfg)
+        s.tick(cfg, due, now, runner_busy=True, emulator_ok=True, records={})
+        self.assertTrue(s.sync_takeover_flag(cfg, now))
+        s.tick(cfg, [], now + 5, runner_busy=False, emulator_ok=True, records={})
+        self.assertFalse(s.sync_takeover_flag(cfg, now + 5))
+        slot = cfg["automation"]["slot_states"][due[0]["key"]]
+        self.assertNotIn(slot["state"], {s.SLOT_WAITING_BUSY, s.SLOT_READY})
+        # 重新安排仍先预告，不在恢复时直接派出。
+        out = s.tick(cfg, due, now + 10, runner_busy=False, emulator_ok=True, records={})
+        self.assertIsNone(out["start"])
+        self.assertEqual(slot["state"], s.SLOT_READY)
+
+    def test_takeover_flag_tracks_current_waiting_shift(self):
+        cfg = _custom_cfg()
+        now = _today_at(8, 10)
+        first = _due(cfg)
+        second = [{**first[0], "key": "second", "team_no": 3}]
+        s.tick(cfg, first, now, runner_busy=True, emulator_ok=True, records={})
+        self.assertTrue(s.sync_takeover_flag(cfg, now))
+        s.tick(cfg, second, now + 5, runner_busy=True, emulator_ok=True, records={})
+        self.assertTrue(s.sync_takeover_flag(cfg, now + 5))
+        flag = json.loads(s.takeover_flag_path().read_text(encoding="utf-8"))
+        self.assertEqual(flag["key"], "second")
 
     def test_expired_is_terminal_and_never_revives(self):
         cfg = _custom_cfg()  # 默认 max_delay 30 → 08:30 过期
@@ -595,21 +700,20 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_next_shift_waits_for_confirmed_collection(tmp_path):
+def test_old_dispatch_record_does_not_require_collection_evidence(tmp_path):
     from panel import server
-    from panel import expedition_observation
     agent = Mock()
     agent.maa.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["没有读到结算"])
+    agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
     record = {"4": {"map_code": "C1", "dispatched_at": "2026-10-02 08:00:00", "duration_min": 60}}
     with patch.object(server, "STATUS_DIR", tmp_path), \
-         patch.object(server, "_read_expedition_records", return_value=record), \
-         patch.object(expedition_observation, "load_observations", return_value={}):
+         patch.object(server, "_read_expedition_records", return_value=record):
         messages = list(server._build_dispatch(agent, "unused", {"team_no": 4,
             "map_code": "C2", "scheduled": True, "slot_key": "second"}))
-    agent.expedition_stream.assert_not_called()
-    assert "尚未确认" in messages[-1]
-    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "refused"
+    agent.expedition_stream.assert_called_once()
+    assert "已出发" in messages[-1]
+    assert json.loads((tmp_path / "dispatch_result.json").read_text(encoding="utf-8"))["outcome"] == "done"
 
 
 def test_next_shift_collects_then_departs(tmp_path):

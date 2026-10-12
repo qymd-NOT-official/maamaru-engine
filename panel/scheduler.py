@@ -551,7 +551,7 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
     """推进全部班次状态机一格（纯函数风格：只改 cfg，返回要播报/要起的事）。
 
     返回 {"events": [(key, msg)], "start": slot|None, "changed": bool}。
-    转移顺序：记录确认 > 过期 > runner 忙 > 游戏没跑 > 部队没回 > 冷却中 > ready。
+    转移顺序：记录确认 > 过期 > 未安排 > 冷却中 > runner 忙 > 游戏没跑 > 部队没回 > ready。
     """
     auto = cfg["automation"]
     slots = auto.setdefault("slot_states", {})
@@ -590,10 +590,19 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
             changed = True
             continue
         if key not in due_keys:
-            continue  # 配置被改了/窗口挪走了：留着等过期，不动它
+            # 已取消或暂停的班保留记录，但不能继续占位置或要求玩法收工。
+            if slot.get("state") in {SLOT_WAITING_BUSY, SLOT_READY}:
+                slot["state"] = SLOT_WAITING_UNKNOWN
+                slot["blocked_reason"] = "这班当前未安排执行"
+                changed = True
+            continue
         prev = slot.get("state")
         retry_at = float(slot.get("next_retry_at", 0) or 0)
-        if runner_busy:
+        if now < retry_at:
+            # 派遣被拒后的冷却也约束插队；ready 的十五秒预告仍保留。
+            new_state = SLOT_READY if prev == SLOT_READY else SLOT_WAITING_UNKNOWN
+            reason = slot.get("blocked_reason", "")
+        elif runner_busy:
             new_state, reason = SLOT_WAITING_BUSY, "等自家任务收工"
         elif not emulator_ok:
             new_state, reason = SLOT_WAITING_UNKNOWN, "游戏没在跑"
@@ -603,9 +612,6 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
             if to_start is None:
                 to_start = slot
             new_state, reason = SLOT_READY, slot.get("blocked_reason", "")
-        elif now < retry_at:
-            new_state = prev or SLOT_WAITING_UNKNOWN  # 冷却/预告窗口内保持原状态
-            reason = slot.get("blocked_reason", "")
         else:
             new_state, reason = SLOT_READY, ""
         slot["state"] = new_state
@@ -639,21 +645,22 @@ def clear_takeover_flag():
 
 
 def sync_takeover_flag(cfg: dict, now: float | None = None) -> bool:
-    """有 waiting_busy 班次就确保旗标落盘，没有就清掉。返回当前是否有旗。"""
+    """仅为未过期、已结束冷却的 waiting_busy 班次更新旗标，否则清掉。"""
+    now = time.time() if now is None else now
     slots = cfg.get("automation", {}).get("slot_states", {})
-    waiting = [s for s in slots.values() if s.get("state") == SLOT_WAITING_BUSY]
+    waiting = [s for s in slots.values() if s.get("state") == SLOT_WAITING_BUSY
+               and now >= float(s.get("next_retry_at", 0) or 0)
+               and now <= float(s.get("expires_at", 0) or 0)]
     path = takeover_flag_path()
     try:
         if not waiting:
             path.unlink(missing_ok=True)
             return False
-        if path.exists():
-            return True
         first = sorted(waiting, key=lambda s: float(s.get("expires_at", 0) or 0))[0]
         path.write_text(json.dumps({
             "key": first["key"], "team_no": first["team_no"],
             "map_code": first["map_code"],
-            "requested_at": now if now is not None else time.time(),
+            "requested_at": now,
         }, ensure_ascii=False), encoding="utf-8")
     except OSError:
         pass
@@ -793,6 +800,10 @@ def start_scheduler(config_path: str, emit_fn):
                     # 暂停/停用且无强制班 = 不接管：接管旗标必须清掉，不然玩法循环会
                     # 为一个不会来的排班白白提前收工
                     clear_takeover_flag()
+                    suspended = tick(cfg, [], now, runner_busy=False,
+                                     emulator_ok=True, records=records,
+                                     inflight_key=inflight[0] if inflight else None)
+                    changed = changed or suspended["changed"]
                     if changed:
                         save_config(cfg)
                     time.sleep(5)
