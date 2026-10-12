@@ -129,6 +129,7 @@ class DispatchVerifyTests(unittest.TestCase):
     CONFIG = {
         "expedition": {
             "eras": {"1": [100, 100]},
+            "map_slots": {"1": [100, 200]},
             "map_ocr_roi": [0, 100, 1280, 400],
             "team_ui_ocr": {"expected": "部队选择", "roi": [506, 1, 774, 77]},
             "injury_stamp": {"template": "重伤.png"},
@@ -182,6 +183,27 @@ class DispatchVerifyTests(unittest.TestCase):
 
         self.assertTrue(any("已出发" in m for m in logs))
         self.assertIn(("远征开始", "exact"), maa.ocr_modes)
+
+    def test_game_success_needs_no_running_text(self):
+        maa = self.Maa()
+        flow = self._flow(maa)
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(flow, "_dispatch_game_result", return_value={"payload": {"status": 0}}), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2, map_slot=1))
+        self.assertTrue(any("已出发" in m for m in logs))
+        self.assertNotIn(("远征中", "contains"), maa.ocr_modes)
+        save.assert_called_once()
+
+    def test_mismatching_game_result_cannot_be_made_green_by_ocr(self):
+        flow = self._flow(self.Maa())
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(flow, "_dispatch_game_result", return_value=False), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2, map_slot=1))
+        self.assertTrue(any("未确认本次" in m for m in logs))
+        self.assertFalse(any("已出发" in m for m in logs))
+        save.assert_not_called()
 
 
 # ==================== 结算观察哨（收菜/扫地/导航共用） ====================

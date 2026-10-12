@@ -161,11 +161,9 @@ class SakuraMixin:
     def _sakura_selected_serial(self, team_no):
         """只用本次换人之后的客户端部队响应辅助去重，旧名单不冒充现场。"""
         from .. import youzu_log
-        from ..runtime_paths import DEBUG_DIR
-        path = None
+        from ..game_state import read_events
         try:
-            path = youzu_log.pull_log(self.maa.adb_path, self.maa.adb_address, DEBUG_DIR)
-            for event in reversed(youzu_log.parse_events(path)):
+            for event in reversed(read_events(self.maa.adb_path, self.maa.adb_address)):
                 body = event.get('payload')
                 if (event.get('direction') != 'S->C' or event.get('status') != 200
                         or not isinstance(body, dict) or str(body.get('status')) != '0'
@@ -182,9 +180,6 @@ class SakuraMixin:
                     return youzu_log._int(captain.get('serial_id')) or None
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
             pass
-        finally:
-            if path is not None:
-                path.unlink(missing_ok=True)
         return None
 
     def _prepare_sakura_team(self, team_no):

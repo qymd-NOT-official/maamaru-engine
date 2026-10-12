@@ -199,7 +199,7 @@ def test_home_situation_api_refresh_uses_private_state_and_burns_log(tmp_path):
     config.write_text('{"adb_path":"adb","adb_address":"127.0.0.1:16384"}',
                       encoding="utf-8")
     with patch.object(server, "STATUS_DIR", tmp_path / "state"), \
-         patch.object(server, "DEBUG_DIR", tmp_path / "debug"), \
+         patch("touken.game_state.DEBUG_DIR", tmp_path / "debug"), \
          patch.object(server, "_CONFIG_PATH", config), \
          patch("touken.telemetry.TelemetryStore", return_value=test_store), \
          patch.object(youzu_log, "pull_log", return_value=raw) as pull:
@@ -837,8 +837,8 @@ def test_log_injury_status_disabled_by_config(monkeypatch):
     assert youzu_log.pull_log.calls == 0
 
 
-def test_combined_injury_takes_conservative(tmp_path, monkeypatch):
-    """两通道取更保守结论：日志说满血、视觉说重伤 → 仍按重伤停。"""
+def test_combined_injury_uses_current_game_hp(tmp_path, monkeypatch):
+    """完整新鲜血量作准，画面误识别不能覆盖。"""
     ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
     f = _injury_log(tmp_path, ts,
                     {"111": ("45", "45", "118"), "222": ("45", "45", "118")})
@@ -846,7 +846,7 @@ def test_combined_injury_takes_conservative(tmp_path, monkeypatch):
     h = _host()
     monkeypatch.setattr(h, "_team_injury_status", lambda cfg: "重伤")
     injury, detail = h._combined_injury_status({}, 1, {})
-    assert injury == "重伤"
+    assert injury is None
     assert detail == "全员满血"
 
 

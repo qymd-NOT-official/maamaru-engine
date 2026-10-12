@@ -387,9 +387,12 @@ _SWORD_FULL_ENDPOINTS = ("/party/list", "/sally")
 
 def _latest_sword_pool(events: list[dict]):
     """最新一次全量刀数据 (swords_dict, event)。没有返回 (None, None)。"""
+    from .game_state import successful_body
     for ev in reversed(events):
         if ev.get("direction") != "S->C" or ev.get("endpoint") not in \
                 _SWORD_FULL_ENDPOINTS or not isinstance(ev.get("payload"), dict):
+            continue
+        if successful_body(ev) is None:
             continue
         pool = ev["payload"].get("sword") or ev["payload"].get("sword_all")
         if isinstance(pool, dict) and pool:
@@ -400,14 +403,15 @@ def _latest_sword_pool(events: list[dict]):
 def party_injury_report(events: list[dict], party_no: int) -> dict | None:
     """某部队的逐振验伤报告（serial 锚定，同名复制人精确区分）。
 
-    成员名单来自最新 /party/list，hp 来自最新全量刀数据响应；
+    成员名单与 hp 来自最新的完整编队或出阵菜单响应；
     两边各自带 observed_at（数据时间，不许拿 pull 时间冒充）。
     任一成员在刀池里查不到 → 数据不全，整体返回 None（调用方回退
     视觉链，绝不拿半残数据放行）。
     """
+    from .game_state import successful_body
     party_ev = None
     for ev in reversed(events):
-        if ev.get("direction") == "S->C" and ev.get("endpoint") == "/party/list" \
+        if successful_body(ev) is not None and ev.get("endpoint") in _SWORD_FULL_ENDPOINTS \
                 and isinstance(ev.get("payload"), dict) \
                 and isinstance(ev["payload"].get("party"), dict):
             party_ev = ev
@@ -432,6 +436,9 @@ def party_injury_report(events: list[dict], party_no: int) -> dict | None:
         s = pool.get(serial)
         if not isinstance(s, dict):
             return None  # 有成员查不到 = 数据不全，不猜
+        hp, hp_max = _int(s.get("hp"), -1), _int(s.get("hp_max"), 0)
+        if hp_max <= 0 or hp < 0 or hp > hp_max:
+            return None
         members.append({
             "serial_id": _int(serial),
             "sword_id": _int(s.get("sword_id")),
@@ -454,6 +461,8 @@ def party_injury_report(events: list[dict], party_no: int) -> dict | None:
         "max_injury": worst["injury"],
         "observed_at": pool_ev.get("ts"),
         "party_observed_at": party_ev.get("ts"),
+        "observed_epoch": _event_epoch(pool_ev),
+        "party_observed_epoch": _event_epoch(party_ev),
     }
 
 

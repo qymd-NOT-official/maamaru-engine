@@ -2,23 +2,15 @@
 import subprocess
 
 from . import youzu_log, sword_db
-from .runtime_paths import DEBUG_DIR
+from .game_state import read_events, successful_body
 
 
 def client_events(maa):
     """Pull observations only; never click or update the roster."""
     try:
-        path = youzu_log.pull_log(maa.adb_path, maa.adb_address, DEBUG_DIR)
-        return youzu_log.parse_events(path)
+        return read_events(maa.adb_path, maa.adb_address)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
         return []
-
-
-def successful_body(event):
-    body = event.get('payload')
-    return (body if event.get('direction') == 'S->C'
-            and event.get('status') == 200 and isinstance(body, dict)
-            and str(body.get('status')) == '0' else None)
 
 
 def team_cleared(events, team, after):

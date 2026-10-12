@@ -1265,7 +1265,11 @@ class TelemetryStore:
             (time.time() if to_ts is None else float(to_ts),)).fetchone()
         from .client_equipment import name_client_assets
         assets = name_client_assets({**_loads(asset_row["payload"], {}), "observed_at": asset_row["ts"]}) if asset_row else None
-        missing = set(LEDGER_RESOURCES) - resources.keys()
+        from .game_state import FACT_MAX_AGE
+        # A fresh JSON observation wins; a much later screen read can fill stale fields.
+        cutoff = time.time() if to_ts is None else float(to_ts)
+        missing = {name for name in LEDGER_RESOURCES
+                   if name not in resources or cutoff - resources[name]["observed_at"] > FACT_MAX_AGE}
         if missing:
             for row in self._conn().execute(
                     "SELECT ts, payload FROM events WHERE event_type='inventory.captured' AND script NOT IN ('youzu_log','manual') AND ts <= ? ORDER BY ts DESC, id DESC",
@@ -1273,7 +1277,9 @@ class TelemetryStore:
                 reading = _resource_reading(_loads(row["payload"], {}).get("resources"))
                 for name in list(missing):
                     value = reading.get(name)
-                    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                    if (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+                            and (name not in resources
+                                 or row["ts"] - resources[name]["observed_at"] > FACT_MAX_AGE)):
                         resources[name] = {"count": int(value), "observed_at": row["ts"], "source": "screen"}
                         missing.remove(name)
                 if not missing:

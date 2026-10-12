@@ -381,14 +381,9 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
                 yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
             if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札", "炼糖", "收杂物"}:
                 try:
-                    from touken import youzu_log
+                    from touken.game_state import read_events
                     from touken.sword_receipts import sync_receipts
-                    path = youzu_log.pull_log(agent.maa.adb_path,
-                                              agent.maa.adb_address, dest_dir=DEBUG_DIR)
-                    try:
-                        result = sync_receipts(youzu_log.parse_events(path))
-                    finally:
-                        path.unlink(missing_ok=True)
+                    result = sync_receipts(read_events(agent.maa.adb_path, agent.maa.adb_address))
                     if result["written"] or result["reconciled"]:
                         yield f"[{tag}] 锻刀和掉落记录已同步到账房"
                 except Exception:
@@ -2265,16 +2260,12 @@ def _refresh_expedition_observations():
         if now < _expedition_observation_next:
             return
         _expedition_observation_next = now + 60
-        from touken import youzu_log
+        from touken.game_state import read_events
         from .expedition_observation import save_observations
         cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-        path = youzu_log.pull_log(cfg.get("adb_path") or _DEFAULT_ADB_PATH,
-                                  cfg.get("adb_address") or _DEFAULT_ADB_ADDR,
-                                  dest_dir=DEBUG_DIR)
-        try:
-            save_observations(youzu_log.parse_events(path), STATUS_DIR / FILENAME)
-        finally:
-            path.unlink(missing_ok=True)
+        events = read_events(cfg.get("adb_path") or _DEFAULT_ADB_PATH,
+                             cfg.get("adb_address") or _DEFAULT_ADB_ADDR)
+        save_observations(events, STATUS_DIR / FILENAME)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
         pass
     finally:
@@ -3217,21 +3208,14 @@ def api_refresh_home_situation(server: str = ""):
         raise HTTPException(409, "执务进行中，收工后再同步近况。")
     try:
         cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-        path = youzu_log.pull_log(
-            cfg.get("adb_path") or _DEFAULT_ADB_PATH,
-            cfg.get("adb_address") or _DEFAULT_ADB_ADDR,
-            dest_dir=DEBUG_DIR)
-        try:
-            events = youzu_log.parse_events(path)
-            from touken.sword_receipts import sync_receipts
-            sync_receipts(events)
-            from .expedition_observation import FILENAME, save_observations
-            save_observations(events, STATUS_DIR / FILENAME)
-            situation = youzu_log.save_home_situation(
-                events,
-                STATUS_DIR / "youzu_home_situation.json")
-        finally:
-            path.unlink(missing_ok=True)
+        from touken.game_state import read_events
+        events = read_events(cfg.get("adb_path") or _DEFAULT_ADB_PATH,
+                             cfg.get("adb_address") or _DEFAULT_ADB_ADDR)
+        from touken.sword_receipts import sync_receipts
+        sync_receipts(events)
+        from .expedition_observation import FILENAME, save_observations
+        save_observations(events, STATUS_DIR / FILENAME)
+        situation = youzu_log.save_home_situation(events, STATUS_DIR / "youzu_home_situation.json")
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(503, "没能从游戏读取近况，请确认模拟器和游戏正在运行。") from exc
     if situation is None:

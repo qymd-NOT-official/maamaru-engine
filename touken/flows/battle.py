@@ -512,29 +512,17 @@ class BattleMixin:
             return None, None
         try:
             if "events" not in cache:
-                from ..youzu_log import (DEFAULT_ADB, DEFAULT_ADDRESS,
-                                         party_injury_report, parse_events,
-                                         pull_log)
-                path = pull_log(
+                from ..youzu_log import DEFAULT_ADB, DEFAULT_ADDRESS
+                from ..game_state import read_events
+                cache["events"] = read_events(
                     getattr(self.maa, "adb_path", "") or DEFAULT_ADB,
                     getattr(self.maa, "adb_address", "") or DEFAULT_ADDRESS)
-                try:
-                    cache["events"] = parse_events(path)
-                finally:
-                    path.unlink(missing_ok=True)  # 阅后即焚
-                cache["report_fn"] = party_injury_report
-            report = cache["report_fn"](cache["events"], team_no)
+            from ..game_state import injury_report
+            report = injury_report(cache["events"], team_no,
+                                   max_age=float(cfg.get("max_age_sec", 600)))
         except Exception:
             return None, None
         if not report:
-            return None, None
-        max_age = float(cfg.get("max_age_sec", 600))
-        try:
-            age = (datetime.now() - datetime.strptime(
-                report["observed_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
-        except (TypeError, ValueError):
-            return None, None
-        if age > max_age:
             return None, None
         hurt = [m for m in report["members"] if m["injury"]]
         detail = ("、".join(f"{m['label'] or m['name']}{m['injury']}"
@@ -544,13 +532,11 @@ class BattleMixin:
 
     def _combined_injury_status(self, cfg: dict, team_no: int,
                                 log_cache: dict):
-        """视觉验伤 + 日志验伤取更保守结论（宁可错停，不放行）。
-        返回 (伤势, 日志明细)；日志通道缺席时明细为 None。"""
-        vision = self._team_injury_status(cfg)
+        """有效游戏血量作准；数据缺失或过时才使用画面验伤。"""
         log_injury, detail = self._log_injury_status(team_no, log_cache)
-        rank = {None: 0, "轻伤": 1, "中伤": 2, "重伤": 3}
-        injury = vision if rank[vision] >= rank[log_injury] else log_injury
-        return injury, detail
+        if detail is not None:
+            return log_injury, detail
+        return self._team_injury_status(cfg), None
 
     def _team_injury_status(self, cfg):
         """在部队列表或战斗结果页识别当前最高伤势。"""

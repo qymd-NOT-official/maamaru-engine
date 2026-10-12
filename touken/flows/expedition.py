@@ -22,6 +22,7 @@
 
 import json
 import re
+import subprocess
 import time
 from uuid import uuid4
 from pathlib import Path
@@ -68,6 +69,20 @@ def _map_meta(era, slot):
     except Exception:
         pass
     return None, None, None
+
+
+def _map_slot(era, name):
+    """Resolve a unique manual map name to the same calibrated map ID."""
+    target = re.sub(r"[^一-鿿]", "", name or "")
+    if len(target) < 2:
+        return None
+    try:
+        maps = json.loads(_MAPS_TABLE.read_text(encoding="utf-8"))["maps"]
+        matches = [row["slot"] for row in maps.values() if row.get("era") == era
+                   and target in re.sub(r"[^一-鿿]", "", row.get("name") or "")]
+        return matches[0] if len(matches) == 1 else None
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 class ExpeditionMixin:
@@ -236,10 +251,21 @@ class ExpeditionMixin:
         if not confirm:
             yield "[远征] 确认弹窗没出现，停，你去看看卡哪了"
             return
+        confirmed_at = int(time.time())
         self.maa.click(confirm)
         yield "[远征] 🐎 确认完毕，出发远征！过场动画跑着..."
 
-        # ========== 9. 过场自动完 → 验证"远征中" ==========
+        # ========== 9. 游戏响应确认结果，缺数据才看画面 ==========
+        time.sleep(1.0)
+        selected_slot = map_slot if map_slot is not None else _map_slot(era, expect_name)
+        proof = self._dispatch_game_result(team_no, era, selected_slot, confirmed_at)
+        if proof is False:
+            yield "[远征] ✗ 游戏未确认本次部队和地图派遣成功，停止派遣"
+            return
+        if proof is not None:
+            yield f"[远征] ✅ 部队{team_no}已出发：时代{era}「{map_name}」，收工"
+            self._record_dispatch(team_no, era, selected_slot, map_name)
+            return
         running_ocr = cfg["running_ocr"]
         running_roi = roi_4to4(*running_ocr["roi"])
         for _ in range(20):  # 过场几秒，给足 10 秒
@@ -247,29 +273,37 @@ class ExpeditionMixin:
             self.maa.screenshot(force=True)
             if self.maa.ocr(expected=running_ocr["expected"], roi=running_roi):
                 yield f"[远征] ✅ 部队{team_no}已出发：时代{era}「{map_name}」，收工"
-                # 落盘派遣记录，看板倒计时用（写砸不影响派遣）
-                try:
-                    code, name, dur = _map_meta(era, map_slot)
-                    rec = _load_exp_record()
-                    rec[str(team_no)] = {
-                        "map_code": code, "map_name": map_name or name,
-                        "era": era, "slot": map_slot,
-                        "duration_min": dur,
-                        "dispatched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    }
-                    _save_exp_record(rec)
-                except Exception:
-                    pass
-                if hasattr(self, "record_event"):
-                    code, name, _ = _map_meta(era, map_slot)
-                    self.record_event("expedition.dispatched", team_no=team_no,
-                                      map_code=code, map_name=map_name or name,
-                                      era=era, slot=map_slot)
+                self._record_dispatch(team_no, era, selected_slot, map_name)
                 return
 
         # 过场后可能回了本丸也可能还在目的地界面，找不到"远征中"就截个图让人看
         yield "[远征] ⚠️ 没看到「远征中」字样，可能派遣失败也可能已回本丸，你去看一眼"
         return
+
+    def _dispatch_game_result(self, team_no, era, slot, after):
+        if slot is None or not getattr(self.maa, "adb_address", None):
+            return None
+        from ..game_state import expedition_started, read_events
+        try:
+            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            return expedition_started(events, team_no, (era - 1) * 4 + slot, after)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return None
+
+    def _record_dispatch(self, team_no, era, slot, map_name):
+        """Countdown is a display record; failure to save does not undo departure."""
+        code, name, dur = _map_meta(era, slot)
+        rec = _load_exp_record()
+        rec[str(team_no)] = {
+            "map_code": code, "map_name": map_name or name,
+            "era": era, "slot": slot, "duration_min": dur,
+            "dispatched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        _save_exp_record(rec)
+        if hasattr(self, "record_event"):
+            self.record_event("expedition.dispatched", team_no=team_no,
+                              map_code=code, map_name=map_name or name,
+                              era=era, slot=slot)
 
     def collect_expedition_stream(self, redispatch=None):
         """

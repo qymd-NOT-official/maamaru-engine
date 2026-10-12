@@ -92,7 +92,7 @@ async function checkGameInventory() {
     if (state.running && state.current === 'game_inventory') {
       gameInventoryRunId.value = state.run_id || gameInventoryRunId.value
       gameInventoryBusy.value = true
-      gameInventoryNotice.value = '正在读取游戏记录并盘点画面，请暂时不要操作模拟器。'
+      gameInventoryNotice.value = '正在读取家底，请暂时不要操作模拟器。'
       gameInventoryTimer = setTimeout(checkGameInventory, 3000)
       return
     }
@@ -101,8 +101,8 @@ async function checkGameInventory() {
       const reading = result.payload
       const count = Object.keys(reading.resources).length
       const recordStatus = reading.records === 'ok' ? '已读取' : reading.records === 'empty' ? '没有资源读数' : '读取失败'
-      const ocrStatus = reading.ocr === 'ok' ? '已完成' : reading.ocr === 'partial' ? '部分读到' : '未完成'
-      gameInventoryNotice.value = `游戏记录：${recordStatus}；画面盘点：${ocrStatus}。确认了 ${count} 项家底${reading.records === 'ok' && reading.ocr === 'ok' ? '，可以在下方查看。' : '；没读到的项目仍保留原记录，可以重试。'}`
+      const ocrStatus = reading.ocr === 'skipped' ? '游戏数据齐全，无需盘点' : reading.ocr === 'ok' ? '已完成' : reading.ocr === 'partial' ? '部分读到' : '未完成'
+      gameInventoryNotice.value = `游戏记录：${recordStatus}；画面盘点：${ocrStatus}。确认了 ${count} 项家底${count === 8 ? '，可以在下方查看。' : '；没读到的项目仍保留原记录，可以重试。'}`
     } else {
       gameInventoryNotice.value = '本次读取没有完成结果，可能已停止；请查看执务台记录后重试。'
     }
@@ -1130,7 +1130,7 @@ watch([reportMode, inventoryFormOpen, manualSessionFormOpen], async () => {
             <li :class="{ active: ledgerOnboarding.step === 3 }"><span>3</span>立目标</li>
           </ol>
           <div v-if="ledgerOnboarding.step === 1 && !props.ledgerMode" class="ledger-onboarding-copy">
-            <div><b>让まあ丸先认识你的本丸</b><p>打开模拟器并进入游戏本丸，再点「读取游戏家底」。会读取游戏记录，并翻到锻刀、所持道具画面盘点资源；不会锻刀、出阵或花资源。读不到时可以重试，也可以手动记下家底。</p></div>
+            <div><b>让まあ丸先认识你的本丸</b><p>打开模拟器并进入游戏本丸，再点「读取游戏家底」。优先读取游戏记录，缺少的数据才通过锻刀、所持道具画面补充；不会锻刀、出阵或花资源。读不到时可以重试，也可以手动记下家底。</p></div>
             <div class="ledger-onboarding-actions"><button type="button" class="primary" :title="isJp ? '打开日服浏览器并更新家底' : '进入游戏本丸后，读取游戏记录并盘点资源。'" :disabled="gameInventoryBusy || jpListenerBusy || props.running" @click="readGameInventory">{{ gameInventoryBusy || jpListenerBusy ? '正在读取……' : '读取游戏家底' }}</button><button type="button" class="secondary" :disabled="gameInventoryBusy || !!ledgerOnboardingBusy" @click="beginLedgerOnboarding">改用手动录入</button></div>
           </div>
           <div v-else-if="ledgerOnboarding.step === 1" class="ledger-onboarding-copy">

@@ -3,6 +3,20 @@ import json
 from touken.telemetry import TelemetryStore
 
 
+def test_screen_fills_stale_json_but_does_not_override_current_json(tmp_path):
+    store = TelemetryStore(tmp_path / "stock.db")
+    for ts, script, resources in [(1000, "youzu_log", {"小判": 100, "木炭": 50}),
+                                  (1650, "youzu_log", {"木炭": 60}),
+                                  (1700, "game_inventory", {"小判": 200, "木炭": 999})]:
+        store._conn().execute("INSERT INTO events(ts,script,event_type,payload) VALUES(?,?,'inventory.captured',?)",
+                              (ts, script, json.dumps({"resources": resources})))
+    store._conn().commit()
+    stock = store.client_item_inventory(1701)["resources"]
+    assert stock["小判"] == {"count": 200, "observed_at": 1700, "source": "screen"}
+    assert stock["木炭"] == {"count": 60, "observed_at": 1650}
+    store.close()
+
+
 def test_stock_uses_latest_actual_client_count_without_window_or_manual_override(tmp_path):
     store = TelemetryStore(tmp_path / "stock.db")
     for ts, script, resources in [(10, "youzu_log", {"小判": 100, "木炭": 25}),
