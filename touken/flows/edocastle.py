@@ -156,9 +156,9 @@ class EdocastleMixin:
             # 读入场屏钥匙总数（本圈 before）
             keys_before = self._read_key_total(cfg)
             if keys_before is None:
-                yield "[江户城] 入场屏钥匙总数读不出，停"
-                return
-            yield f"[江户城] 本丸钥匙家底：{keys_before} 把"
+                yield "[江户城] 入场钥匙总数未读到，照常开跑；本圈暂不算钥匙增量"
+            else:
+                yield f"[江户城] 本丸钥匙家底：{keys_before} 把"
 
             yield f"[江户城] ⚔️ 第 {runs_done + 1} 圈开场"
 
@@ -219,39 +219,39 @@ class EdocastleMixin:
                 return
 
             keys_after = self._read_key_total(cfg)
-            if keys_after is None:
-                # 用流程内部估算兜底
-                keys_after = keys_before + max(0, run_keys)
-                yield f"[江户城] 结算后钥匙总数没读到，按 HUD 估算 {keys_after} 把"
-            delta = keys_after - keys_before
-            total_keys += delta
+            delta = keys_after - keys_before if keys_after is not None and keys_before is not None else None
+            if delta is not None:
+                total_keys += delta
+            else:
+                yield f"[江户城] 本圈钥匙增量未读清；地图观察约 {max(0, run_keys)} 把，仅供参考，不记入成绩"
+            gain_text = f"{delta:+d}" if delta is not None else "未知"
             if ok:
                 if hasattr(self, "record_event"):
                     from ..advisor import MAX_PLAUSIBLE_KEYS_PER_RUN
                     payload = dict(period=period, difficulty=4,
                                    run_no=runs_done + 1, team_no=team_no)
-                    if 0 < delta <= MAX_PLAUSIBLE_KEYS_PER_RUN:
+                    if delta is not None and 0 < delta <= MAX_PLAUSIBLE_KEYS_PER_RUN:
                         payload["keys"] = delta
-                    else:
+                    elif delta is not None:
                         yield (f"[江户城] 本圈钥匙差 {delta:+d} 离谱，"
                                "疑似 OCR 读岔，这趟不记场均")
                     self.record_event("edocastle.run_completed", **payload)
                 yield (
-                    f"[江户城] ✓ 第 {runs_done + 1} 圈收工，本圈钥匙 {delta:+d} "
+                    f"[江户城] ✓ 第 {runs_done + 1} 圈收工，本圈钥匙 {gain_text} "
                     f"（累计 {total_keys} 把）"
                 )
             else:
                 if hasattr(self, "record_event"):
                     self.record_event(
                         "edocastle.run_aborted",
-                        keys_retained=delta,
+                        **({"keys_retained": delta} if delta is not None else {}),
                         period=period,
                         difficulty=4,
                         attempted_run_no=runs_done + 1,
                         team_no=team_no,
                     )
                 yield (
-                    f"[江户城] ⚠️ 第 {runs_done + 1} 圈意外结束，本圈钥匙 {delta:+d}，"
+                    f"[江户城] ⚠️ 第 {runs_done + 1} 圈意外结束，本圈钥匙 {gain_text}，"
                     "先停下了"
                 )
                 raise FlowAborted(
@@ -260,7 +260,7 @@ class EdocastleMixin:
             runs_done += 1
 
         yield (
-            f"[江户城] 收工，跑了 {runs_done} 圈，合计带回 {total_keys} 把钥匙"
+            f"[江户城] 收工，跑了 {runs_done} 圈，已确认带回 {total_keys} 把钥匙"
         )
 
     # ---------- 内部：入场 → 地图 ----------

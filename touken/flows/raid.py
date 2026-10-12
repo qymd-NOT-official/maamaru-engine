@@ -114,6 +114,7 @@ class RaidMixin:
         march_cfg = cfg.get("auto_march") if auto_march else None
 
         self._raid_takeover_remaining = None
+        self._raid_points_after = None
         self._ticket_buys = 0  # 本次运行的小判买票计数
 
         # ========== 1. 导航到出阵 ==========
@@ -166,6 +167,7 @@ class RaidMixin:
             # 3.1 选难度。旧配置只有图4坐标；其他图未标定时安全停止。
             #     夜光贝在本圈出发前先读一次家底（回到主界面再读一次算差分）。
             shells_before = self._read_shells_total(cfg)
+            self._raid_points_after = time.time()
             targets = cfg.get("difficulty_targets", {})
             target = targets.get(str(difficulty_no))
             if target is None and difficulty_no == 4:
@@ -381,6 +383,10 @@ class RaidMixin:
 
     def _read_shells_total(self, cfg) -> int | None:
         """读联队战主界面的夜光贝累计数（记账用，读不出不挡路）。"""
+        from ..game_state import available_events, activity_points
+        points = activity_points(available_events(self.maa), "raid", after=getattr(self, "_raid_points_after", None))
+        if points is not None:
+            return points
         ocr_cfg = cfg.get("shells_total_ocr", {})
         roi_raw = ocr_cfg.get("roi")
         if not roi_raw:

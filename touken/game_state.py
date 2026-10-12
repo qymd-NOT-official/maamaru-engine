@@ -245,7 +245,7 @@ def begin_operation(maa):
             "requests": {_request_key(e) for e in events if e.get("direction") == "C->S"},
             "repairs": repairs,
             "repair_known": repair_at is not None and 0 <= now - repair_at <= FACT_MAX_AGE,
-            "swords": swords}
+            "swords": swords, "resources": fresh_resources(resource_facts(events))}
 
 
 def operation_result(events, boundary, operation, serial=None):
@@ -670,3 +670,58 @@ def furnace_facts(events, *, now=None):
             result.append({"slot": number, "state": state, "remain": remain})
         return sorted(result, key=lambda r:r["slot"]) or None
     return None
+
+
+def ticket_receipt(events, boundary):
+    """A fresh paid recovery request and its exact result, including actual balance change."""
+    body = practice_receipt(events, boundary, "/sally/recovercost", "1", "num")
+    if body is False or body is None:
+        return body
+    # The CN receipt returns the recovered quantity as result (one for num=1).
+    count = youzu_log._int(body.get("result"), -1)
+    if count == 0:
+        return False
+    if count != 1:
+        return None
+    before = boundary.get("resources", {}).get("小判")
+    after = (youzu_log._reading_from_payload(body) or {}).get("小判")
+    spent = before - after if before is not None and after is not None and after <= before else None
+    return {"count": count, "spent": spent}
+
+
+def confirm_ticket(maa, boundary):
+    return ticket_receipt(available_events(maa), boundary)
+
+
+def activity_points(events, mechanic, *, now=None, after=None):
+    """Bind an activity ID to its active game block, then read that ID's current points."""
+    block = {"raid": "allout", "hanafuda": "koikoi"}.get(mechanic)
+    if block is None:
+        return None
+    now = time.time() if now is None else now
+    pending, binding, points = [], None, {}
+    for event in events:
+        endpoint = event.get("endpoint")
+        at = youzu_log._event_epoch(event)
+        if endpoint == "/sally/eventsally" and event.get("direction") == "C->S":
+            pending.append(event)
+            continue
+        body = successful_body(event)
+        if endpoint == "/sally/eventsally" and event.get("direction") == "S->C":
+            request = pending.pop() if len(pending) == 1 else None
+            pending.clear()
+            if request and body is not None and at is not None:
+                active = [key for key in ("allout", "koikoi", "edo", "goldenfall", "tsukimi")
+                          if isinstance(body.get(key), dict) and body[key]]
+                event_id = (request.get("payload") or {}).get("event_id")
+                if active == [block] and youzu_log._int(event_id) > 0:
+                    binding = (str(event_id), at)
+        if body is not None and at is not None and isinstance(body.get("point"), dict):
+            for event_id, value in body["point"].items():
+                count = youzu_log._int(value, -1)
+                if count >= 0 and at >= points.get(str(event_id), (-1, 0))[1]:
+                    points[str(event_id)] = (count, at)
+    if binding is None or not 0 <= now - binding[1] <= FACT_MAX_AGE:
+        return None
+    count, at = points.get(binding[0], (-1, 0))
+    return count if count >= 0 and 0 <= now - at <= FACT_MAX_AGE and (after is None or at >= after) else None

@@ -124,6 +124,7 @@ class HanafudaMixin:
         self.set_progress("hanafuda")
 
         # ========== 3. 主循环：一圈一圈跑 ==========
+        self._hanafuda_points_after = None
         runs_done = 0
         total_tama = 0
         team_record_saved = False
@@ -137,6 +138,7 @@ class HanafudaMixin:
                 break
 
             tama_before = self._read_tama_total(cfg)
+            self._hanafuda_points_after = time.time()
             yield f"[花札] 🎴 第 {runs_done + 1} 圈开场（难度·{label}）"
 
             entered, team_record_saved = yield from self._enter_hanafuda_map_stream(
@@ -155,7 +157,7 @@ class HanafudaMixin:
 
             runs_done += 1
             tama_after = self._read_tama_total(cfg)
-            if tama_before is not None and tama_after is not None:
+            if tama_before is not None and tama_after is not None and tama_after >= tama_before:
                 delta = tama_after - tama_before
                 total_tama += delta
                 if hasattr(self, "record_event"):
@@ -327,6 +329,10 @@ class HanafudaMixin:
 
     def _read_tama_total(self, cfg: dict) -> int | None:
         """读活动主界面的玉累计数（记账用，读不出不挡路）。"""
+        from ..game_state import available_events, activity_points
+        points = activity_points(available_events(self.maa), "hanafuda", after=getattr(self, "_hanafuda_points_after", None))
+        if points is not None:
+            return points
         ocr_cfg = cfg.get("tama_total_ocr", {})
         roi_raw = ocr_cfg.get("roi")
         if not roi_raw:

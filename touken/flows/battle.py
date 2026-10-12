@@ -287,7 +287,9 @@ class BattleMixin:
         if not hasattr(self, "record_event"):
             return
         source = tag.strip("[]")
-        price = int(cfg["ticket_price"]) if cfg.get("ticket_price") else None
+        receipt = getattr(self, "_ticket_refill_receipt", None)
+        self._ticket_refill_receipt = None
+        price = receipt.get("spent") if isinstance(receipt, dict) else int(cfg["ticket_price"]) if cfg.get("ticket_price") else None
         refill_payload = {"source": source}
         if price:
             refill_payload.update(
@@ -297,7 +299,7 @@ class BattleMixin:
             return
         change = {
             "source": "ticket.refilled",
-            "evidence": "confirmed_refill_flow",
+            "evidence": "game_refill_result" if isinstance(receipt, dict) else "confirmed_refill_flow",
             "note": f"{source}补手形",
         }
         if isinstance(refill_id, int):
@@ -316,7 +318,10 @@ class BattleMixin:
           （不配 recover_button；三连确认是同一张图，见到就点、消失
           为止，最多 3 次防死循环。数量页默认补 1 个，可配
           quantity_ocr 复核数量，读不清或不是 1 就停手不点）。"""
+        from ..game_state import begin_operation, confirm_ticket
         self._recover_ok = False
+        self._ticket_refill_receipt = None
+        boundary = begin_operation(self.maa)
         rec_cfg = cfg["ticket_recover"]
 
         self.maa.screenshot(force=True)
@@ -360,16 +365,33 @@ class BattleMixin:
             self.maa.click(confirm)
             clicks += 1
             time.sleep(1.5)
+            receipt = confirm_ticket(self.maa, boundary)
+            if receipt is False:
+                yield f"{tag} 游戏未受理本次补充，停止点击"
+                return
+            if isinstance(receipt, dict):
+                self._ticket_refill_receipt = receipt
         if clicks == 0:
             yield f"{tag} 找不到恢复完毕的确定按钮"
             return
         if slider_style and clicks >= max_clicks:
             self.maa.screenshot(force=True)
-            if self._match_template_config(rec_cfg["confirm_button"]):
+            if self._match_template_config(rec_cfg["confirm_button"]) and not isinstance(self._ticket_refill_receipt, dict):
                 yield f"{tag} 确认点了 {clicks} 次还在，停手防死循环"
                 return
         time.sleep(0.5)
 
+        receipt = confirm_ticket(self.maa, boundary)
+        if receipt is None and isinstance(self._ticket_refill_receipt, dict):
+            receipt = self._ticket_refill_receipt
+        if receipt is False:
+            yield f"{tag} 游戏未受理本次补充，停止点击"
+            return
+        if isinstance(receipt, dict):
+            self._ticket_refill_receipt = receipt
+        elif self._match_template_config(rec_cfg["confirm_button"]):
+            yield f"{tag} 补充结果未确认，停止点击，不再重复付款"
+            return
         self._recover_ok = True
         yield f"{tag} 手形补充完成"
 
@@ -740,8 +762,20 @@ class BattleMixin:
                     yield (f"{tag} 补票弹窗的确定按钮没认出，停止点击，"
                            "请手动看一眼")
                     return False, team_record_saved
+                from ..game_state import begin_operation, confirm_ticket
+                boundary = begin_operation(self.maa)
+                self._ticket_refill_receipt = None
                 self.maa.click(confirm)
                 time.sleep(1.5)
+                receipt = confirm_ticket(self.maa, boundary)
+                if receipt is False:
+                    yield f"{tag} 游戏未受理本次补票，停止出阵"
+                    return False, team_record_saved
+                if isinstance(receipt, dict):
+                    self._ticket_refill_receipt = receipt
+                elif self.maa.template_match(popup_template):
+                    yield f"{tag} 补票结果未确认，停止点击，防止重复消费小判"
+                    return False, team_record_saved
                 refill_done = True
                 if refill_state is not None:
                     refill_state["used"] = True

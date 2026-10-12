@@ -563,6 +563,12 @@ class BattleComponentTests(unittest.TestCase):
             "恢复一个.png": recover,
             "确定.png": confirm,
         }))
+        original_click = flow.maa.click
+        def click_and_close(point):
+            original_click(point)
+            if point == confirm:
+                flow.maa.templates.pop("确定.png", None)
+        flow.maa.click = click_and_close
         cfg = {"ticket_recover": {
             "popup_button": {"template": "补充.png"},
             "recover_button": {"template": "恢复一个.png"},
