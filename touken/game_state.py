@@ -93,7 +93,7 @@ def expedition_started(events, team_no, field_id, after):
 def sword_facts(events):
     """Reduce full snapshots and sparse updates by instance and field, in event order."""
     swords, parties = {}, {}
-    hp_times, slot_times, field_times = {}, {}, {}
+    hp_times, slot_times, field_times, field_indices = {}, {}, {}, {}
     combat_index, combat_at = -1, 0
     for index, event in enumerate(events):
         body = successful_body(event)
@@ -110,7 +110,7 @@ def sword_facts(events):
             rows = None
         if isinstance(rows, dict):
             if full:
-                swords, hp_times, field_times = {}, {}, {}
+                swords, hp_times, field_times, field_indices = {}, {}, {}, {}
             for key, row in rows.items():
                 if not isinstance(row, dict):
                     continue
@@ -122,6 +122,7 @@ def sword_facts(events):
                 for field, value in row.items():
                     if at >= times.get(field, 0):
                         current[field], times[field] = value, at
+                        field_indices.setdefault(serial, {})[field] = index
                         if field == "hp":
                             hp_times[serial] = (at, index)
         teams = body if endpoint == "/party/setsword" else body.get("party")
@@ -149,7 +150,7 @@ def sword_facts(events):
             combat_index = index
             combat_at = max(combat_at, at)
     return {"swords": swords, "parties": parties, "hp_times": hp_times,
-            "slot_times": slot_times, "field_times": field_times,
+            "slot_times": slot_times, "field_times": field_times, "field_indices": field_indices,
             "combat_index": combat_index, "combat_at": combat_at}
 
 
@@ -725,3 +726,74 @@ def activity_points(events, mechanic, *, now=None, after=None):
         return None
     count, at = points.get(binding[0], (-1, 0))
     return count if count >= 0 and 0 <= now - at <= FACT_MAX_AGE and (after is None or at >= after) else None
+
+
+def member_field(events, team, slot, field, *, now=None, previous=None):
+    """An identified current member and a freshly observed field."""
+    now = time.time() if now is None else now
+    state = sword_facts(events)
+    serial = str(state["parties"].get(str(team), {}).get(str(slot), ""))
+    member_at = state["slot_times"].get(str(team), {}).get(str(slot), 0)
+    if not serial.isdigit() or int(serial) <= 0:
+        return None
+    at = state["field_times"].get(serial, {}).get(field, 0)
+    if not all(0 <= now - t <= FACT_MAX_AGE for t in (member_at, at)):
+        return None
+    if previous is not None:
+        before = sword_facts(previous)
+        if str(before["parties"].get(str(team), {}).get(str(slot), "")) != serial:
+            return None
+        old = {_request_key(e) for e in previous if e.get("direction") == "S->C"}
+        new = sword_facts([e for e in events if e.get("direction") == "S->C" and _request_key(e) not in old])
+        if field not in new["swords"].get(serial, {}):
+            return None
+    return serial, state["swords"].get(serial, {}).get(field)
+
+
+def fatigue_value(events, team, slot, *, now=None):
+    member = member_field(events, team, slot, "fatigue", now=now)
+    if member is None:
+        return None
+    serial, raw = member
+    state = sword_facts(events)
+    if (state["field_indices"].get(serial, {}).get("fatigue", -1) < state["combat_index"]
+            or state["field_times"][serial]["fatigue"] < state["combat_at"]):
+        return None
+    if isinstance(raw, bool) or isinstance(raw, float) and not raw.is_integer():
+        return None
+    value = youzu_log._int(raw, -1)
+    return value if 0 <= value <= 100 else None
+
+
+def equipped_asset(events, team, slot, kind, *, now=None, previous=None):
+    from .client_equipment import EQUIPMENT_NAMES, CHARM_NAMES, TREASURE_NAMES
+    field = {"horse": "horse_serial_id", "charm": "item_id", "treasure": "artifact_serial_id1"}[kind]
+    member = member_field(events, team, slot, field, now=now, previous=previous)
+    if member is None:
+        return None
+    serial, asset_id = member
+    if asset_id in (None, "", 0, "0"):
+        return {"empty": True}
+    if kind == "charm":
+        name = CHARM_NAMES.get(youzu_log._int(asset_id))
+        return {"name": name} if name else None
+    now = time.time() if now is None else now
+    for event in reversed(events):
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        pool = body.get("artifact" if kind == "treasure" else "equip") if body else None
+        if not isinstance(pool, dict) or at is None or not 0 <= now-at <= FACT_MAX_AGE:
+            continue
+        row = next((r for r in pool.values() if isinstance(r, dict) and str(r.get("serial_id")) == str(asset_id)), None)
+        if row is None:
+            continue
+        if kind == "horse":
+            known = EQUIPMENT_NAMES.get(youzu_log._int(row.get("equip_id")))
+            return {"name": known[1]} if known and known[0] == "horse" else None
+        level = youzu_log._int(row.get("level"), -1)
+        affection = youzu_log._int(row.get("usage_score"), -1)
+        if level < 1 or affection < 0:
+            return None
+        return {"name": TREASURE_NAMES.get(youzu_log._int(row.get("artifact_id"))),
+                "level": level, "affection": affection}
+    return None

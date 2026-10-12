@@ -566,7 +566,7 @@ class ApplyStreamTests(unittest.TestCase):
                            return_value=iter([f"[{kind}] 没找到，停"])) as equip:
                     ok, msgs = _apply(host, slots=slots)
                 self.assertFalse(ok)
-                equip.assert_called_once_with(host, 1, kind, name)
+                equip.assert_called_once_with(host, 1, kind, name, team_no=3)
                 self.assertIn("绝不继续出发", msgs[-1])
 
     def test_troop_failure_stops_preset_before_departure(self):

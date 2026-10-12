@@ -1155,14 +1155,14 @@ class FormationEditorMixin:
                 for kind, label in (("horse", "马"), ("charm", "御守")):
                     if equipment.get(kind):
                         equipped = yield from equip_preset_accessory_stream(
-                            self, slot_no, kind, equipment[kind])
+                            self, slot_no, kind, equipment[kind], team_no=team_no)
                         if not equipped:
                             yield (f"[预设编队] {slot_no}号位的{label}没装妥，"
                                    "预设没应用完，绝不继续出发")
                             return False
                 if equipment.get("treasure"):
                     equipped = yield from equip_preset_treasure_stream(
-                        self, slot_no, equipment["treasure"])
+                        self, slot_no, equipment["treasure"], team_no=team_no)
                     if not equipped:
                         yield (f"[预设编队] {slot_no}号位的宝物没装妥，"
                                "预设没应用完，绝不继续出发")

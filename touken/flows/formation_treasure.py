@@ -132,8 +132,9 @@ def transfer_owner(tokens):
     return None
 
 
-def equip_preset_treasure_stream(agent, slot_no, target):
+def equip_preset_treasure_stream(agent, slot_no, target, team_no=None):
     """在已确认的编队页给一个槽位换宝物；失败时绝不点未知卡片。"""
+    from ..game_state import available_events, equipped_asset
     maa = agent.maa
     from .team_roster import _ROW_CY
 
@@ -151,6 +152,11 @@ def equip_preset_treasure_stream(agent, slot_no, target):
         return False
 
     try:
+        before = available_events(maa) if team_no else []
+        current = equipped_asset(before, team_no, slot_no, "treasure") if team_no else None
+        if current is not None and all(current.get(field) == target.get(field) for field in ("name", "level", "affection")):
+            yield f"[宝物] {slot_no}号位已经装着指定的「{target['name']}」"
+            return True
         maa.click(Point(634, 365))
         time.sleep(0.4)
         if not _has_text(maa, "宝物", _PANEL_TITLE):
@@ -175,11 +181,6 @@ def equip_preset_treasure_stream(agent, slot_no, target):
             yield "[宝物] 所持计数与装备状态矛盾，停"
             return False
 
-        slot_tokens = _tokens(maa, _SLOT)
-        if any(str(value).strip() == target["name"] for value, _ in slot_tokens):
-            yield f"[宝物] {slot_no}号位已经装着「{target['name']}」"
-            return True
-
         maa.click(point)
         time.sleep(0.35)
         maa.screenshot(force=True)
@@ -200,7 +201,12 @@ def equip_preset_treasure_stream(agent, slot_no, target):
         elif owner:
             yield "[宝物] 未装备宝物却出现转交弹窗，停止确认"
             return False
-        if not any(str(value).strip() == target["name"]
+        actual = equipped_asset(available_events(maa), team_no, slot_no, "treasure", previous=before) if team_no else None
+        details_wrong = actual is not None and (actual.get("empty") or any(actual.get(field) != target.get(field) for field in ("level", "affection"))
+                         or actual.get("name") is not None and actual["name"] != target["name"])
+        # Unknown names retain the screen confirmation after selecting the full target fingerprint.
+        named = actual is not None and actual.get("name") == target["name"]
+        if details_wrong or not named and not any(str(value).strip() == target["name"]
                    for value, _ in _tokens(maa, _SLOT)):
             yield "[宝物] 换装后槽位未读到目标宝物，停"
             return False

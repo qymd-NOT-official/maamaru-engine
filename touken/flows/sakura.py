@@ -89,6 +89,7 @@ class SakuraMixin:
         if repair_threshold not in ('light', 'medium', 'heavy'):
             yield "[刷花] 伤势停止条件无效，未清队"
             return
+        self._sakura_active_team = team_no
         target, swap_threshold = 100, 50
         from ..expedition_sakura import pending_restore
         if pending_restore():
@@ -346,9 +347,13 @@ class SakuraMixin:
 
     def _check_fatigue(self, team_no: int, slot: int, *, in_place: bool = False):
         """
-        导航到编队 → 切部队标签 → OCR 读疲劳。
+        先读当前队员的游戏疲劳数据，缺数据才导航到编队读画面。
         Returns: 疲劳值 int；读不到返回 None（yield from 接返回值）
         """
+        from ..game_state import available_events, fatigue_value
+        fatigue = fatigue_value(available_events(self.maa), team_no, slot)
+        if fatigue is not None:
+            return fatigue
         if in_place:
             # 换人已回到所选部队，直接读，不重走目录或重选部队。
             self.maa.screenshot(force=True)
@@ -557,6 +562,15 @@ class SakuraMixin:
         return True
 
     def _sakura_unequip(self):
+        team_no = getattr(self, "_sakura_active_team", None)
+        if team_no is not None:
+            if self.current_location != "编队":
+                yield from self.navigate_to_stream("编队")
+                if self.current_location != "编队":
+                    yield "[刷花] 卸装前到不了编队，停止"
+                    return False
+            self.maa.click(Point(*_TEAM_TAB[team_no]))
+            time.sleep(1.5)
         if not self._sakura_equipment_page():
             yield "[刷花] 卸装时装备页没打开，停止"
             return False

@@ -56,10 +56,8 @@ def find_horse_in_list(maa, name):
         tokens = _tokens(maa, _HORSE_LIST)
         matches = _horse_matches(tokens, name)
         free = [point for point, occupied in matches if not occupied]
-        if len(free) == 1:
-            return free[0], False
-        if len(free) > 1:
-            return None
+        if free:
+            return min(free, key=lambda point: point.y), False
         occupied = [point for point, taken in matches if taken]
         if uniquely_named and len(occupied) == 1:
             return occupied[0], True
@@ -81,7 +79,8 @@ def find_charm_in_list(maa, name):
                            and abs(badge_point.y - point.y) <= 25
                            for badge, badge_point in tokens))
                for value, point in tokens if str(value).strip() == name]
-    return matches[0] if len(matches) == 1 and not matches[0][1] else None
+    free = [match for match in matches if not match[1]]
+    return min(free, key=lambda match: match[0].y) if free else None
 
 
 def _transfer_owner(maa):
@@ -89,10 +88,11 @@ def _transfer_owner(maa):
     return transfer_owner(_tokens(maa, _TRANSFER))
 
 
-def equip_preset_accessory_stream(agent, slot_no, kind, name):
+def equip_preset_accessory_stream(agent, slot_no, kind, name, team_no=None):
     """kind 为 horse/charm；失败时不继续预设。"""
     from .team_roster import _ROW_CY
 
+    from ..game_state import available_events, equipped_asset
     maa = agent.maa
     if (not isinstance(slot_no, int) or not 1 <= slot_no <= 6
             or kind not in ("horse", "charm")
@@ -112,8 +112,10 @@ def equip_preset_accessory_stream(agent, slot_no, kind, name):
         yield f"[{label}] 装备页没打开，停"
         return False
     try:
-        current = _tokens(maa, slot)
-        if any(((_horse_name(value).endswith(name) if kind == "horse"
+        before = available_events(maa) if team_no else []
+        asset = equipped_asset(before, team_no, slot_no, kind) if team_no else None
+        current = _tokens(maa, slot) if asset is None else []
+        if asset is not None and asset.get("name") == name or asset is None and any(((_horse_name(value).endswith(name) if kind == "horse"
                  else str(value).strip() == name)) for value, _ in current):
             yield f"[{label}] {slot_no}号位已经是「{name}」"
             return True
@@ -149,9 +151,10 @@ def equip_preset_accessory_stream(agent, slot_no, kind, name):
         elif owner:
             yield f"[{label}] 未装备的候选却出现转交弹窗，停"
             return False
-        if not any(((_horse_name(value).endswith(name) if kind == "horse"
+        actual = equipped_asset(available_events(maa), team_no, slot_no, kind, previous=before) if team_no else None
+        if (actual is not None and actual.get("name") != name) or (actual is None and not any(((_horse_name(value).endswith(name) if kind == "horse"
                      else str(value).strip() == name))
-                   for value, _ in _tokens(maa, slot)):
+                   for value, _ in _tokens(maa, slot))):
             yield f"[{label}] 换装后没有读到「{name}」，停"
             return False
         yield f"[{label}] ✓ {slot_no}号位已装备「{name}」"
