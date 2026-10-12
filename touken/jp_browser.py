@@ -26,6 +26,7 @@ class JpBrowser:
         self._socket: jp_listener._CdpSocket | None = None
         self._page_id: str | None = None
         self._view: dict | None = None
+        self._enforce_view = True
 
     # ---- 生命周期 ----
 
@@ -88,10 +89,32 @@ class JpBrowser:
         """核对窗口尺寸与连接时一致；变了立即熔断，绝不盲点。"""
         current = self._read_view()
         base = self._view or current
-        if (current['clientWidth'], current['clientHeight']) != (
+        if self._enforce_view and (current['clientWidth'], current['clientHeight']) != (
                 base['clientWidth'], base['clientHeight']):
             raise BrowserError('游戏窗口尺寸已变化，已停止操作；请恢复窗口后重新开始')
         return current
+
+    def relaxed_view(self):
+        """暂时关闭视口尺寸熔断（上下文管理器）。
+
+        仅用于刷新后的启动序列：页面导航期间滚动条显隐会让视口读数
+        抖动一个滚动条宽度，而启动按钮全按模板命中的归一化坐标点击，
+        不受这点抖动影响。退出时以当前读数重锁基线，恢复熔断。"""
+        import contextlib
+
+        @contextlib.contextmanager
+        def _relaxed():
+            self._enforce_view = False
+            try:
+                yield
+            finally:
+                self._enforce_view = True
+                try:
+                    self._view = self._read_view()
+                except BrowserError:
+                    pass  # 页面还在导航就保持旧基线；下次 check_view 会兜底
+
+        return _relaxed()
 
     def _send(self, method: str, params: dict | None = None) -> None:
         """只发不等应答（ack 进 backlog，后续 _call 会自动收掉）。
@@ -106,6 +129,34 @@ class JpBrowser:
         except ConnectionError:
             self.close()
             raise BrowserError('与游戏页面的连接已断开，请确认浏览器仍在运行')
+
+    def reload(self, settle_timeout: float = 20.0) -> None:
+        """刷新游戏页（相当于 F5）。仅用于长时间黑屏加载的自愈。
+
+        刷新后页面 target 不变，socket 连接仍然有效；浏览器崩溃导致的
+        连接断开按 BrowserError 抛出，由状态机安全停止。
+        刷新完成后重新锁存视口基线：页面导航期间滚动条显隐会让
+        getLayoutMetrics 抖动，而窗口本身并没有动——这不算「用户改了窗口」。"""
+        self._call('Page.reload', {'ignoreCache': False}, timeout=5)
+        self._view = self._wait_view_stable(timeout=settle_timeout)
+
+    def _wait_view_stable(self, timeout: float = 20.0) -> dict:
+        """刷新后等视口尺寸读数稳定下来再锁存基线。
+
+        页面导航期间滚动条显隐会让 getLayoutMetrics 抖动；连续两次读到
+        同样的尺寸才算稳。超时仍不稳按异常抛，状态机会安全停止。"""
+        deadline = time.monotonic() + timeout
+        last = None
+        while time.monotonic() < deadline:
+            try:
+                view = self._read_view()
+            except BrowserError:
+                view = None
+            if view and view == last:
+                return view
+            last = view
+            time.sleep(0.5)
+        raise BrowserError('刷新后游戏画面尺寸一直不稳定，已停止；请人工查看浏览器')
 
     # ---- 画面与输入 ----
 

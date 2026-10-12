@@ -18,6 +18,9 @@ KNOWN = {
     'dialog/yes': (0.600, 0.601),
     'dialog/no': (0.388, 0.601),
     'dialog/automarch-request': (0.500, 0.154),
+    'boot/volume-arrow': (0.496, 0.681),
+    'boot/honmaru-button': (0.492, 0.731),
+    'formation/label': (0.060, 0.134),
 }
 
 pytestmark = pytest.mark.skipif(
@@ -45,6 +48,7 @@ class FakeBrowser:
     def __init__(self, frames):
         self.frames = list(frames)
         self.clicks = []
+        self.reloads = 0
 
     def screenshot(self):
         if self.frames:
@@ -53,6 +57,13 @@ class FakeBrowser:
 
     def click(self, nx, ny):
         self.clicks.append((round(nx, 3), round(ny, 3)))
+
+    def reload(self):
+        self.reloads += 1
+
+    def relaxed_view(self):
+        import contextlib
+        return contextlib.nullcontext()
 
 
 def make_sally(browser, **kwargs):
@@ -107,6 +118,18 @@ def test_menu_already_open_skips_shiki_tab():
     assert any('出阵完成' in line for line in logs)
 
 
+def test_navigation_continues_from_formation():
+    """停留在编成页：点左上 ↩ 回本丸再接着走。"""
+    frames = [fake_screen('formation/label'),   # 编成页
+              ] + happy_frames()
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1)
+    assert browser.clicks[0] == (round(jp_sally.BACK_ARROW[0], 3),
+                                 round(jp_sally.BACK_ARROW[1], 3))
+    assert any('出阵完成' in line for line in logs)
+
+
 def test_dialog_during_march_stops_everything():
     frames = happy_frames()[:11] + [fake_screen('dialog/yes', 'dialog/no')]
     browser = FakeBrowser(frames)
@@ -141,6 +164,63 @@ def test_near_black_counts_as_loading_then_timeout():
     with pytest.raises(jp_sally.SallyStop, match='超时'):
         sally._wait(frozenset({'home'}), timeout=0.1,
                     passable=frozenset({'loading'}), what='测试')
+
+
+def greeting_frame():
+    """登录问候：近侍全身像无 UI——没有可匹配元素，用纯色不暗帧充当。"""
+    return Image.new('RGB', (1508, 1088), (60, 60, 70))
+
+
+def test_black_loading_too_long_reloads_and_boots(monkeypatch):
+    """黑屏加载卡死 → 自动刷新一次 → 启动序列（音量/标题/问候）→ 回本丸出阵。"""
+    monkeypatch.setattr(jp_sally, 'RELOAD_AFTER', -1.0)   # 第二帧黑屏即触发
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)   # 问候稳定判定立即满足
+    black = Image.new('RGB', (1508, 1088), (0, 0, 0))
+    frames = [
+        black, black,                          # 持续黑屏 → 刷新
+        fake_screen('boot/volume-arrow'),      # 启动：音量注意
+        fake_screen('boot/honmaru-button'),    # 启动：标题页
+        greeting_frame(), greeting_frame(),    # 登录问候（unknown 稳定后点中央）
+        fake_screen('home/badge'),             # 回到本丸
+    ] + happy_frames()[1:]                     # 之后照常走到出阵
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1)
+    assert browser.reloads == 1
+    assert any('自动刷新' in line for line in logs)
+    assert any('跳过登录问候' in line for line in logs)
+    assert (0.5, 0.5) in browser.clicks        # 问候屏中央
+    assert any('出阵完成' in line for line in logs)
+
+
+def test_reload_only_once_per_navigation(monkeypatch):
+    """刷新一次后仍持续黑屏 → 不再刷第二次，超时安全停车。"""
+    monkeypatch.setattr(jp_sally, 'RELOAD_AFTER', -1.0)
+    monkeypatch.setattr(jp_sally, 'BOOT_TIMEOUT', 0.05)
+    black = Image.new('RGB', (1508, 1088), (0, 0, 0))
+    browser = FakeBrowser([black])             # 永远黑屏
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop):
+        sally.run(team_no=1, rounds=1)
+    assert browser.reloads == 1
+    assert browser.clicks == []
+
+
+def test_boot_ignores_stale_home_frame(monkeypatch):
+    """刷新后的前几帧可能还是旧本丸画面——必须等它消失再认「到家」。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    frames = [
+        fake_screen('home/badge'),             # 刷新前的残留帧
+        fake_screen('boot/volume-arrow'),
+        fake_screen('boot/honmaru-button'),
+        fake_screen('home/badge'),             # 真正回到本丸
+    ]
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    # 残留帧没骗过它：箭头与本丸按钮都被点过
+    assert len(browser.clicks) == 2
+    assert any('重新进入本丸' in line for line in logs)
 
 
 @pytest.mark.parametrize('team_no', [0, 6, '二'])

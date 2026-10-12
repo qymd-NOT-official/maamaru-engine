@@ -2,8 +2,9 @@
 """日服游戏画面的图形识别：帧归一化 + 模板匹配。
 
 v1 不上 OCR：文字类判断一律回避，全靠图形模板。模板按同源铁律从实跑帧
-裁剪（resource/base/image/jp/，由 jp_capture 采集后制作）；运行帧先
-resize 到标定基准分辨率再匹配，吸收浏览器窗口缩放带来的尺寸漂移。
+裁剪（resource/base/image/jp/，由 jp_capture 采集后制作）；运行帧按宽度比
+等比缩放到基准宽度再匹配，吸收窗口整体缩放；窗口高度变化只是视口裁剪，
+内容逐像素不变，不需要也不允许纵向拉伸。
 """
 from __future__ import annotations
 
@@ -70,15 +71,34 @@ def load_template(name: str):
 
 
 def normalize_frame(image, base: tuple[int, int] | None = None):
+    """把运行帧按「宽度比」等比缩放到基准宽度。
+
+    DMM 页面内容是固定宽度的：窗口变矮只是视口裁剪，内容逐像素不变，
+    绝不能按 (宽,高) 双双拉伸——那会把模板匹配分数拉崩（2026-10-12 事故：
+    窗口从 1088 变 944，拉伸后 home/badge 从 1.0 掉到 0.76）。"""
     base = base or base_size()
-    """把运行帧缩到基准分辨率；已是基准尺寸则原样返回。"""
-    if image.size == tuple(base):
+    bw, _ = base
+    w, h = image.size
+    if w == bw:
         return image
-    return image.resize(tuple(base))
+    return image.resize((bw, round(h * bw / w)))
 
 
 def near_black(image, ceiling: int = 8) -> bool:
     return all(high <= ceiling for low, high in image.getextrema())
+
+
+def mostly_dark(image, ceiling: int = 16,
+                region: tuple[float, float, float, float] = (0.15, 0.15, 0.7, 0.6)) -> bool:
+    """画面中心区域全暗视为黑屏转场/加载。
+
+    整帧判黑（near_black）会被 DMM 页头页尾的白底骗过——游戏区全黑加载时
+    网页框架还是白的。实际画面（本丸/地图/战斗）中心必有内容，不会全暗。"""
+    w, h = image.size
+    rx, ry, rw, rh = region
+    crop = image.crop((int(rx * w), int(ry * h),
+                       int((rx + rw) * w), int((ry + rh) * h)))
+    return all(high <= ceiling for low, high in crop.getextrema())
 
 
 def _to_gray(image):
@@ -137,9 +157,9 @@ def matches(frame, names: list[str],
 
 def base_size_ok(image, base: tuple[int, int] | None = None, tolerance: float = 0.02) -> bool:
     base = base or base_size()
-    """画面宽高比与基准一致才允许跑（窗口拖变形了模板会全线漂移）。"""
+    """帧宽与基准接近即可；高度差只是窗口裁剪，归一化按宽度比等比处理。"""
     w, h = image.size
     if w <= 0 or h <= 0:
         return False
-    bw, bh = base
-    return abs(w / h - bw / bh) <= tolerance
+    bw, _ = base
+    return abs(w - bw) / bw <= tolerance

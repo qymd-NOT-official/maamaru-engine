@@ -53,11 +53,21 @@ def test_roi_limits_search_area(scene):
     assert hit is not None
 
 
-def test_normalize_frame_scales_to_base(scene):
+def test_normalize_frame_scales_by_width_ratio(scene):
     frame, template = scene
     small = frame.resize((640, 360))
     normalized = jp_vision.normalize_frame(small)
     assert normalized.size == (1280, 720)
+    assert jp_vision.match(normalized, template) is not None
+
+
+def test_normalize_frame_height_clip_not_stretched(scene):
+    """窗口变矮只是视口裁剪：同宽的帧原样返回，绝不纵向拉伸
+    （2026-10-12 事故：拉伸让 home/badge 匹配分从 1.0 掉到 0.76）。"""
+    frame, template = scene
+    clipped = frame.crop((0, 0, 1280, 600))
+    normalized = jp_vision.normalize_frame(clipped)
+    assert normalized.size == (1280, 600)
     assert jp_vision.match(normalized, template) is not None
 
 
@@ -84,5 +94,19 @@ def test_near_black_and_base_size_guard():
     from PIL import Image
     assert jp_vision.near_black(Image.new('RGB', (64, 64), (2, 2, 2)))
     assert not jp_vision.near_black(Image.new('RGB', (64, 64), (90, 90, 90)))
-    assert jp_vision.base_size_ok(Image.new('RGB', (1920, 1080)))
-    assert not jp_vision.base_size_ok(Image.new('RGB', (1000, 1000)))
+    # 宽度对齐基准（1280）即可，高度是窗口裁剪
+    assert jp_vision.base_size_ok(Image.new('RGB', (1280, 600)))
+    assert jp_vision.base_size_ok(Image.new('RGB', (1290, 1080)))
+    assert not jp_vision.base_size_ok(Image.new('RGB', (1920, 1080)))
+
+
+def test_mostly_dark_sees_black_game_area_behind_white_page():
+    from PIL import Image
+    # DMM 页框是白的、游戏区全黑：整帧判黑会漏，中心判黑能抓到
+    image = Image.new('RGB', (1000, 800), (255, 255, 255))
+    image.paste(Image.new('RGB', (700, 480), (0, 0, 0)), (150, 120))
+    assert jp_vision.mostly_dark(image)
+    assert not jp_vision.near_black(image)
+    # 中心有内容（本丸/地图/战斗）不算加载
+    image.paste(Image.new('RGB', (100, 100), (200, 30, 30)), (450, 350))
+    assert not jp_vision.mostly_dark(image)

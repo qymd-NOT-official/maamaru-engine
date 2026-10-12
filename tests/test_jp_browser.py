@@ -125,6 +125,40 @@ def test_press_failure_surfaces_original_error(fake):
     assert socket.closed
 
 
+def test_reload_rebaselines_view(fake, monkeypatch):
+    monkeypatch.setattr(jp_browser.time, 'sleep', lambda s: None)
+    browser = jp_browser.JpBrowser().connect()
+    fake['view'] = {'clientWidth': 1206, 'clientHeight': 755}  # 滚动条显隐级抖动
+    browser.reload()
+    socket = fake['sockets'][0]
+    assert any(method == 'Page.reload' for method, _ in socket.calls)
+    assert browser.base_view['clientWidth'] == 1206
+    browser.screenshot()  # 不炸
+
+
+def test_reload_never_stable_view_raises(fake, monkeypatch):
+    monkeypatch.setattr(jp_browser.time, 'sleep', lambda s: None)
+    browser = jp_browser.JpBrowser().connect()
+    import itertools
+    views = itertools.cycle([{'clientWidth': 1191, 'clientHeight': 740},
+                             {'clientWidth': 1206, 'clientHeight': 755}])
+    monkeypatch.setattr(browser, '_read_view', lambda: dict(next(views)))
+    with pytest.raises(jp_browser.BrowserError, match='不稳定'):
+        browser.reload(settle_timeout=0.2)
+
+
+def test_relaxed_view_tolerates_flap_and_relocks(fake):
+    browser = jp_browser.JpBrowser().connect()
+    with browser.relaxed_view():
+        fake['view'] = {'clientWidth': 1206, 'clientHeight': 755}
+        browser.screenshot()  # 抖动不熔断
+        browser.click(.5, .5)
+    assert browser.base_view['clientWidth'] == 1206  # 退出时重锁基线
+    fake['view'] = {'clientWidth': 800, 'clientHeight': 755}
+    with pytest.raises(jp_browser.BrowserError, match='尺寸已变化'):
+        browser.screenshot()  # 熔断恢复生效
+
+
 def test_connection_drop_becomes_readable_error(fake):
     browser = jp_browser.JpBrowser().connect()
     fake['sockets'][0].broken = True

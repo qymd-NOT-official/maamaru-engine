@@ -16,6 +16,7 @@ import time
 from . import jp_browser, jp_browser_probe as frames, jp_vision
 
 SHIKI_TAB = (0.940, 0.728)          # 本丸右侧「指揮」拉页
+BACK_ARROW = (0.138, 0.115)         # 编成等子页左上「↩」回本丸
 TEAM_TABS = {1: (0.142, 0.168), 2: (0.229, 0.168), 3: (0.316, 0.168),
              4: (0.403, 0.168), 5: (0.490, 0.168)}
 AUTOMARCH_BUTTON = (0.907, 0.490)   # 部队选择页「自動行軍」
@@ -25,6 +26,9 @@ DIALOG_CLOSE = (0.788, 0.116)       # 弹窗右上 ✕
 NAV_TIMEOUT = 25.0                  # 每步导航认画面的上限
 MARCH_TIMEOUT = 1500.0              # 一轮行军总上限
 STUCK_SECONDS = 120.0               # 画面纹丝不动的熔断线
+RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷新一次页面自愈
+BOOT_TIMEOUT = 300.0                # 刷新后重进本丸的上限（数据加载可能很慢）
+GREET_STABLE = 4.0                  # 登录问候画面稳定这么久才点中央跳过
 
 # 画面分类：按优先级从上到下
 # 注意 shiki_menu 必须排在 home 前面：指挥菜单是盖在本丸上的浮层，
@@ -33,6 +37,9 @@ SCREENS = (
     ('loading', ('loading/sakura',)),
     ('automarch_dialog', ('dialog/automarch-request',)),
     ('dialog', ('dialog/yes', 'dialog/no')),      # 两个按钮都中才算弹窗
+    ('boot_arrow', ('boot/volume-arrow',)),       # 启动「音量注意」
+    ('boot_honmaru', ('boot/honmaru-button',)),   # 标题页「本丸」按钮
+    ('formation', ('formation/label',)),          # 编成页（停留现场，点 ↩ 回本丸）
     ('shiki_menu', ('menu/sally',)),
     ('era', ('era/decide',)),
     ('map', ('map/team-select',)),
@@ -72,7 +79,7 @@ class Sally:
 
     def classify(self, image) -> str:
         """认当前画面；认不出返回 'unknown'。"""
-        if jp_vision.near_black(image):
+        if jp_vision.near_black(image) or jp_vision.mostly_dark(image):
             return 'loading'
         normalized = jp_vision.normalize_frame(image)
         for name, templates in SCREENS:
@@ -111,9 +118,13 @@ class Sally:
             time.sleep(self.poll)
         raise SallyStop(f'{what}超时，已停止；请人工查看游戏')
 
-    def _click_hit(self, template: str, what: str) -> None:
-        """在当前已确认的画面上找模板并点其中心。"""
-        image = self.b.screenshot()
+    def _click_hit(self, template: str, what: str, image=None) -> None:
+        """在已确认的画面上找模板并点其中心。
+
+        默认重新取一帧；调用方若刚分类过某帧（如启动序列）应把它传进来——
+        音量箭头是动的，重新取帧可能抓到另一个动画相位导致匹配失败。"""
+        if image is None:
+            image = self.b.screenshot()
         hit = jp_vision.find(image, template)
         if not hit:
             raise SallyStop(f'{what}的按钮没认出来，已停止；请人工查看游戏')
@@ -121,11 +132,74 @@ class Sally:
 
     # ---- 出阵流程 ----
 
+    def _boot_to_home(self) -> None:
+        """刷新后的启动序列：音量注意 → 标题页「本丸」按钮 → 进本丸。
+
+        启动途中会路过白屏/黑屏/读条等认不出的画面，一律只等不点；
+        只点认得的两个按钮（音量提示的绿色箭头、标题页的本丸）。
+        导航期间视口读数会随滚动条显隐抖动，这里放宽尺寸熔断，
+        回本丸后自动重锁基线。"""
+        deadline = time.monotonic() + BOOT_TIMEOUT
+        last = (None, None)
+        last_change = time.monotonic()
+        entered = False                   # 已点过标题页本丸按钮
+        greeted = False                   # 登录问候已点过
+        unknown_since: float | None = None  # 进入未知画面的时刻
+        departed = False                  # 已看到旧画面消失（防刷新前的残留帧被误当「到本丸了」）
+        with self.b.relaxed_view():
+            while time.monotonic() < deadline:
+                image = self.b.screenshot()
+                screen = self.classify(image)
+                if screen != 'home':
+                    departed = True
+                elif not departed:
+                    time.sleep(self.poll)
+                    continue
+                else:
+                    self.log('游戏已重新进入本丸')
+                    return
+                if screen == 'dialog':
+                    raise SallyStop('游戏重新启动时出现了确认弹窗，已停止；请人工查看游戏')
+                if screen == 'boot_arrow':
+                    self._click_hit('boot/volume-arrow', '音量提示箭头', image=image)
+                elif screen == 'boot_honmaru':
+                    self._click_hit('boot/honmaru-button', '标题页本丸按钮', image=image)
+                    entered = True
+                elif (entered and not greeted and screen == 'unknown'
+                        and unknown_since is not None
+                        and time.monotonic() - unknown_since > GREET_STABLE):
+                    # 点过本丸按钮后的合理落点只有登录问候（近侍无 UI 全身像）。
+                    # 它没有可匹配的固定元素，认图无解——此处上下文收敛，
+                    # 等画面稳定 4 秒后点一次中央跳过问候。只点这一次；若猜错
+                    # （如是公告页），后续画面不动会触发卡死熔断，安全停车。
+                    self.log('跳过登录问候…')
+                    self.b.click(0.5, 0.5)
+                    greeted = True
+                unknown_since = (unknown_since if screen == 'unknown' else None)
+                if unknown_since is None and screen == 'unknown':
+                    unknown_since = time.monotonic()
+                digest = _digest(image)
+                if (screen, digest) != last:
+                    last = (screen, digest)
+                    last_change = time.monotonic()
+                elif time.monotonic() - last_change > self.stuck_seconds:
+                    self._save_debug(image)
+                    raise SallyStop('游戏重新启动时画面卡住不动了，已停止；请人工查看游戏')
+                time.sleep(self.poll)
+        self._save_debug(self.b.screenshot())
+        raise SallyStop('游戏重新启动超时，已停止；请人工查看游戏')
+
     def _navigate_to_team(self) -> None:
-        """走到部队选择页。支持从本丸/指挥菜单/时代/地域任意一层接续。"""
+        """走到部队选择页。支持从本丸/指挥菜单/时代/地域/编成任意一层接续。
+
+        黑屏加载（转场/挂起后页面重载）是正常路过的画面；但持续黑屏超过
+        RELOAD_AFTER 说明游戏多半挂在加载上（闲置掉线、渲染上下文丢失），
+        自动刷新一次页面让它重进本丸。刷新后仍认不出画面则安全停止。"""
         deadline = time.monotonic() + NAV_TIMEOUT * 5
         last = (None, None)
         last_change = time.monotonic()
+        loading_since: float | None = None
+        reloaded = False
         while time.monotonic() < deadline:
             image = self.b.screenshot()
             screen = self.classify(image)
@@ -134,10 +208,23 @@ class Sally:
             if screen == 'dialog':
                 raise SallyStop('前往出阵时出现了确认弹窗，已停止；请人工查看游戏')
             if screen == 'loading':
+                if loading_since is None:
+                    loading_since = time.monotonic()
+                elif not reloaded and time.monotonic() - loading_since > RELOAD_AFTER:
+                    self.log('游戏黑屏加载太久，自动刷新一次页面…')
+                    self.b.reload()
+                    reloaded = True
+                    self._boot_to_home()
+                    deadline = time.monotonic() + NAV_TIMEOUT * 5
+                    loading_since = None
+                    continue
                 time.sleep(self.poll)
                 continue
+            loading_since = None
             if screen == 'home':
                 self.b.click(*SHIKI_TAB)
+            elif screen == 'formation':
+                self.b.click(*BACK_ARROW)
             elif screen == 'shiki_menu':
                 self._click_hit('menu/sally', '出阵入口')
             elif screen == 'era':
@@ -155,7 +242,7 @@ class Sally:
                 self._save_debug(image)
                 raise SallyStop('导航时画面卡住不动了，已停止；请人工查看游戏')
             time.sleep(self.poll)
-        raise SallyStop('前往出阵超时，已停止；请人工查看游戏')
+        raise SallyStop('前往出阵超时，已停止；若游戏一直黑屏请手动刷新页面后重试')
 
     def _select_team(self, team_no: int) -> None:
         self.b.click(*TEAM_TABS[team_no])
