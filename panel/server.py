@@ -1353,7 +1353,8 @@ register_script("jp-sally", "日服出阵",
                          "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
                          "default": "1"},
                         {"key": "rounds", "type": "number", "label": "连刷轮数",
-                         "default": 1, "min": 1, "max": 200}])
+                         "default": 1, "min": 1, "max": 200}],
+                hidden=True)
 
 
 # ── 自定义工作流（乐高排班）──
