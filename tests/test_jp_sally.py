@@ -6,6 +6,8 @@ from touken import jp_sally, jp_vision
 # 各模板在 1508x1088 基准帧上的实测中心（标定帧模板匹配结果）
 KNOWN = {
     'home/badge': (0.062, 0.129),
+    'home/catalog': (0.926, 0.110),
+    'directory/sally': (0.191, 0.247),
     'menu/shiki-tab': (0.939, 0.726),
     'menu/sally': (0.845, 0.709),
     'era/decide': (0.909, 0.726),
@@ -77,12 +79,12 @@ def make_sally(browser, **kwargs):
 def happy_frames():
     """一轮完整出阵的帧序列。导航点击复用分类帧不额外取帧；部队页签/
     自动行军/弹窗按钮/出发按钮各重新取一帧。"""
-    home = fake_screen('home/badge', 'menu/shiki-tab')
+    home = fake_screen('home/badge', 'home/catalog')
     team = fake_screen('team/depart')
     dialog = fake_screen('dialog/automarch-request')
     return [
-        home,                            # classify → 本丸，点指挥标签
-        fake_screen('menu/sally'),       # 指挥菜单
+        home,                            # classify → 本丸，点目录按钮
+        fake_screen('directory/sally'),  # 目录大页，点出阵入口
         fake_screen('era/decide'),
         fake_screen('map/team-select'),
         team,                            # classify → 部队选择页
@@ -106,7 +108,9 @@ def click_near(clicks, nx, ny, tol=0.01):
 
 
 # 锚点 + 偏移算出的期望点击位置（锚点即 KNOWN 里的粘贴中心）
-SHIKI_CLICK = KNOWN['menu/shiki-tab']
+CATALOG_CLICK = KNOWN['home/catalog']
+DIR_SALLY_CLICK = KNOWN['directory/sally']
+MENU_SALLY_CLICK = KNOWN['menu/sally']
 TAB1_CLICK = (0.905 + jp_sally.TEAM_TAB_OFFSETS[1][0] / 1508,
               0.714 + jp_sally.TEAM_TAB_OFFSETS[1][1] / 1088)
 AUTOMARCH_CLICK = (0.905 + jp_sally.AUTOMARCH_OFFSET[0] / 1508,
@@ -124,8 +128,9 @@ def test_happy_path_single_round():
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert any('出阵完成' in line for line in logs)
-    # 关键点击：指挥标签、出阵入口、决定、部队选择、部队一页签、自动行军、依頼、关窗、出发
-    assert click_near(browser.clicks, *SHIKI_CLICK)
+    # 关键点击：目录按钮、目录出阵入口、部队一页签、自动行军、依頼、关窗、出发
+    assert click_near(browser.clicks, *CATALOG_CLICK)
+    assert click_near(browser.clicks, *DIR_SALLY_CLICK)
     assert click_near(browser.clicks, *TAB1_CLICK)
     assert click_near(browser.clicks, *AUTOMARCH_CLICK)
     assert click_near(browser.clicks, *CONFIRM_CLICK)
@@ -134,12 +139,15 @@ def test_happy_path_single_round():
     assert depart, '出阵按钮没被点'
 
 
-def test_menu_already_open_skips_shiki_tab():
-    frames = happy_frames()[1:]  # 指挥菜单已开着（上次中断留下的现场）
+def test_menu_already_open_used_directly():
+    """指挥菜单已被手动开着（上次中断留下的现场）：直接用，不走目录。"""
+    frames = [fake_screen('menu/sally')  # 菜单已开，直接点出阵入口
+              ] + happy_frames()[2:]
     browser = FakeBrowser(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
-    assert not click_near(browser.clicks, *SHIKI_CLICK)  # 没再点指揮（会把菜单关上）
+    assert not click_near(browser.clicks, *CATALOG_CLICK)  # 没绕道目录
+    assert click_near(browser.clicks, *MENU_SALLY_CLICK)
     assert any('出阵完成' in line for line in logs)
 
 
@@ -168,7 +176,7 @@ def test_unknown_screen_mid_navigation_stops(monkeypatch):
     """起手认得、点了东西之后才撞见未知画面：立即安全停车，不刷新。"""
     monkeypatch.setattr(jp_sally, 'UNKNOWN_STABLE', -1.0)
     weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
-    frames = [fake_screen('home/badge', 'menu/shiki-tab'), weird]
+    frames = [fake_screen('home/badge', 'home/catalog'), weird]
     browser = FakeBrowser(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):

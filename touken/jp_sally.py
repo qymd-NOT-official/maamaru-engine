@@ -45,6 +45,7 @@ SCREENS = (
     ('boot_arrow', ('boot/volume-arrow',)),       # 启动「音量注意」
     ('boot_honmaru', ('boot/honmaru-button',)),   # 标题页「本丸」按钮
     ('formation', ('formation/label',)),          # 编成页（停留现场，点 ↩ 回本丸）
+    ('directory', ('directory/sally',)),          # 目录大页（不透明，景趣影响不到）
     ('shiki_menu', ('menu/sally',)),
     ('era', ('era/decide',)),
     ('map', ('map/team-select',)),
@@ -211,7 +212,11 @@ class Sally:
         raise SallyStop('游戏重新启动超时，已停止；请人工查看游戏')
 
     def _navigate_to_team(self) -> None:
-        """走到部队选择页。支持从本丸/指挥菜单/时代/地域/编成任意一层接续。
+        """走到部队选择页。支持从本丸/目录/指挥菜单/时代/地域/编成任意一层接续。
+
+        本丸一律走「目録」大页进出阵：目录页不透明，景趣怎么换都影响不到；
+        指挥菜单是半透明浮层，模板会被景趣透出来的背景干扰（2026-10-12 西式
+        景趣事故），只作为菜单已被手动打开时的接续路径。
 
         黑屏加载（转场/挂起后页面重载）是正常路过的画面；但持续黑屏超过
         RELOAD_AFTER 说明游戏多半挂在加载上（闲置掉线、渲染上下文丢失），
@@ -271,7 +276,9 @@ class Sally:
                 loading_since = None
                 unknown_since = None
             if screen == 'home':
-                self._click_hit('menu/shiki-tab', '指挥标签', image=image)
+                self._click_hit('home/catalog', '目录按钮', image=image)
+            elif screen == 'directory':
+                self._click_hit('directory/sally', '目录出阵入口', image=image)
             elif screen == 'formation':
                 self._click_near('formation/label', BACK_ARROW_OFFSET,
                                  '编成页返回箭头', image=image)
