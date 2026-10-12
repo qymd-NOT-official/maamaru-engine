@@ -149,7 +149,8 @@ def sword_facts(events):
             combat_index = index
             combat_at = max(combat_at, at)
     return {"swords": swords, "parties": parties, "hp_times": hp_times,
-            "slot_times": slot_times, "combat_index": combat_index, "combat_at": combat_at}
+            "slot_times": slot_times, "field_times": field_times,
+            "combat_index": combat_index, "combat_at": combat_at}
 
 
 def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
@@ -250,7 +251,9 @@ def begin_operation(maa):
 def operation_result(events, boundary, operation, serial=None):
     """True=confirmed, False=rejected, None=unknown; a click alone is never success."""
     endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many",
-                "forge": "/forge/startmultiple", "forge_ten": "/forge/fastmultiple"}.get(operation)
+                "forge": "/forge/startmultiple", "forge_ten": "/forge/fastmultiple",
+                "compose": "/composition/compose", "task_rewards": "/mission/rewards",
+                "free_gift": "/shop/buy", "duty": "/duty/start"}.get(operation)
     pending = []
     outcome = None
     for event in events:
@@ -290,6 +293,24 @@ def operation_result(events, boundary, operation, serial=None):
             continue
         request = pending.pop()
         params = request.get("payload") or {}
+        if operation in ("task_rewards", "free_gift", "duty"):
+            body = successful_body(event)
+            if operation == "task_rewards" and not params.get("category"):
+                continue
+            if operation == "free_gift" and not params.get("shop_id"):
+                continue
+            if body is not None:
+                boundary["result_body"] = body
+                boundary["result_at"] = at
+                outcome = not (operation == "free_gift" and youzu_log._int(body.get("is_lack")) != 0)
+                # Status=0 can still carry an expired mission list (reward_status=2).
+                if operation == "task_rewards" and youzu_log._int(body.get("reward_status")) == 2:
+                    outcome = False
+            elif (event.get("status", 0) >= 400 or isinstance(event.get("payload"), dict)
+                  and "status" in event["payload"] and str(event["payload"]["status"]) != "0"):
+                boundary.pop("result_body", None)
+                outcome = False
+            continue
         if operation in ("forge", "forge_ten"):
             body = successful_body(event)
             if body is None:
@@ -308,19 +329,25 @@ def operation_result(events, boundary, operation, serial=None):
                 count = youzu_log._int(body.get("finish_count"), -1)
                 outcome = count == 10 if count >= 0 else None
             continue
-        raw = params.get("material_serial_id" if operation == "union" else "serial_ids")
+        material_key = {"union": "material_serial_id", "compose": "material_id"}.get(operation, "serial_ids")
+        base_key = "base_id" if operation == "compose" else "base_serial_id"
+        raw = params.get(material_key)
         ids = str(raw).split(",") if raw is not None else []
         if (not ids or len(set(ids)) != len(ids)
                 or not all(value.isdigit() and int(value) > 0 for value in ids)):
             continue
-        if operation == "union" and (youzu_log._int(params.get("base_serial_id")) <= 0
-                                     or str(params.get("base_serial_id")) in ids):
+        if operation in ("union", "compose") and (youzu_log._int(params.get(base_key)) <= 0
+                                                  or str(params.get(base_key)) in ids):
             continue
         body = successful_body(event)
         if body is not None:
             sword = body.get("sword")
-            if (operation == "union" and isinstance(sword, dict) and "serial_id" in sword
-                    and str(sword["serial_id"]) != str(params["base_serial_id"])):
+            if operation == "compose" and (not isinstance(sword, dict)
+                    or str(sword.get("serial_id")) != str(params[base_key])):
+                outcome = None
+                continue
+            if (operation in ("union", "compose") and isinstance(sword, dict) and "serial_id" in sword
+                    and str(sword["serial_id"]) != str(params[base_key])):
                 outcome = None
                 continue
             boundary["serial_ids"] = [int(value) for value in ids]
@@ -407,3 +434,101 @@ def forge_capacity(events, *, now=None):
         elif endpoint == "/shop/buy" or endpoint and endpoint.startswith(("/receive/", "/battle/")):
             return None
     return (len(ids), maximum) if 0 <= now - observed <= FACT_MAX_AGE else None
+
+
+def available_events(maa):
+    """Missing connection evidence uses the existing screen path."""
+    if not getattr(maa, "adb_address", None):
+        return []
+    try:
+        return read_events(maa.adb_path, maa.adb_address)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return []
+
+
+def duty_state(events, *, now=None):
+    """Fresh duty deadline from the game; no local observation becomes a new start."""
+    from datetime import datetime, timedelta, timezone
+    now = time.time() if now is None else now
+    for event in reversed(events):
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        if body is None or event.get("endpoint") not in ("/home", "/duty", "/duty/start", "/duty/complete"):
+            continue
+        if event.get("endpoint") == "/duty/complete":
+            return None
+        if not isinstance(body.get("duty"), dict):
+            continue
+        if at is None or not 0 <= now - at <= FACT_MAX_AGE:
+            return None
+        finish = body["duty"].get("finished_at")
+        if not finish:
+            return None
+        try:
+            end = datetime.strptime(str(finish), "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone(timedelta(hours=8))).timestamp()
+        except ValueError:
+            return None
+        # Normal duty takes 24 hours; the deadline, rather than read time, owns the clock.
+        return {"running": end > now, "finished_at": str(finish),
+                "started_at": (datetime.fromtimestamp(end - 86400, timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+                               if str(body["duty"].get("item_use_status")) == "0" else None)}
+    return None
+
+
+def troop_matches(events, team, slot, position, name, *, previous=None, now=None):
+    """Match a current member's equipped instance to its calibrated troop name."""
+    from .client_equipment import EQUIPMENT_NAMES
+    now = time.time() if now is None else now
+    state = sword_facts(events)
+    serial = str(state["parties"].get(str(team), {}).get(str(slot), ""))
+    member_at = state["slot_times"].get(str(team), {}).get(str(slot), 0)
+    field = f"equip_serial_id{position}"
+    field_at = state["field_times"].get(serial, {}).get(field, 0)
+    if (not serial or not 0 <= now - field_at <= FACT_MAX_AGE
+            or not 0 <= now - member_at <= FACT_MAX_AGE):
+        return None
+    if previous is not None:
+        previous_serial = str(sword_facts(previous)["parties"].get(str(team), {}).get(str(slot), ""))
+        if previous_serial != serial:
+            return False
+        old = {_request_key(e) for e in previous if e.get("direction") == "S->C"}
+        updates = sword_facts([e for e in events if e.get("direction") == "S->C"
+                               and _request_key(e) not in old])
+        if field not in updates["swords"].get(serial, {}):
+            return None
+    equip_serial = state["swords"].get(serial, {}).get(field)
+    if equip_serial in (None, 0, "0", ""):
+        return False
+    for event in reversed(events):
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        rows = body.get("equip") if body else None
+        if not isinstance(rows, dict) or at is None or not 0 <= now - at <= FACT_MAX_AGE:
+            continue
+        row = next((r for r in rows.values() if isinstance(r, dict)
+                    and str(r.get("serial_id")) == str(equip_serial)), None)
+        if row is not None:
+            calibrated = EQUIPMENT_NAMES.get(youzu_log._int(row.get("equip_id")))
+            return calibrated[1] == name if calibrated and calibrated[0] == "troop" else None
+    return None
+
+
+def team_member_matches(events, team, slot, expected, *, now=None):
+    """Equipment belongs to the current, identified member of the requested slot."""
+    from . import sword_db
+    state = sword_facts(events)
+    now = time.time() if now is None else now
+    serial = str(state["parties"].get(str(team), {}).get(str(slot), ""))
+    at = state["slot_times"].get(str(team), {}).get(str(slot), 0)
+    if not serial or not 0 <= now - at <= FACT_MAX_AGE:
+        return None
+    observation = str(expected.get("observation_id") or "")
+    if observation.startswith("youzu:") and observation[6:].isdigit():
+        return serial == observation[6:]
+    sword = state["swords"].get(serial, {})
+    at = state["field_times"].get(serial, {}).get("sword_id", 0)
+    if not expected.get("sword_catalog_id") or not 0 <= now - at <= FACT_MAX_AGE:
+        return None
+    found = sword_db.find_game_sword(youzu_log._int(sword.get("sword_id")))
+    return found[0] == expected["sword_catalog_id"] if found else None

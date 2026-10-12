@@ -25,17 +25,15 @@ def _slot_tokens(maa, position):
 
 
 def find_troop_in_list(maa, name):
-    """逐页找完整名称；列表停滞或读到同名多行时停止。"""
+    """逐页找完整名称；同名同品级任选一件，列表停滞才停止。"""
     previous = None
     for _ in range(20):
         maa.screenshot(force=True)
         tokens = maa.ocr_all(roi_4to4(*_LIST)) or []
         matches = [point for value, point in tokens
                    if str(value).strip() == name and 130 <= point.y <= 650]
-        if len(matches) == 1:
-            return matches[0]
-        if len(matches) > 1:
-            return None
+        if matches:
+            return min(matches, key=lambda point: point.y)
         signature = tuple((str(value).strip(), point.y // 5)
                           for value, point in tokens if 940 <= point.x <= 1240)
         if not signature or signature == previous:
@@ -46,10 +44,11 @@ def find_troop_in_list(maa, name):
     return None
 
 
-def equip_preset_troop_stream(agent, slot_no, position, name):
+def equip_preset_troop_stream(agent, slot_no, position, name, team_no=None):
     """只装备精确名称；每一步失明都停在当前编队，绝不继续出发。"""
     from .team_roster import _ROW_CY
 
+    from ..game_state import available_events, troop_matches
     maa = agent.maa
     if (not isinstance(slot_no, int) or not 1 <= slot_no <= 6
             or not isinstance(position, int) or not 1 <= position <= 3
@@ -66,7 +65,9 @@ def equip_preset_troop_stream(agent, slot_no, position, name):
         return False
 
     try:
-        if any(str(value).strip() == name.strip()
+        before = available_events(maa) if team_no else []
+        current = troop_matches(before, team_no, slot_no, position, name.strip()) if team_no else None
+        if current is True or current is None and any(str(value).strip() == name.strip()
                for value, _ in _slot_tokens(maa, position)):
             yield f"[刀装] {slot_no}号位第{position}格已经是「{name}」"
             return True
@@ -89,7 +90,9 @@ def equip_preset_troop_stream(agent, slot_no, position, name):
             return False
         maa.click(confirm)
         time.sleep(0.5)
-        if not any(str(value).strip() == name.strip()
+        actual = troop_matches(available_events(maa), team_no, slot_no, position,
+                               name.strip(), previous=before) if team_no else None
+        if actual is False or actual is None and not any(str(value).strip() == name.strip()
                    for value, _ in _slot_tokens(maa, position)):
             yield "[刀装] 换装后没有读到目标刀装，停"
             return False

@@ -115,6 +115,8 @@ class SynthesizeMixin:
         if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
             yield "[合成] 确认弹窗没出现，放弃"
             return
+        from ..game_state import begin_operation, confirm_operation
+        boundary = begin_operation(self.maa)
         self.maa.click(Point(785, 630))
 
         # ---- 等动画自己演完，回到素材界面（认一键选择按钮，跟炼糖同款判据）----
@@ -122,9 +124,14 @@ class SynthesizeMixin:
             time.sleep(2.0)
             self.maa.screenshot(force=True)
             if self.maa.template_match("一键选择.png", threshold=0.75):
-                yield f"[合成] 合成完成: {name} 已喂"
-                return
-        yield "[合成] 动画等太久没回素材界面，可能成了也可能没成"
+                break
+        outcome = confirm_operation(self.maa, boundary, "compose")
+        if outcome is True:
+            yield f"[合成] 合成完成: {name} 已喂"
+        elif outcome is False:
+            yield "[合成] 游戏拒绝本次合成，本次停止"
+        else:
+            yield "[合成] 未确认合成结果，本次停止，不再重复消耗刀剑"
 
     def _protect_filter_on(self) -> bool:
         """检测"显示保护中的刀剑男士"是否勾着（红✓）"""

@@ -17,6 +17,7 @@ import time
 
 from ..maa_adapter import roi_4to4
 from ..runtime_paths import STATUS_DIR
+from ..game_state import available_events, duty_state, begin_operation, confirm_operation
 from . import naihanka_report
 
 
@@ -79,7 +80,12 @@ class NaihankaMixin:
 
         marker_cfg = cfg["running_marker"]
         marker_roi = roi_4to4(*marker_cfg["roi"]) if "roi" in marker_cfg else None
-        if self.maa.template_match(marker_cfg["template"], marker_roi):
+        duty = duty_state(available_events(self.maa))
+        if duty and duty["running"]:
+            self._remember_duty(duty)
+            yield "[内番] 游戏数据确认已经在内番中，收工"
+            return
+        if duty is None and self.maa.template_match(marker_cfg["template"], marker_roi):
             yield "[内番] 已经在内番中了，今天不用开始，收工"
             return
 
@@ -97,6 +103,7 @@ class NaihankaMixin:
             self.maa.screenshot(force=True)
             confirm = self.maa.template_match(cfg["confirm_button"]["template"])
             if confirm:
+                self._duty_boundary = begin_operation(self.maa)
                 self.maa.click(confirm)
                 confirmed = True
                 break
@@ -111,6 +118,14 @@ class NaihankaMixin:
         for skip_msg in self.skip_dialogue_stream():
             yield skip_msg
         return
+
+    @staticmethod
+    def _remember_duty(duty):
+        if not duty.get("started_at"):
+            return
+        state = _load_naihanka_state()
+        state["started_at"] = duty["started_at"]
+        _save_naihanka_state(state)
 
     # ---------- 对话跳过（独立公开，卡在对话里能单独救场）----------
 
@@ -127,6 +142,19 @@ class NaihankaMixin:
         marker_roi = roi_4to4(*marker_cfg["roi"]) if "roi" in marker_cfg else None
         title_template = cfg["ui_title"]["template"]
 
+        boundary = getattr(self, "_duty_boundary", None)
+        self._duty_boundary = None
+        outcome = confirm_operation(self.maa, boundary, "duty") if boundary else None
+        if outcome is False:
+            yield "[内番] 游戏拒绝本次内番开始，本次停止"
+            return
+        duty = duty_state(available_events(self.maa))
+        if outcome is True:
+            state = _load_naihanka_state()
+            state["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boundary["result_at"]))
+            _save_naihanka_state(state)
+        elif duty and duty["running"]:
+            self._remember_duty(duty)
         confirm_time = time.time()
         dialogue_seen = False
 
@@ -147,21 +175,20 @@ class NaihankaMixin:
                 dialogue_seen = True
 
             # 完工标志：回到内番界面 + 右下角内番中
-            if title_visible and self.maa.template_match(marker_cfg["template"], marker_roi):
+            running = outcome is True or bool(duty and duty["running"])
+            if title_visible and (running or self.maa.template_match(marker_cfg["template"], marker_roi)):
                 elapsed = time.time() - confirm_time
                 if dialogue_seen or elapsed > 10:
                     yield "[内番] 内番开始成功，收工 🎉"
-                    # 落盘开工时间，看板显示"内番中·已跑X小时"（写砸不影响；
-                    # 合并旧内容，别把数值快照/报告记录冲掉）
-                    state = _load_naihanka_state()
-                    state["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                    _save_naihanka_state(state)
                     return
 
             self._click_point(cfg["skip_tap"])
             time.sleep(0.8)
 
-        yield "[内番] ⚠️ 跳动画超过安全上限还没看到内番中，你去看看卡哪了"
+        if outcome is True or duty and duty["running"]:
+            yield "[内番] 内番已开始；对话页面暂未回到内番页，请检查画面"
+        else:
+            yield "[内番] ⚠️ 跳动画超过安全上限还没看到内番中，你去看看卡哪了"
         return
 
     # ---------- 收结果观察窗 & 数值快照（谁+1 识别，纯观察不碰开工逻辑）----------

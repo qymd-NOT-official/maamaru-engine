@@ -8,6 +8,7 @@ import re
 import time
 
 from ..maa_adapter import roi_4to4
+from ..game_state import begin_operation, confirm_operation
 
 # 「任务达成报酬一览」弹窗格子几何（1280×720 实测，证据 tmp/task_probe_2.png）：
 # 标题顶部正中；物品格横排，首格 x=311、格距 110、格宽 104；
@@ -165,6 +166,7 @@ class RewardsMixin:
         buy_roi_raw = buy_config.get("roi", [0, 0, 1280, 720])
         buy_roi = roi_4to4(buy_roi_raw[0], buy_roi_raw[1], buy_roi_raw[2], buy_roi_raw[3])
 
+        boundary = begin_operation(self.maa)
         bought = False
         for _ in range(3):
             buy_result = self.maa.template_match(
@@ -183,6 +185,11 @@ class RewardsMixin:
                 break
             self.maa.click(buy_result)
             yield f"[SHOP] 点击购买 at ({buy_result.x}, {buy_result.y})"
+            time.sleep(0.5)
+            outcome = confirm_operation(self.maa, boundary, "free_gift")
+            if outcome is not None:
+                bought = outcome
+                break
             # 0价标签连续两帧消失 = 购买被受理（单帧 OCR 抖一下不算数）
             for _ in range(8):
                 time.sleep(0.5)
@@ -289,13 +296,15 @@ class RewardsMixin:
 
             if claim_result:
                 yield f"[TASK] {tab_name} 有奖励可领，点击一键领取..."
+                boundary = begin_operation(self.maa)
                 self.maa.click(claim_result)
 
                 # 等待领取动画/弹窗
                 time.sleep(1.5)
 
                 # 弹窗还在的窗口期读报酬明细；读失败不阻断领取流程
-                popup, notes = self._read_popup_guarded(tab_name)
+                outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                popup, notes = (None, []) if outcome is not None else self._read_popup_guarded(tab_name)
                 for note in notes:
                     yield note
 
@@ -309,7 +318,7 @@ class RewardsMixin:
                 # 确认后必须补点一次一键领取，否则三次领取全丢
                 # （2026-08-20 日课血泪：日常/月常/活动全部 unconfirmed）。
                 confirm_point = self.maa.template_match("通用_确定.png", None)
-                if confirm_point:
+                if confirm_point and outcome is not True:
                     self.maa.click(confirm_point)
                     yield "[TASK] 任务信息已失效，刷新"
                     # 点确定后任务列表会自行刷新；实机并不保证 0.5 秒内就把
@@ -326,10 +335,12 @@ class RewardsMixin:
                             break
                     if retry:
                         yield f"[TASK] {tab_name} 补点一键领取..."
+                        boundary = begin_operation(self.maa)
                         self.maa.click(retry)
                         time.sleep(1.5)
                         # 补点后重新走一遍报酬弹窗读取（首点被吞时没弹过）
-                        if popup is None:
+                        outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                        if popup is None and outcome is None:
                             popup, notes = self._read_popup_guarded(tab_name)
                             for note in notes:
                                 yield note
@@ -346,7 +357,7 @@ class RewardsMixin:
                 # 否则弹窗晚于首次读取 = 领到了却被记成未确认（2026-08-22 安装版实测）。
                 button_confirmed = False
                 late_popup = False
-                for _ in range(6):
+                for _ in range(6) if outcome is None else ():
                     self.maa.screenshot(force=True)
                     still_active = self.maa.template_match(
                         template=claim_config["template"], roi=None,
@@ -370,20 +381,27 @@ class RewardsMixin:
                         for msg in close_msgs:
                             yield msg
                 popup_confirmed = popup is not None or late_popup
-                if button_confirmed or popup_confirmed:
+                if outcome is None:
+                    outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                if outcome is True or outcome is None and (button_confirmed or popup_confirmed):
                     if hasattr(self, "record_event"):
                         claimed_id = self.record_event("task_rewards.claimed",
                                                        tab=tab_name)
-                        if popup and popup[0]:
+                        if outcome is True:
+                            from ..youzu_log import _payload_resource_rewards
+                            items = list(_payload_resource_rewards(boundary.get("result_body")).items())
+                            self._emit_reward_popup_changes(items, claimed_id, evidence="client_reward_list")
+                        elif popup and popup[0]:
                             self._emit_reward_popup_changes(popup[0], claimed_id)
-                    evidence = "按钮变灰" if button_confirmed else "报酬弹窗"
+                    evidence = "游戏结果" if outcome is True else "按钮变灰" if button_confirmed else "报酬弹窗"
                     yield f"[TASK] {tab_name} 领取成功，已确认{evidence}"
                 else:
                     if hasattr(self, "record_event"):
                         self.record_event(
                             "task_rewards.unconfirmed", tab=tab_name,
                             stage="after_click")
-                    yield f"[TASK] {tab_name} 点击后未确认领取成功，本次不计成绩"
+                    yield (f"[TASK] {tab_name} 游戏拒绝本次领取，本次不计成绩" if outcome is False
+                           else f"[TASK] {tab_name} 点击后未确认领取成功，本次不计成绩")
             elif inactive_result:
                 if hasattr(self, "record_event"):
                     self.record_event("task_rewards.none", tab=tab_name)
@@ -544,13 +562,13 @@ class RewardsMixin:
             pass
         return (value, observed) if with_presence else value
 
-    def _emit_reward_popup_changes(self, items, claimed_event_id):
-        """报酬弹窗识别成功的物品各记一条 resource.change（正 delta）"""
+    def _emit_reward_popup_changes(self, items, claimed_event_id, evidence="reward_popup_ocr"):
+        """游戏奖励清单优先，缺数据时使用报酬弹窗；沿用既有账本来源分类。"""
         if not hasattr(self, "record_event"):
             return
         for resource, qty in items:
             payload = {"source": "task_rewards.reward_popup", "script": "task",
-                       "attribution": "confirmed", "evidence": "reward_popup_ocr"}
+                       "attribution": "confirmed", "evidence": evidence}
             if isinstance(claimed_event_id, int):
                 payload["source_event_id"] = claimed_event_id
             if hasattr(self, "record_resource_change"):

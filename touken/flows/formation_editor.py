@@ -1131,20 +1131,23 @@ class FormationEditorMixin:
             from .formation_troops import equip_preset_troop_stream
             from .formation_accessory import equip_preset_accessory_stream
             for slot_no, equipment in equipment_slots:
-                current_team = self._formation_read_team()
-                current = (current_team[slot_no - 1]
-                           if current_team and len(current_team) >= slot_no else {})
                 expected = slots[str(slot_no)]
-                expected_id = expected.get("sword_catalog_id")
-                if (current.get("slot_status") != "occupied"
-                        or not expected_id
-                        or current.get("sword_catalog_id") != expected_id):
+                from ..game_state import available_events, team_member_matches
+                member = team_member_matches(available_events(self.maa), team_no, slot_no, expected)
+                if member is None:
+                    current_team = self._formation_read_team()
+                    current = (current_team[slot_no - 1]
+                               if current_team and len(current_team) >= slot_no else {})
+                    expected_id = expected.get("sword_catalog_id")
+                    member = (current.get("slot_status") == "occupied" and bool(expected_id)
+                              and current.get("sword_catalog_id") == expected_id)
+                if not member:
                     yield (f"[预设编队] {slot_no}号位的刀剑未能重新确认，"
                            "装备不换，预设没应用完")
                     return False
                 for position, name in sorted(equipment.get("troops", {}).items()):
                     equipped = yield from equip_preset_troop_stream(
-                        self, slot_no, int(position), name)
+                        self, slot_no, int(position), name, team_no=team_no)
                     if not equipped:
                         yield (f"[预设编队] {slot_no}号位第{position}格刀装没装妥，"
                                "预设没应用完，绝不继续出发")
