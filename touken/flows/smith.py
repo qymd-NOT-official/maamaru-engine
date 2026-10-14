@@ -84,6 +84,31 @@ def dismantled_today() -> bool:
     except Exception:
         return False
 
+
+def dismantled_today_in_log(maa):
+    """今天的游戏记录里有没有刀解成功响应——玩家手动刀解也走
+    /sword/dismantle_many，所以这个信号覆盖脚本没经手的场景。
+
+    True=今天解过；False=拿到数据但没解过；None=没有数据（回退旧标记）。
+    日期口径与 dismantled_today 一致用自然日，不擅自改成游戏日。
+    """
+    from ..game_state import available_events, successful_body
+    from ..youzu_log import _event_epoch
+    events = available_events(maa)
+    if not events:
+        return None
+    today = time.strftime("%Y-%m-%d")
+    for event in events:
+        if event.get('endpoint') != '/sword/dismantle_many':
+            continue
+        epoch = _event_epoch(event)
+        if (epoch is None
+                or time.strftime("%Y-%m-%d", time.localtime(epoch)) != today):
+            continue
+        if event.get('direction') == 'S->C' and successful_body(event):
+            return True
+    return False
+
 # 刀解白名单（用户给的，不稀有的刀）
 DISMANTLE_WHITELIST = [
     "山姥切国广", "陆奥守吉行", "宗三左文字", "加州清光", "歌仙兼定",

@@ -303,18 +303,16 @@ class DailyMixin:
 
     def _dismantle_step(self):
         """日课的刀解步：今天已经解过（比如锻刀收刀腾位置顺手解的）就跳过"""
-        # 玩家优先对账（2026-10-14）本该覆盖「玩家手动刀解过、脚本不知道」
-        # 的场景，但实现不了：/mission/index 的任务行只有
-        # mission_id/value/status 三个字段（见 tests/test_mission_reward_precheck.py
-        # 的真实报文样本），没有任务名/类别，仓库里也不存在 mission_id →
-        # 任务身份的映射表——日服 wiki 的静态表硬套国服属于硬猜 id，版本
-        # 一换就会把别的任务（比如演练/内番日课）当成刀解任务，反而漏解
-        # 或误跳。所以在拿到可靠识别手段之前，这里保持只看 dismantled_today
-        # 的旧行为；另一条可能的信号是当日 /sword/dismantle_many 成功响应
-        # 事件（玩家手动刀解也走这个接口），留待以后单独评估。
-        from .smith import dismantled_today
+        from .smith import dismantled_today, dismantled_today_in_log
         if dismantled_today():
             yield "[日课] ✓ 今天已经刀解过了（锻刀收刀腾位置时顺手解的），这步跳过"
+            return
+        # 玩家优先：手动刀解不经过脚本标记，但会留下 /sword/dismantle_many
+        # 成功响应——翻到就说明玩家今天自己解过了，别再白解一把（不可逆）。
+        # 拿不到数据（None）时回退只看脚本标记的旧行为。
+        seen = dismantled_today_in_log(getattr(self, "maa", None))
+        if seen:
+            yield "[日课] ✓ 游戏记录显示今天已经刀解过了（你自己动手的？），这步跳过"
             return
         yield from self.dismantle_stream(max_dismantle=1)
 

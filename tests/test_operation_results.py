@@ -1,5 +1,6 @@
 """Synthetic operation receipts, rejected actions, missing evidence and stale state."""
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -125,3 +126,50 @@ def test_dismantle_marks_daily_completion_only_with_receipt(monkeypatch, outcome
     assert mark.call_count == (1 if outcome is True else 0)
     assert any("分解完成" in message for message in messages) is (outcome is True)
     assert host.record_event.call_count == (1 if outcome is True else 0)
+
+
+def _dismantle_event(day_offset=0, direction='S->C', ok=True):
+    import time as _time
+    ts = _time.time() + day_offset * 86400
+    return {"direction": direction, "endpoint": "/sword/dismantle_many",
+            "status": 200, "ts": ts,
+            "payload": {"status": 0 if ok else 1, "now_time": ts}}
+
+
+def test_dismantled_today_in_log_covers_manual_player_action(monkeypatch):
+    from touken.flows import smith
+    from touken import game_state
+    today = _dismantle_event()
+    yesterday = _dismantle_event(day_offset=-1)
+    monkeypatch.setattr(game_state, "read_events",
+                        lambda *a: [yesterday, today])
+    maa = SimpleNamespace(adb_path="adb", adb_address="addr")
+    assert smith.dismantled_today_in_log(maa) is True
+    monkeypatch.setattr(game_state, "read_events", lambda *a: [yesterday])
+    assert smith.dismantled_today_in_log(maa) is False
+    monkeypatch.setattr(game_state, "read_events", lambda *a: [])
+    assert smith.dismantled_today_in_log(maa) is None
+    # 只有请求没有成功响应不算数
+    req = _dismantle_event(direction='C->S')
+    monkeypatch.setattr(game_state, "read_events", lambda *a: [req])
+    assert smith.dismantled_today_in_log(maa) is False
+
+
+def test_daily_dismantle_step_skips_when_log_shows_player_dismantled(monkeypatch):
+    from touken.flows import daily, smith
+    monkeypatch.setattr(smith, "dismantled_today", lambda: False)
+    host = SimpleNamespace(maa=SimpleNamespace())
+    calls = []
+
+    def dismantle_stream(**kw):
+        calls.append(kw)
+        yield "dismantled"
+
+    host.dismantle_stream = dismantle_stream
+    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda maa: True)
+    messages = list(daily.DailyMixin._dismantle_step(host))
+    assert calls == []
+    assert any("游戏记录显示今天已经刀解过了" in m for m in messages)
+    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda maa: None)
+    messages = list(daily.DailyMixin._dismantle_step(host))
+    assert calls == [{"max_dismantle": 1}]
