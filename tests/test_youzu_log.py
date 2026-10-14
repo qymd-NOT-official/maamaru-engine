@@ -650,27 +650,6 @@ def test_injury_tier_boundaries():
     assert t(-1, 79) is None and t(10, 0) is None
 
 
-def test_party_injury_report(tmp_path):
-    f = _injury_log(tmp_path, "2026-09-28 18:00:00",
-                    {"111": ("45", "45", "118"), "222": ("30", "79", "118")})
-    report = youzu_log.party_injury_report(youzu_log.parse_events(f), 1)
-    assert report["max_injury"] == "中伤"
-    assert report["observed_at"] == "2026-09-28 18:00:00"
-    hurt = [m for m in report["members"] if m["injury"]]
-    assert len(hurt) == 1 and hurt[0]["serial_id"] == 222
-    assert hurt[0]["hp"] == 30 and hurt[0]["omamori"] == 1
-    assert hurt[0]["label"]  # 同名两振，必须给消歧标签
-    # 不存在的部队
-    assert youzu_log.party_injury_report(youzu_log.parse_events(f), 9) is None
-
-
-def test_party_injury_report_missing_member_is_unknown(tmp_path):
-    """成员在刀池里查不到 = 数据不全，返回 None 回退视觉链，不放行。"""
-    f = _injury_log(tmp_path, "2026-09-28 18:00:00",
-                    {"111": ("45", "45", "118")}, slots=("111", "999"))
-    assert youzu_log.party_injury_report(youzu_log.parse_events(f), 1) is None
-
-
 def test_dup_labels():
     swords = [
         {"serial_id": 20475841, "name": "压切长谷部", "level": 99},

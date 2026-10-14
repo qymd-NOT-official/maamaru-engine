@@ -13,11 +13,16 @@
 伤势配置形状与 touken_config.example.json 完全一致（中文键），事件断言
 用英文稳定枚举。花数证据受 _PROVEN_FLOWER_COMBOS 白名单约束。
 
+JSON 事实优先用例（GameFactsFirstTests）：注入合成游戏数据事件流
+（形状与 tests/test_game_state.py 相同），验证身份/等级/生存/疲劳/
+伤势以 sword_facts.parties 等事实为准、缺失/过期逐字段回退视觉。
+
 真机运行帧校准用例（RealFrameCalibrationTests）：帧取自本机数据目录
 debug/research（不提交仓库），缺帧时自动跳过。
 """
 
 import os
+import time
 import unittest
 from pathlib import Path
 
@@ -26,7 +31,7 @@ import numpy as np
 from touken.flows.team_roster import (
     TeamRosterMixin, _ROW_CY, _TEAM_TAB, _BADGE_THRESHOLD,
     _PROVEN_FLOWER_COMBOS, ROW_CELL_ROIS, _slot_name_from_combined,
-    link_visible_slot)
+    _roster_facts_from_events, link_visible_slot)
 
 _REPO = Path(__file__).resolve().parents[1]
 _DEV_FRAMES = Path(os.environ.get("LOCALAPPDATA", "")) / "Maamaru-Dev" / "debug" / "research"
@@ -746,6 +751,247 @@ class KiwameConclusionTests(unittest.TestCase):
         self.assertEqual(slot["sword_type"], "胁差")
         self.assertEqual(slot["badge"]["conclusion"], "recognized")
         self.assertEqual(slot["kiwame_status"], "kiwame")
+
+
+# ---------------------------------------------------------------- JSON 事实优先
+
+def _json_event(body, endpoint="/party/list", at=None):
+    """合成游戏数据事件（形状与 tests/test_game_state.py 的 event 相同）。"""
+    return {"direction": "S->C", "status": 200, "endpoint": endpoint,
+            "payload": {"status": 0,
+                        "now_time": time.time() if at is None else at,
+                        **body}}
+
+
+def _party_events(now, *, team_no=1, serial="111", sword_id=118, level="99",
+                  hp="45", hp_max="45", fatigue="88",
+                  slots=("111", None, None, None, None, None)):
+    """一份 /party/list 全量快照：默认 1 号槽 serial 111，其余空槽。"""
+    sword = {serial: {"serial_id": serial, "sword_id": sword_id,
+                      "level": level, "hp": hp, "hp_max": hp_max,
+                      "fatigue": fatigue, "protect": "1"}}
+    slot = {str(i + 1): {"serial_id": s} for i, s in enumerate(slots)}
+    return [_json_event(
+        {"sword": sword, "party": {str(team_no): {"slot": slot}}}, at=now)]
+
+
+class _FactsHost(_RosterHost):
+    """注入固定 JSON 事件流的点名宿主（覆写事件源注入缝）。"""
+
+    def __init__(self, maa, events):
+        super().__init__(maa)
+        self._facts_events = events
+
+    def _roster_game_events(self):
+        return self._facts_events
+
+
+def _facts_host(now, *, events=None, rows=None, pages_team=1):
+    """JSON 事件（默认一份新鲜全量快照）+ 指定页面剧本的点名宿主。"""
+    pages = {pages_team: (rows or {}, None, set(), {})}
+    maa = _make_maa(pages, current=pages_team)
+    return _FactsHost(maa,
+                      _party_events(now) if events is None else events)
+
+
+class RosterFactsPureTests(unittest.TestCase):
+    """_roster_facts_from_events：新鲜度/战后时效/空槽/身份映射纯函数判定。"""
+
+    def test_unknown_team_returns_none(self):
+        now = time.time()
+        self.assertIsNone(
+            _roster_facts_from_events(_party_events(now), 9, now=now))
+
+    def test_occupied_and_empty_slots(self):
+        now = time.time()
+        events = _party_events(now, slots=("111", "0", None))
+        facts = _roster_facts_from_events(events, 1, now=now)
+        self.assertTrue(facts[1]["occupied"])
+        self.assertEqual(facts[1]["sword_catalog_id"],
+                         "touken_118_heshikiri_hasebe")
+        self.assertEqual(facts[1]["level"], 99)
+        self.assertEqual(facts[1]["fatigue"], 88)
+        self.assertEqual(facts[1]["survival"], 45)
+        self.assertEqual(facts[1]["survival_max"], 45)
+        self.assertEqual(facts[1]["injury"], "none")
+        self.assertFalse(facts[2]["occupied"])   # serial "0" 也是空槽
+        self.assertFalse(facts[3]["occupied"])   # serial None 也是空槽
+
+    def test_stale_membership_nulls_whole_slot(self):
+        now = time.time()
+        facts = _roster_facts_from_events(_party_events(now - 700), 1,
+                                          now=now)
+        self.assertIsNone(facts[1])
+
+    def test_unmappable_sword_id_keeps_other_fields(self):
+        # sword_id 映射不进目录：身份缺省，其余字段不受影响
+        now = time.time()
+        facts = _roster_facts_from_events(
+            _party_events(now, sword_id=999999), 1, now=now)
+        self.assertNotIn("sword_catalog_id", facts[1])
+        self.assertEqual(facts[1]["level"], 99)
+        self.assertEqual(facts[1]["injury"], "none")
+
+    def test_pre_combat_hp_is_rejected(self):
+        now = time.time()
+        events = (_party_events(now - 60, hp="26", hp_max="79")
+                  + [_json_event({}, "/battle/pve", at=now - 30)])
+        facts = _roster_facts_from_events(events, 1, now=now)
+        self.assertNotIn("survival", facts[1])
+        self.assertNotIn("injury", facts[1])
+        self.assertNotIn("fatigue", facts[1])
+
+
+class GameFactsFirstTests(unittest.TestCase):
+    """JSON 数据优先、视觉兜底：身份/等级/生存/疲劳/伤势以 sword_facts 为准。"""
+
+    def test_json_identity_beats_garbled_ocr(self):
+        # 页面名字/数值全是乱码：JSON 身份与字段照样落，且不列 unknown
+        now = time.time()
+        rows = {160: {"name": "丼丼丼", "level": "11 级",
+                      "fatigue": "11/100", "survival": "11/11"}}
+        slots = _facts_host(now, rows=rows)._read_team_page()
+        s0 = slots[0]
+        self.assertEqual(s0["slot_status"], "occupied")
+        self.assertEqual(s0["name"], "压切长谷部")
+        self.assertEqual(s0["name_status"], "recognized")
+        self.assertEqual(s0["sword_catalog_id"],
+                         "touken_118_heshikiri_hasebe")
+        self.assertEqual(s0["sword_type"], "打刀")
+        self.assertEqual(s0["rarity_base"], 2)
+        self.assertEqual(s0["level"], 99)
+        self.assertEqual(s0["fatigue"], 88)
+        self.assertEqual(s0["survival"], 45)
+        self.assertEqual(s0["survival_max"], 45)
+        self.assertEqual(s0["injury"], "none")
+        for field in ("name", "level", "fatigue", "survival", "injury"):
+            self.assertNotIn(field, s0["unknown_fields"])
+        for s in slots[1:]:
+            self.assertEqual(s["slot_status"], "empty")
+
+    def test_json_injury_tiers_without_stamp_channel(self):
+        # 伤势由 hp 换算直接给（含满血 none），伤势章通道整段不用跑
+        now = time.time()
+        cases = (("45", "45", "none"), ("53", "79", "light"),
+                 ("27", "79", "medium"), ("26", "79", "heavy"))
+        for hp, hp_max, expected in cases:
+            with self.subTest(hp=hp, hp_max=hp_max):
+                rows = {160: {"name": "x"}}
+                host = _facts_host(now, rows=rows,
+                                   events=_party_events(now, hp=hp,
+                                                        hp_max=hp_max))
+                slot = host._read_team_page()[0]
+                self.assertEqual(slot["injury"], expected)
+                self.assertEqual(slot["survival"], int(hp))
+                self.assertEqual(slot["survival_max"], int(hp_max))
+
+    def test_stale_json_falls_back_to_vision(self):
+        # 全量快照过期（>600s）：整槽回退视觉 OCR，满血正面证明仍成立
+        now = time.time()
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "85/100", "survival": "45/45",
+                      "badge_char": "打"}}
+        slot = _facts_host(now - 700, rows=rows)._read_team_page()[0]
+        self.assertEqual(slot["slot_status"], "occupied")
+        self.assertEqual(slot["name"], "压切长谷部")
+        self.assertEqual(slot["level"], 99)
+        self.assertEqual(slot["fatigue"], 85)
+        self.assertEqual(slot["injury"], "none")
+
+    def test_partial_json_degrades_per_field(self):
+        # 成员关系+疲劳新鲜（setsword 后又有稀疏疲劳更新），hp/等级/身份
+        # 停在 700 秒前的全量快照：疲劳吃 JSON，其余本字段回退视觉
+        now = time.time()
+        slot_update = {"1": {"slot": {str(i + 1): {"serial_id": s}
+                                      for i, s in enumerate(
+                                          ("111", None, None, None, None,
+                                           None))}}}
+        events = (_party_events(now - 700, fatigue="10")
+                  + [_json_event({"sword": {"111": {"fatigue": 66}}},
+                                 "/repair/complete", at=now - 1),
+                     _json_event(slot_update, "/party/setsword", at=now)])
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "85/100", "survival": "30/45",
+                      "badge_char": "打"}}
+        slot = _facts_host(now, rows=rows, events=events)._read_team_page()[0]
+        self.assertEqual(slot["slot_status"], "occupied")
+        self.assertEqual(slot["name"], "压切长谷部")   # sword_id 过期 → OCR 认人
+        self.assertEqual(slot["level"], 99)            # level 过期 → OCR
+        self.assertEqual(slot["fatigue"], 66)          # JSON 新鲜，盖过 OCR 85
+        self.assertEqual((slot["survival"], slot["survival_max"]), (30, 45))
+        self.assertIsNone(slot["injury"])
+        self.assertIn("injury", slot["unknown_fields"])
+
+    def test_json_empty_slot_overrides_visual_content(self):
+        # 二槽 JSON 说空：卡面涂着占位纹理、OCR 有乱码内容也判 empty
+        now = time.time()
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "85/100", "survival": "45/45",
+                      "badge_char": "打"},
+                258: {"name": "幽灵丼", "level": "1 级",
+                      "fatigue": "5/100", "survival": "1/1"}}
+        slots = _facts_host(now, rows=rows)._read_team_page()
+        self.assertEqual(slots[0]["slot_status"], "occupied")
+        self.assertEqual(slots[1]["slot_status"], "empty")
+
+    def test_facts_anchor_to_visual_team_label(self):
+        # 页面标签=部队二 + 事件里二队数据：JSON 生效；页面标签=部队一
+        # + 事件只有二队：绝不用二队数据充数，全槽回退视觉
+        now = time.time()
+        rows = {160: {"name": "丼丼", "level": "1 级",
+                      "fatigue": "1/100", "survival": "1/1"}}
+        events = _party_events(now, team_no=2)
+        host = _facts_host(now, rows=rows, pages_team=2, events=events)
+        slot = host._read_team_page()[0]
+        self.assertEqual(slot["name"], "压切长谷部")
+        self.assertEqual(slot["level"], 99)
+        host = _facts_host(now, rows=rows, events=events)
+        slot = host._read_team_page()[0]
+        self.assertEqual(slot["slot_status"], "occupied")
+        self.assertIsNone(slot["name"])
+        self.assertEqual(slot["name_status"], "unrecognized")
+        self.assertEqual(slot["level"], 1)
+        self.assertEqual(slot["fatigue"], 1)
+
+    def test_no_events_is_pure_visual(self):
+        now = time.time()
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "85/100", "survival": "45/45",
+                      "badge_char": "打"}}
+        slot = _facts_host(now, rows=rows, events=[])._read_team_page()[0]
+        self.assertEqual(slot["name"], "压切长谷部")
+        self.assertEqual(slot["fatigue"], 85)
+
+    def test_pre_combat_json_hp_falls_back_to_stamp_channel(self):
+        # hp/疲劳快照都在战斗之前：JSON 伤势与疲劳作废，章通道+OCR 兜底
+        # （JSON 本会说 heavy，章命中 medium 证明吃到的真是视觉链）
+        now = time.time()
+        events = (_party_events(now - 60, hp="26", hp_max="79")
+                  + [_json_event({}, "/battle/pve", at=now - 30)])
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "40/100", "survival": "26/79",
+                      "badge_char": "打"}}
+        pages = {1: (rows, None, set(), {160: {"中伤": 0.89}})}
+        host = _FactsHost(_make_maa(pages), events)
+        slot = host._read_team_page()[0]
+        self.assertEqual(slot["injury"], "medium")
+        self.assertEqual((slot["survival"], slot["survival_max"]), (26, 79))
+        self.assertEqual(slot["fatigue"], 40)
+        self.assertEqual(slot["level"], 99)
+
+    def test_unreadable_label_disables_json(self):
+        # 行首标签读不出 → 部队锚不定 → JSON 整页不接，回退视觉
+        now = time.time()
+        rows = {160: {"name": "压切长谷部", "level": "99 级",
+                      "fatigue": "85/100", "survival": "45/45",
+                      "badge_char": "打"}}
+        page = _Page(_page_frame((160,)), rows=rows, labels={},
+                     sakura=set(), stamp_scores={})
+        host = _FactsHost(_RosterMaa({1: page}, current=1),
+                          _party_events(now))
+        slot = host._read_team_page()[0]
+        self.assertEqual(slot["slot_status"], "occupied")
+        self.assertEqual(slot["fatigue"], 85)
 
 
 class RealFrameCalibrationTests(unittest.TestCase):

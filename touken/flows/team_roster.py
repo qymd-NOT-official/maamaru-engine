@@ -3,6 +3,10 @@
 
 issue #7「智能编队」第 1 步工单（牛老师终版口径 + 返工单）：
   - 只读：导航 + 切部队标签；禁止成员卡、替换、装备等危险点击，禁止 swipe/drag；
+  - JSON 数据优先：身份/等级/生存/疲劳/伤势先取 sword_facts.parties
+    等游戏事实（FACT_MAX_AGE=600s，逐字段校验新鲜度与战后时效，
+    半残数据不放行），数据缺失/过期才降级本字段视觉链（OCR/伤势章）；
+    行定位（切队标签锚定、卡面空位正面证据、极化徽章/白樱花）保留视觉；
   - 切队正面确认：点标签后读行首"N之M"位置标签核对队号，确认不了该队
     observation_status=failed、slots=[]，绝不张冠李戴；
   - 伤势分类比分数选最佳（最佳+区分度+同源已证明类别），不吃配置顺序抢答；
@@ -38,6 +42,7 @@ issue #7「智能编队」第 1 步工单（牛老师终版口径 + 返工单）
 """
 
 import re
+import time
 from pathlib import Path
 
 from .. import sword_db
@@ -418,6 +423,75 @@ def _tactical_roles(sword_type, kiwame_status, injury):
     return []
 
 
+def _roster_facts_from_events(events, team_no, *, now=None):
+    """JSON 事实 → {槽号: 槽事实}；整队不可用返回 None（调用方全量回退视觉）。
+
+    每槽事实 {"occupied": bool, "sword_catalog_id", "level", "fatigue",
+    "survival", "survival_max", "injury"}：
+      - occupied 由成员关系（parties + slot_times）新鲜度正面判定，
+        serial 空/0 即空槽（客户端数据本身就是空位正面证据）；
+      - 其余字段各自独立校验 FACT_MAX_AGE 与战后时效（hp/疲劳战斗中
+        会变，战斗前的读数一律作废），读不出就不出现该键——半残数据
+        不放行，由 _read_roster_slot 逐字段回退视觉；
+      - 当前页是哪支部队由调用方用行首位置标签视觉锚定后传入 team_no。
+    """
+    from .. import youzu_log
+    from ..game_state import FACT_MAX_AGE, sword_facts
+    now = time.time() if now is None else now
+    state = sword_facts(events)
+    party = state["parties"].get(str(team_no)) or {}
+    slot_times = state["slot_times"].get(str(team_no)) or {}
+    if not party:
+        return None
+    combat_index, combat_at = state["combat_index"], state["combat_at"]
+
+    def fresh(at):
+        return at is not None and 0 <= now - at <= FACT_MAX_AGE
+
+    facts = {}
+    for slot in range(1, 7):
+        member_at = slot_times.get(str(slot))
+        if not fresh(member_at):
+            facts[slot] = None   # 成员关系缺失/过期：本槽整槽回退视觉
+            continue
+        serial = party.get(str(slot))
+        if serial in (None, "", 0, "0"):
+            facts[slot] = {"occupied": False}
+            continue
+        serial = str(serial)
+        sword = state["swords"].get(serial) or {}
+        times = state["field_times"].get(serial) or {}
+        fact = {"occupied": True}
+        if fresh(times.get("sword_id")):
+            found = sword_db.find_game_sword(
+                youzu_log._int(sword.get("sword_id"), -1))
+            if found:
+                fact["sword_catalog_id"] = found[0]
+        if fresh(times.get("level")):
+            member_level = youzu_log._int(sword.get("level"), -1)
+            if member_level > 0:
+                fact["level"] = member_level
+        hp_at, hp_index = state["hp_times"].get(serial, (None, -1))
+        if (fresh(hp_at) and hp_index >= combat_index and hp_at >= combat_at
+                and fresh(times.get("hp_max"))):
+            hp = youzu_log._int(sword.get("hp"), -1)
+            maximum = youzu_log._int(sword.get("hp_max"), 0)
+            if maximum > 0 and 0 <= hp <= maximum:
+                fact["survival"], fact["survival_max"] = hp, maximum
+                tier = youzu_log.injury_tier(hp, maximum)
+                fact["injury"] = "none" if tier is None else _INJURY_ENUM[tier]
+        fatigue_at = times.get("fatigue")
+        fatigue_index = (state["field_indices"].get(serial) or {}
+                         ).get("fatigue", -1)
+        if (fresh(fatigue_at) and fatigue_index >= combat_index
+                and fatigue_at >= combat_at):
+            value = youzu_log._int(sword.get("fatigue"), -1)
+            if 0 <= value <= 100:
+                fact["fatigue"] = value
+        facts[slot] = fact
+    return facts
+
+
 class TeamRosterMixin:
     """编队页只读点名。依赖宿主类的 navigate_to_stream、maa、config、record_event。"""
 
@@ -430,7 +504,6 @@ class TeamRosterMixin:
         Yields:
             str: 执行状态消息
         """
-        import time
         team_list = list(teams) if teams else [1, 2, 3, 4, 5]
         yield "[点名] 正在进入编队页…"
         for nav_msg in self.navigate_to_stream("编队"):
@@ -496,22 +569,52 @@ class TeamRosterMixin:
                 return "partial"
         return "complete"
 
+    # ---------- JSON 事实（数据优先通道，视觉兜底） ----------
+
+    def _roster_game_events(self):
+        """JSON 事实事件源（注入缝：无 ADB 环境/测试可覆写）。"""
+        from ..game_state import available_events
+        return available_events(self.maa)
+
+    def _roster_facts_by_slot(self):
+        """当前页六槽的 JSON 事实 {槽号: 事实}；不可用返回 None。
+
+        当前部队号由行首位置标签视觉锚定（行定位保留视觉）；
+        锚不定就不用 JSON——绝不张冠李戴。
+        """
+        team_no = self._read_row_label(_ROW_CY[0])
+        if team_no is None:
+            return None
+        try:
+            events = self._roster_game_events()
+        except (OSError, ValueError, RuntimeError):
+            events = []
+        if not events:
+            return None
+        return _roster_facts_from_events(events, team_no)
+
     # ---------- 单部队 ----------
 
     def _read_team_page(self):
         """当前帧读六槽。Returns: [slot dict × 6]（六槽固定输出）。
 
+        身份/等级/生存/疲劳/伤势以 JSON 事实（sword_facts.parties 等）
+        为准，数据缺失/过期才逐字段降级本链路的 OCR/伤势章；行定位
+        （切队标签锚定、卡面空位正面证据、极化徽章/白樱花）保留视觉。
+
         伤势章在编队页持续脉动（真机探针：真章单帧匹配分 0.67~0.92
-        随机摆动）——阈值用编队页校准值 0.75，对章没命中且未满血的
-        占用槽最多补采两帧、间隔 0.6s，任一帧命中即取枚举；只重试
+        随机摆动）——JSON 伤势不可用、走伤势章兜底的占用槽，对章没命中
+        且未满血的最多补采两帧、间隔 0.6s，任一帧命中即取枚举；只重试
         伤势通道，其他字段仍以首帧为准。
         """
         stamps = self._roster_injury_stamps()
-        slots = [self._read_roster_slot(slot, cy, stamps)
+        facts = self._roster_facts_by_slot()
+        slots = [self._read_roster_slot(slot, cy, stamps,
+                                        None if facts is None
+                                        else facts.get(slot))
                  for slot, cy in enumerate(_ROW_CY, start=1)]
         if stamps and any(s["slot_status"] == "occupied" and s["injury"] is None
                           for s in slots):
-            import time
             for _attempt in range(2):
                 time.sleep(0.6)
                 self.maa.screenshot(force=True)
@@ -534,8 +637,14 @@ class TeamRosterMixin:
                         s["sword_type"], s["kiwame_status"], s["injury"])
         return slots
 
-    def _read_roster_slot(self, slot, cy, stamps):
-        """读单个槽位：空位（正面证据）/ 占用（逐字段降级）/ 未知。"""
+    def _read_roster_slot(self, slot, cy, stamps, fact=None):
+        """读单个槽位：JSON 事实优先，视觉逐字段兜底。
+
+        fact: _roster_facts_from_events 给出的本槽事实（occupied/
+        sword_catalog_id/level/fatigue/survival/survival_max/injury），
+        None 表示 JSON 不可用，全字段走视觉链。槽位形态：
+        空位（正面证据）/ 占用（逐字段降级）/ 未知。
+        """
         cells = ROW_CELL_ROIS[slot]
         combined = self._roster_ocr_text(cells["name"])
         name_raw, label_conflict = _slot_name_from_combined(combined, slot)
@@ -565,17 +674,35 @@ class TeamRosterMixin:
             survival, survival_max = _parse_survival_tokens(
                 self._roster_ocr_tokens(_shift(_SURVIVAL_ROI, cy)))
         badge = self._read_badge_char(cy)
-        injury = self._read_slot_injury(cy, stamps, survival, survival_max)
+
+        # ---- JSON 事实逐字段覆盖：数据缺失/过期保持上面的视觉值，
+        # 由本字段各自的兜底链（OCR/伤势章）顶上 ----
+        fact = fact or {}
+        json_occupied = fact.get("occupied")   # True=占用 / False=空槽 / None=未知
+        if fact.get("level") is not None:
+            level = fact["level"]
+        if fact.get("fatigue") is not None:
+            fatigue = fact["fatigue"]
+        if fact.get("survival") is not None:
+            survival = fact["survival"]
+        if fact.get("survival_max") is not None:
+            survival_max = fact["survival_max"]
+        if fact.get("injury") is not None:
+            injury = fact["injury"]
+        else:
+            injury = self._read_slot_injury(cy, stamps, survival, survival_max)
         blank = self._card_blank(cy)
 
-        # 内容证据任一：名字/数值/徽章字符/伤势章（可靠花数在占用分支里才算）
-        has_content = label_conflict or any(v is not None for v in
-                          (name_raw, level, fatigue, survival,
-                           badge["type_raw"], injury))
+        # 内容证据任一：JSON 确认占用、名字/数值/徽章字符/伤势章
+        # （可靠花数在占用分支里才算）
+        has_content = label_conflict or json_occupied is True or any(
+            v is not None for v in (name_raw, level, fatigue, survival,
+                                    badge["type_raw"], injury))
 
-        # 空位：卡面近纯白（真机校准的空槽形态）且无任何内容证据；
-        # 纯白卡面上花数模板不可能可靠命中，花数证据只在占用分支产生
-        if blank and not has_content:
+        # 空位：JSON 成员关系给空槽正面证据直接成立；否则维持视觉
+        # 正面证据（卡面近纯白 + 无内容证据）。纯白卡面上花数模板
+        # 不可能可靠命中，花数证据只在占用分支产生
+        if json_occupied is False or (blank and not has_content):
             return {"slot": slot, "slot_status": "empty", "name_raw": None,
                     "name": None, "name_status": None,
                     "sword_catalog_id": None, "sword_type": None,
@@ -586,8 +713,10 @@ class TeamRosterMixin:
                     "kiwame_evidence": [], "tactical_roles": [],
                     "unknown_fields": []}
 
-        # 名字 → 名册校正（失败只降级名字字段）
-        sid = _match_name(name_raw) if name_raw else None
+        # 身份：JSON sword_id 映射目录优先；失败降级 OCR 名字匹配
+        sid = fact.get("sword_catalog_id") if json_occupied else None
+        if sid is None and name_raw:
+            sid = _match_name(name_raw)
         if sid:
             info = sword_db.all_swords()[sid]
             name = info.get("name_zh") or info["name"]
@@ -611,9 +740,10 @@ class TeamRosterMixin:
                         name_status, sid, None, level, fatigue, survival,
                         injury, badge, True)}
 
-        # 有内容但身份/数值全读不出：unknown（不猜，不硬判空位也不硬判占用）
-        if name_status != "recognized" and level is None \
-                and fatigue is None and survival is None:
+        # 有内容但身份/数值全读不出：unknown（JSON 已确认占用的除外——
+        # 成员关系本身就是正面占用证据，字段各自降级即可）
+        if json_occupied is not True and name_status != "recognized" \
+                and level is None and fatigue is None and survival is None:
             return {"slot": slot, "slot_status": "unknown", "name_raw": name_raw,
                     "name": name, "name_status": name_status,
                     "sword_catalog_id": sid, "sword_type": None,
@@ -665,7 +795,10 @@ class TeamRosterMixin:
         return self.config.get("sortie", {}).get("injury_stamps", {})
 
     def _read_slot_injury(self, cy, stamps, survival, survival_max):
-        """伤势：三类章各取真实分，比分数选最佳，不吃配置顺序抢答。
+        """伤势视觉兜底：三类章各取真实分，比分数选最佳，不吃配置顺序抢答。
+
+        只在 JSON 伤势（hp/hp_max 新鲜换算）缺失/过期时由
+        _read_roster_slot 调用；JSON 在席时章匹配整通道跳过。
 
         - 最高分且 ≥ 编队页校准阈值才入围；
         - 与次高分差距不足（脉动动画章会互相蹭分）→ unknown；
