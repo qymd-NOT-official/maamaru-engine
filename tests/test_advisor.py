@@ -185,6 +185,33 @@ class KobanFloorYieldTests(unittest.TestCase):
         self.assertIsNone(advisor.koban_floor_yield(events, now=self.NOW))
 
 
+class GameDaysRemainingTests(unittest.TestCase):
+    """凌晨 4 点换日的「剩余完整游戏日」口径：收摊零头并入最后一天。"""
+
+    @staticmethod
+    def _ts(text: str) -> float:
+        return datetime.fromisoformat(f"2026-{text}+08:00").timestamp()
+
+    def test_closing_stub_merges_into_last_full_day(self):
+        now = self._ts("10-14T12:00:00")
+        # 明早 5 点收摊：04:00–05:00 的零头不单独占一天
+        self.assertEqual(advisor.game_days_remaining(
+            now, self._ts("10-15T05:00:00")), 1)
+        # 后天早上收摊：今天 + 明天一个完整日
+        self.assertEqual(advisor.game_days_remaining(
+            now, self._ts("10-16T05:00:00")), 2)
+
+    def test_boundaries(self):
+        now = self._ts("10-14T12:00:00")
+        self.assertEqual(advisor.game_days_remaining(
+            now, self._ts("10-14T20:00:00")), 1)   # 今天收摊
+        self.assertEqual(advisor.game_days_remaining(
+            now, self._ts("10-15T04:00:00")), 1)   # 正好换日时刻收摊
+        self.assertEqual(advisor.game_days_remaining(
+            now, self._ts("10-16T04:00:00")), 2)   # 明天是完整的一天
+        self.assertEqual(advisor.game_days_remaining(now, now), 1)
+
+
 class EvaluateGoalTests(unittest.TestCase):
     TODAY = date(2026, 8, 25)
 

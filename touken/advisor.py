@@ -49,6 +49,31 @@ CURRENCY_MECHANICS = {
 DEFAULT_CURRENCY_TARGET = 300_000
 
 
+def _next_game_day_reset(now_ts: float) -> float:
+    """国服按上海时间凌晨 4 点换日；返回 now 之后最近的一次换日时刻。"""
+    local = datetime.fromtimestamp(now_ts, _TZ)
+    reset = local.replace(hour=4, minute=0, second=0, microsecond=0)
+    if local >= reset:
+        reset += timedelta(days=1)
+    return reset.timestamp()
+
+
+def game_days_remaining(now_ts: float, end_ts: float) -> int:
+    """now 到 end 之间还剩几个「完整游戏日」（凌晨 4 点换日口径）。
+
+    当前游戏日算 1 个，之后每多一个完整 04:00→04:00 日 +1；收摊前
+    不足一天的零头（比如凌晨 5 点收摊只剩 04:00–05:00）并入最后一天，
+    不单独占一天——免得把最后一圈摊到收摊前的凌晨，默认玩家四五点
+    起床补圈。
+    """
+    if end_ts <= now_ts:
+        return 1
+    reset = _next_game_day_reset(now_ts)
+    if end_ts <= reset:
+        return 1
+    return 1 + int((end_ts - reset) // 86400)
+
+
 def _today() -> date:
     return datetime.now(_TZ).date()
 
@@ -581,8 +606,10 @@ def evaluate_goal(goal: dict, *, current: float | None, rate_info: dict,
             return advice
         import math
         floors_needed = max(1, math.ceil((target - current) / per_floor))
-        remaining_days = max(1, math.ceil(
-            (end_dt - now_dt).total_seconds() / 86400))
+        # 剩余天数按凌晨 4 点换日数完整游戏日：收摊前的零头小时并入
+        # 今天，不单独占一天（与联队战/花札的每日建议同一口径）。
+        remaining_days = game_days_remaining(now_dt.timestamp(),
+                                             end_dt.timestamp())
         advice["status"] = "active"
         advice["floors_needed"] = floors_needed
         advice["floors_per_day"] = max(1, math.ceil(floors_needed / remaining_days))

@@ -371,6 +371,22 @@ class DayTimelineMiscTests(unittest.TestCase):
         self.assertEqual(result["completed_today"], 2)
         self.assertEqual(dtl._raid_daily_runs(result), 15)
 
+    def test_raid_final_day_collects_all_remaining_rounds(self):
+        """明早 5 点收摊：今天是最后一个正常游玩日，剩余圈数今天收齐，
+        不把最后一圈摊到收摊前的 04:00–05:00 零头里。"""
+        now = _today_at_shanghai(12, 0)
+        plan = {"runs_needed": 27, "completed_today": 0,
+                "seconds_to_end": 17 * 3600, "now": now}  # 次日 05:00 收摊
+        self.assertEqual(dtl._raid_daily_runs(plan), 27)
+        # 今天已打 5 圈：剩下的 22 圈也全在今天
+        plan = {"runs_needed": 22, "completed_today": 5,
+                "seconds_to_end": 17 * 3600, "now": now}
+        self.assertEqual(dtl._raid_daily_runs(plan), 22)
+        # 后天早上收摊：今天 + 明天一个完整日，零头并入明天
+        plan = {"runs_needed": 27, "completed_today": 0,
+                "seconds_to_end": 41 * 3600, "now": now}  # 后天 05:00 收摊
+        self.assertEqual(dtl._raid_daily_runs(plan), 14)
+
 
 class DayTimelineSuggestWindowsTests(unittest.TestCase):
     """suggest_windows 纯函数：占用段手工注入。"""
@@ -535,6 +551,8 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
 
     def _raid_build(self, now, plan, *, raid_team_no=None, forced=None,
                     active=None, player_tasks=None):
+        if plan is not None:
+            plan = {**plan, "now": now}  # _raid_active_plan 生产路径也会带上
         with patch.object(dtl, "_raid_active_plan", return_value=plan), \
              patch.object(dtl, "_hanafuda_active_plan", return_value=None):
             return dtl.build_day_timeline(

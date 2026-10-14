@@ -390,7 +390,6 @@ def _raid_active_plan(now: float, store) -> dict | None:
                 plan["completed_today"] = sum(
                     1 for ts, _ in period_events
                     if game_day.timestamp() <= ts <= min(now, observed_at))
-                plan["game_day_started_at"] = game_day.timestamp()
                 plan["now"] = now
                 return plan
     except Exception:
@@ -399,11 +398,20 @@ def _raid_active_plan(now: float, store) -> dict | None:
 
 
 def _raid_daily_runs(plan: dict) -> int:
-    """活动卡的日均圈数扣掉本丸换日后已完成的圈，不让目标边跑边重置。"""
+    """活动卡的日均圈数扣掉本丸换日后已完成的圈，不让目标边跑边重置。
+
+    剩余天数按凌晨 4 点换日数完整游戏日（touken.advisor.game_days_remaining）：
+    收摊前不足一天的零头并入今天，不单独占一天——明早 5 点收摊时今天
+    就是最后一个正常游玩日，剩余目标今天收齐，不默认凌晨起来补圈。
+    圈数本身来自实际夜光贝口径（runs_needed = 剩余贝 ÷ 实测场均），
+    今天份额打完但贝还不够时，下一次记账会算出新的剩余圈数继续建议。
+    """
+    from touken import advisor
     runs = int(plan["runs_needed"])
     completed = int(plan.get("completed_today") or 0)
-    elapsed = max(0, plan.get("now", 0) - plan.get("game_day_started_at", 0))
-    days_left = (plan["seconds_to_end"] + elapsed) / 86400
+    now = float(plan.get("now") or time.time())
+    days_left = advisor.game_days_remaining(
+        now, now + float(plan["seconds_to_end"]))
     original_target = min(runs + completed,
                           max(1, math.ceil((runs + completed) / days_left)))
     return min(runs, max(0, original_target - completed))
@@ -419,19 +427,22 @@ def _hanafuda_hint(plan: dict | None) -> str | None:
     return f"秘宝之里：按现在的节奏，拿完剩下的玉还要{duration}。"
 
 
-def _daily_quota_seconds(plan: dict, remaining_today: float) -> int | None:
+def _daily_quota_seconds(plan: dict, remaining_today: float,
+                         now: float) -> int | None:
     """今天该挂多少秒。
 
     口径和活动卡前端一致（EventTimeline.vue tamaTimeText）：
-    estimated_seconds 按剩余天数（seconds_to_end / 86400）平摊，
-    再被 estimated_seconds 本身、今天剩余时间、收摊时间三头卡住。
+    estimated_seconds 按剩余完整游戏日（凌晨 4 点换日）平摊——收摊前
+    不足一天的零头并入今天；再被 estimated_seconds 本身、今天剩余
+    时间、收摊时间三头卡住。
     """
+    from touken import advisor
     est = plan.get("estimated_seconds")
     seconds_to_end = plan.get("seconds_to_end")
     if not (est and seconds_to_end and seconds_to_end > 0):
         return None
-    days_left = seconds_to_end / 86400
-    daily = est / days_left if days_left > 0 else est
+    days_left = advisor.game_days_remaining(now, now + seconds_to_end)
+    daily = est / days_left
     quota = min(daily, est, remaining_today, seconds_to_end)
     return int(quota) if quota > 0 else None
 
@@ -725,7 +736,11 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
                     "occupied": occupied}
         pace_label = (f"{pace // 60} 分 {pace % 60} 秒" if pace >= 60
                       else f"{pace} 秒")
-        hint = (f"联队战：今天已记 {completed} 圈，接下来按进度建议"
+        tama_remaining = raid_plan.get("tama_remaining")
+        currency = raid_plan.get("currency") or "夜光贝"
+        progress = (f"离目标还差 {int(tama_remaining):,} {currency}，"
+                    if isinstance(tama_remaining, (int, float)) else "")
+        hint = (f"联队战：今天已记 {completed} 圈，{progress}接下来按进度建议"
                 f" {daily_runs} 圈；按本期实测每圈约 {pace_label}"
                 "找远征空窗。只是建议，不会自动开工。")
         if active and active.get('script') == 'raid':
@@ -733,7 +748,7 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             activity = None
             hint = '联队战正在运行；收工后按最新圈数更新建议。'
     else:
-        quota = (_daily_quota_seconds(hanafuda_plan, day_end - now)
+        quota = (_daily_quota_seconds(hanafuda_plan, day_end - now, now)
                  if hanafuda_plan else None)
         if quota:
             occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no) + list(player_tasks or [])

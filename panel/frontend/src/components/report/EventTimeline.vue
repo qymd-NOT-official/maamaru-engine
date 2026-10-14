@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ActivityPace, DayTimeline, EventAbacus, EventTimelineCandidate, EventTimelineEntry, EventTimelineReport, PlanningGoalAdvice } from '../../types'
-import { dailyRunTarget, immediateBatchPlan } from './eventTimelineModel'
+import { dailyRunTarget, gameDaysRemaining, immediateBatchPlan } from './eventTimelineModel'
 
 const props = defineProps<{
   timeline: EventTimelineReport | null
@@ -281,9 +281,9 @@ function tamaTimeText(entry: EventTimelineEntry) {
   if (!budget || budget.can_finish == null || budget.estimated_seconds == null) return ''
   const secondsToEnd = budget.seconds_to_end ?? 0
   if (!budget.can_finish) return `离收摊只剩 ${paceDuration(secondsToEnd)}，照现在的圈速，即使全天挂机也来不及。`
-  const daysLeft = secondsToEnd / 86400
-  const dailySeconds = daysLeft > 0 ? budget.estimated_seconds / daysLeft : budget.estimated_seconds
-  const dailyRuns = dailyRunTarget(budget.runs_needed, secondsToEnd)
+  const daysLeft = gameDaysRemaining(nowMs.value, nowMs.value + secondsToEnd * 1000)
+  const dailySeconds = budget.estimated_seconds / daysLeft
+  const dailyRuns = dailyRunTarget(budget.runs_needed, secondsToEnd, nowMs.value)
   if (budget.mechanics === 'raid' && dailyRuns != null) {
     return `按剩余活动时间折算，日均约 ${fmt(dailyRuns)} 圈；今日安排见上方时间表。`
   }
