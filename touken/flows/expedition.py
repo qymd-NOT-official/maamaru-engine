@@ -58,6 +58,38 @@ def _save_exp_record(rec: dict):
         pass
 
 
+def reconcile_records_with_game(maa) -> list:
+    """派遣记录与游戏现状对账，把游戏确认已回家的残留记录翻篇删档。
+
+    玩家优先规矩（2026-10-14）：脚本自己记的旧账与游戏现实冲突时以
+    游戏为准。收菜时数据通道不可用会留下残留记录，玩家手动收菜后该队
+    其实早已在家，之后按 dispatched_at+duration_min 死等会白跳过几
+    小时——这里对每条还没到期的记录用 /party/list 的部队状态对账，
+    游戏明说 status=1（待命）就说明记录是残留，删掉落盘；游戏说还在
+    外、数据缺失/过期一律不动（回退旧行为，绝不误删）。返回被翻篇的
+    队号列表；对账任何一步翻车都不许炸主流程。
+    """
+    try:
+        from ..game_state import available_events
+        from ..expedition_state import (parse_expedition_records,
+                                        reconcile_view_with_game)
+        events = available_events(maa)
+        if not events:
+            return []
+        records = _load_exp_record()
+        if not isinstance(records, dict):
+            return []
+        view = parse_expedition_records(records, time.time())
+        cleared = reconcile_view_with_game(view, events)
+        if cleared:
+            for team_no in cleared:
+                records.pop(str(team_no), None)
+            _save_exp_record(records)
+        return cleared
+    except Exception:
+        return []
+
+
 def _map_meta(era, slot):
     """按时代+卡位查收益表，拿图名和时长"""
     try:

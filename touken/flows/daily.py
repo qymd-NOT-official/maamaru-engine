@@ -303,6 +303,15 @@ class DailyMixin:
 
     def _dismantle_step(self):
         """日课的刀解步：今天已经解过（比如锻刀收刀腾位置顺手解的）就跳过"""
+        # 玩家优先对账（2026-10-14）本该覆盖「玩家手动刀解过、脚本不知道」
+        # 的场景，但实现不了：/mission/index 的任务行只有
+        # mission_id/value/status 三个字段（见 tests/test_mission_reward_precheck.py
+        # 的真实报文样本），没有任务名/类别，仓库里也不存在 mission_id →
+        # 任务身份的映射表——日服 wiki 的静态表硬套国服属于硬猜 id，版本
+        # 一换就会把别的任务（比如演练/内番日课）当成刀解任务，反而漏解
+        # 或误跳。所以在拿到可靠识别手段之前，这里保持只看 dismantled_today
+        # 的旧行为；另一条可能的信号是当日 /sword/dismantle_many 成功响应
+        # 事件（玩家手动刀解也走这个接口），留待以后单独评估。
         from .smith import dismantled_today
         if dismantled_today():
             yield "[日课] ✓ 今天已经刀解过了（锻刀收刀腾位置时顺手解的），这步跳过"
@@ -325,8 +334,17 @@ class DailyMixin:
             yield "[远征] 没有启用常用安排，本次只收取归来奖励"
             return
 
-        from .expedition import _load_exp_record
-        records = _load_exp_record()
+        # 玩家手动收菜后残留记录还在，按倒计时死等会白跳过派遣——先与
+        # 游戏现状对账翻篇（数据缺失/对账翻车都安静回退旧行为），被翻篇
+        # 的队记录已销，照常往下走派遣。
+        from . import expedition as expedition_flow
+        reconciled = expedition_flow.reconcile_records_with_game(
+            getattr(self, "maa", None))
+        if reconciled:
+            yield ("[远征] 部队" + "、".join(str(t) for t in sorted(reconciled))
+                   + " 的记录与游戏现状不符（你已手动收菜？），"
+                     "以游戏为准继续安排")
+        records = expedition_flow._load_exp_record()
         for route in routes:
             team = int(route["team_no"])
             record = records.get(str(team), {})

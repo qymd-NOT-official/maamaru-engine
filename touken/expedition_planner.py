@@ -717,6 +717,14 @@ def plan_expeditions(profile=None, *, store=None, member_facts=None,
     else:
         active_info = parse_expedition_records(active_expeditions, now)
     warnings.extend(active_info["warnings"])
+    if active_info.get("reconciled"):
+        # 调用方带游戏事件时 load_active_expeditions 已把游戏确认在家
+        # 的残留记录剔出视图；这是翻篇说明不是降级理由（见
+        # expedition_state.reconcile_view_with_game）。
+        explanation.append(
+            "部队" + "、".join(str(t) for t in active_info["reconciled"])
+            + " 的派遣记录与游戏现状不符（已手动收菜？），"
+              "以游戏为准视为已归来")
     active_problems = bool(active_info["warnings"])  # 损坏/未知一律降级
     away = active_info["active"]                     # {team_no: info}
     unknown_state_teams = set(active_info["unknown_end"])

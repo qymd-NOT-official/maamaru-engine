@@ -12,7 +12,10 @@ panel/server.py、panel/scheduler.py 也读同一文件。本模块只读不写�
   - dispatched_at 或 duration_min 不可靠 → 队伍确认状态未知
     （unknown_end），调用方必须排除该队并降级；
   - 活跃记录缺 map_code → unknown_map_active，占用地点未知，
-    调用方不得伪称其余地图都安全。
+    调用方不得伪称其余地图都安全；
+  - 调用方带游戏事件流（load_active_expeditions(events=...)）时，
+    游戏确认已回家的残留记录以游戏为准从视图翻篇（玩家优先，
+    2026-10-14），本模块仍只读不写，文件销账归收发流程。
 """
 
 import json
@@ -108,11 +111,43 @@ def parse_expedition_records(raw, now: float) -> dict:
     return out
 
 
-def load_active_expeditions(now=None, path=None) -> dict:
+def reconcile_view_with_game(parsed, events, now=None) -> list[int]:
+    """把游戏确认已回家的记录从解析视图里剔除（只动视图，不碰文件）。
+
+    玩家优先规矩（2026-10-14）：脚本自己记的派遣旧账与游戏现实冲突时
+    以现实为准。/party/list 新鲜成功响应明说该队 status=1（待命）→
+    记录是残留（多半玩家手动收过菜），从 active/unknown_end 剔除、
+    记进 parsed["reconciled"]；游戏说还在外、数据缺失/过期一律不动。
+    返回被翻篇的队号列表。剔除记录不写 warnings——冲突已被游戏数据
+    正面解决，不该再让整个规划卷降级 needs_confirmation。
+    """
+    from . import game_state
+    now = time.time() if now is None else now
+    candidates = list(parsed.get("active") or {}) + \
+        list(parsed.get("unknown_end") or [])
+    cleared = [team_no for team_no in candidates
+               if game_state.party_home(events, team_no, now=now) is True]
+    for team_no in cleared:
+        active = parsed.get("active")
+        if isinstance(active, dict):
+            active.pop(team_no, None)
+        unknown_end = parsed.get("unknown_end")
+        if isinstance(unknown_end, list) and team_no in unknown_end:
+            unknown_end.remove(team_no)
+    if cleared:
+        parsed["reconciled"] = sorted(
+            set(parsed.get("reconciled") or []) | set(cleared))
+    return cleared
+
+
+def load_active_expeditions(now=None, path=None, events=None) -> dict:
     """读取并解析 expeditions.json（只读）。
 
     文件不存在 → status=missing（没有任何派遣记录，属正常状态）；
     读取/解析失败 → status=corrupt + warning，绝不静默当全员空闲。
+    events 给了（游戏事件流）就顺手做对账：游戏确认已回家的残留记录
+    从视图剔除（见 reconcile_view_with_game）；本模块只读，文件本身
+    的销账归 flows/expedition.py 的收发流程管。
     """
     now = now if now is not None else time.time()
     path = path or EXP_RECORD_PATH
@@ -133,4 +168,7 @@ def load_active_expeditions(now=None, path=None) -> dict:
                 "unknown_map_active": [],
                 "warnings": ["远征派遣记录 JSON 损坏："
                              "无法确认有没有队伍在外面，按未知降级"]}
-    return parse_expedition_records(raw, now)
+    parsed = parse_expedition_records(raw, now)
+    if events:
+        reconcile_view_with_game(parsed, events, now=now)
+    return parsed

@@ -480,6 +480,34 @@ def duty_state(events, *, now=None):
     return None
 
 
+def party_home(events, team_no, *, now=None):
+    """最新一条新鲜 /party/list 成功响应里该队的 status：'1'=待命在家。
+
+    True=游戏明说该队在家；False=游戏给了明确状态且不是 '1'（还在外）；
+    None=没有新鲜成功响应、队伍行缺/坏——「不知道」绝不冒充「在家」。
+    status 语义按日服 API 惯例推的（1=待命 2=远征中 3=出阵中），国服未
+    逐项实测校准（见 youzu_log._PARTY_STATUS_LABEL），所以只有游戏
+    明说 '1' 才翻篇，其余一律按不在家处理，宁保守不放行。
+    """
+    now = time.time() if now is None else now
+    for event in reversed(events):
+        body = successful_body(event)
+        if body is None or event.get("endpoint") != "/party/list":
+            continue
+        at = youzu_log._event_epoch(event)
+        if at is None or not 0 <= now - at <= FACT_MAX_AGE:
+            return None
+        rows = body.get("party")
+        if not isinstance(rows, dict):
+            return None
+        row = rows.get(str(team_no))
+        if not isinstance(row, dict):
+            return None
+        status = row.get("status")
+        return str(status) == "1" if status is not None else None
+    return None
+
+
 def troop_matches(events, team, slot, position, name, *, previous=None, now=None):
     """Match a current member's equipped instance to its calibrated troop name."""
     from .client_equipment import EQUIPMENT_NAMES
