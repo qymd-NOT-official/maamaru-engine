@@ -585,7 +585,7 @@ class _FlowHost(RepairMixin):
 
 
 class SpeedupDecisionTests(unittest.TestCase):
-    """加速符只给带伤势章（轻伤/中伤/重伤）的刀"""
+    """游戏数据缺失时的画面兜底：加速符只给带伤势章（轻伤/中伤/重伤）的刀"""
 
     def _run(self, names, prefixes):
         host = _FlowHost(names, prefixes)

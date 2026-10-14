@@ -10,8 +10,11 @@
   3. speedup_teams 里的部队（默认部队三=挖地队）：
      行首编号是"三之x"的，修的时候勾加速符秒修，修完继续打；
      其他队的就慢慢修，加速符省着
-  4. 加速符只给带伤势章（轻伤/中伤/重伤）的刀：擦伤刀血条没满
-     但没章，修一下十几个资源几分钟的事，哪怕在加速部队也慢修
+  4. 加速符决策权归游戏数据（JSON 事实）：数据确认轻伤及以上才烧符，
+     画面伤势章只作日志旁证——章与数据不一致记日志，不改变决策。
+     数据分档最细只有轻伤，hp≥90% 的"轻伤"按擦伤处理不烧符
+     （老规矩"没章不烧符"的数据版）；数据缺失/过期时回到老规矩：
+     没章不烧符，擦伤刀慢慢修
      （2026-08-20 实战血泪：擦伤刀白吃了三张加速符）
 """
 
@@ -99,10 +102,10 @@ class RepairMixin:
             facts = self._repair_game_facts()
             rows, junk = self._scan_page(cfg)
             if junk:
-                yield f"[手入] （本页过滤掉的乱码/伤势章：{junk}）"
+                yield f"[手入] （本页过滤掉的乱码：{junk}）"
             for row in rows:
                 prefix, name, name_y = row["prefix"], row["name"], row["y"]
-                injury = row.get("injury")
+                stamp = row.get("injury")  # OCR 伤势章：旁证，决策权在游戏数据
                 fact = self._repair_row_fact(row, facts)
                 if fact is False:
                     unresolved_key = f"unresolved:{prefix}|{name}|{name_y}"
@@ -118,10 +121,21 @@ class RepairMixin:
                     hp, hp_max = fact["hp"], fact["hp_max"]
                     if hp == hp_max:
                         continue
-                    # Tiny scratches keep their original no-ticket meaning.
-                    game_injury = fact["injury"]
-                    injury = (game_injury if game_injury != "轻伤"
-                              or injury == "轻伤" else None)
+                    # 决策权全归 JSON 事实：章与数据不一致只记旁证日志，不改决策
+                    injury = fact["injury"]
+                    # 擦伤守卫：数据分档最细只有轻伤，44/45 这种蹭破皮过去
+                    # 靠"画面没章"省下加速符；决策改吃数据后这条省钱规矩不变——
+                    # hp≥90% 的轻伤按擦伤处理，不烧符
+                    if injury == "轻伤" and hp * 10 >= hp_max * 9:
+                        injury = None
+                    if stamp != injury:
+                        yield (f"[手入] ⚠ {prefix} {name}：画面伤势章"
+                               f"（{stamp or '没读到'}）与游戏数据"
+                               f"（{injury or '擦伤'}）不一致，"
+                               f"按游戏数据决策")
+                else:
+                    # 游戏数据缺失/过期：保留画面兜底，没章不烧符的规矩不变
+                    injury = stamp
 
                 key = f"serial:{serial}" if serial else f"{prefix}|{name}"
                 if key in seen:
@@ -136,8 +150,8 @@ class RepairMixin:
                     sid = fact["catalog_id"]
                 std_name = hit[1]["name_zh"] if hit else name
                 is_black = (sid in bl_ids) or any(b in name for b in blacklist)
-                # 已确认的伤势用于加速决策；加速部队的擦伤刀也慢修，
-                # 十几个资源几分钟的事，不配烧一张符（老大原话精神）
+                # 伤势以游戏数据为准（缺失时才是画面章兜底）；加速部队的
+                # 擦伤刀也慢修，十几个资源几分钟的事，不配烧一张符（老大原话精神）
                 in_speed_team = (fact["team_no"] in speedup_teams if fact
                                  else any(mark in prefix for mark in speedup_marks))
                 need_speed = in_speed_team and bool(injury)
@@ -319,8 +333,9 @@ class RepairMixin:
         列里会混进伤势章文字（轻伤/中伤/重伤）和乱码，
         名字必须过 sword_db 字典验证才算数，编号必须
         符合"三之x"格式才保留——认不出的宁可跳过不乱修。
-        伤势章单独收集，按 y 跟行配对进 row["injury"]
-        （加速符只给带章的刀，擦伤不配吃）。
+        伤势章单独收集，按 y 跟行配对进 row["injury"]；
+        章只作日志旁证，加速符决策权在游戏数据
+        （数据缺失/过期时才回退到章，没章不烧符）。
 
         Returns:
             (rows, junk) — rows: [{"prefix","name","y","injury"}]；

@@ -29,17 +29,52 @@ def test_repair_row_uses_exact_member_and_json_hp():
     assert RepairMixin._repair_row_fact({"name": "五虎退", "prefix": ""}, repair_state(twin=True)) is False
 
 
-def test_repair_json_decision_ignores_missing_stamp_and_preserves_scratch_policy(monkeypatch):
+def test_repair_json_decision_ignores_missing_stamp(monkeypatch):
+    """JSON 确认有伤就按 JSON 决策：画面没读到章不影响中伤/真轻伤烧符；
+    hp≥90% 的擦伤（数据分档最细也是轻伤）不烧符，满血整行跳过"""
     from test_flow_resource_changes import _FlowHost
     monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
-    for hp, speed in [(20, True), (44, False), (45, None)]:
+    for hp, speed, injury in [(20, True, "中伤"), (40, True, "轻伤"),
+                              (44, False, None), (45, None, None)]:
         host = _FlowHost([("五虎退", 200)], [("三之一", 200)])
         host._repair_game_facts = Mock(return_value=repair_state(hp))
-        list(host.repair_stream())
+        messages = list(host.repair_stream())
         assert host.speed_calls == ([] if speed is None else [speed])
         if speed is not None:
             queued = next(p for kind, p in host.events if kind == "repair.queued")
             assert queued["serial_id"] == 111
+            assert queued["injury"] == injury
+        if speed is False:
+            assert any("省一张加速符" in m for m in messages)
+        if injury is not None:
+            assert any("不一致" in m and "按游戏数据决策" in m for m in messages)
+        else:
+            assert not any("不一致" in m for m in messages)
+
+
+def test_repair_json_overrides_conflicting_stamp(monkeypatch):
+    """章与 JSON 冲突时按 JSON 决策（章只是旁证，记日志不翻案）"""
+    from test_flow_resource_changes import _FlowHost
+    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    # 画面读到中伤章，但 JSON 血量只是轻伤：按轻伤决策记档
+    host = _FlowHost([("五虎退", 200), ("中伤", 195)], [("三之一", 200)])
+    host._repair_game_facts = Mock(return_value=repair_state(40))
+    messages = list(host.repair_stream())
+    assert host.speed_calls == [True]
+    queued = next(p for kind, p in host.events if kind == "repair.queued")
+    assert queued["injury"] == "轻伤"
+    assert any("不一致" in m and "按游戏数据决策" in m for m in messages)
+
+
+def test_repair_matching_stamp_stays_quiet(monkeypatch):
+    """章与 JSON 一致时不唠叨旁证日志"""
+    from test_flow_resource_changes import _FlowHost
+    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    host = _FlowHost([("五虎退", 200), ("轻伤", 198)], [("三之一", 200)])
+    host._repair_game_facts = Mock(return_value=repair_state(40))
+    messages = list(host.repair_stream())
+    assert host.speed_calls == [True]
+    assert not any("不一致" in m for m in messages)
 
 
 def test_json_does_not_bypass_repair_blacklist(monkeypatch):
