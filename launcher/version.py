@@ -1,3 +1,3 @@
 """Launcher version embedded into release builds."""
 
-CURRENT_VERSION = "1.3.3"
+CURRENT_VERSION = "1.3.4"
