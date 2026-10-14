@@ -114,7 +114,10 @@ class PracticeMixin:
                 for m in members
             ) or "（空）"
             yield f"[演练] 对手{row_idx + 1} [{opponent['title']}]: {verdict} —— {'；'.join(reasons)}"
-            yield f"[演练]   阵容({len(members)}/6): {roster}"
+            if opponent.get("source") == "screen":
+                yield f"[演练]   画面读取（未取得本次完整阵容，空位尚未确认）: {roster}"
+            else:
+                yield f"[演练]   阵容({len(members)}/6): {roster}"
 
             if verdict == "打":
                 score = self._strength_key(members)
@@ -256,7 +259,8 @@ class PracticeMixin:
             members = practice_members(body)
             if members is not None:
                 self._practice_enemy_id = boundary.get("practice_enemy_id", enemy)
-                return {"title": rows[row_idx]["title"] if rows else "对手", "members": members}
+                return {"title": rows[row_idx]["title"] if rows else "对手", "members": members,
+                        "source": "data"}
         self._practice_enemy_id = boundary.get("practice_enemy_id", enemy)
         # 对手名（审神者 xxx级 名字）
         title_tokens = self.maa.ocr_all(roi_4to4(400, 90, 750, 120))
@@ -267,7 +271,7 @@ class PracticeMixin:
             member = self._scan_member(cy)
             if member:
                 members.append(member)
-        return {"title": title, "members": members}
+        return {"title": title, "members": members, "source": "screen"}
 
     def _scan_member(self, cy: int):
         """
@@ -341,10 +345,10 @@ class PracticeMixin:
                 if mob is None and "extreme" not in m:
                     dodge.append(f"{m['name']}是短刀但机动读不出，当极短处理")
             if m["type"] == "未知":
-                dodge.append(f"{m['name']} 名册查无此人，认不清不敢打")
+                dodge.append(f"{m['name']}身份未确认")
 
         if dodge:
-            return "躲", dodge
+            return "躲", list(dict.fromkeys(dodge))
 
         reasons = []
         if len(members) < 6:

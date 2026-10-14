@@ -1,5 +1,6 @@
 """Current opponent receipts and data-first snapshots, with explicit unknowns."""
 import json
+import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
@@ -47,6 +48,38 @@ def test_receipt_rejects_wrong_opponent_and_excludes_preclick_request():
     assert gs.practice_receipt(events, {"after":1000,"requests":set()}, "/battle/practicebattle", 101, "enemy_user_id") is False
 
 
+@pytest.mark.parametrize("clock_offset", [-3600, -5, 5, 3600])
+@pytest.mark.parametrize("endpoint,parameter", [
+    ("/practice/offer", "enemy_id"), ("/battle/practicebattle", "enemy_user_id")])
+def test_practice_current_receipt_uses_preclick_snapshot_across_clocks(
+        monkeypatch, clock_offset, endpoint, parameter):
+    host = Mock(adb_address="device", adb_path="adb")
+    old = event(endpoint, {parameter: 101}, 900, "C->S")
+    old_response = event(endpoint, {"status": 0, "result": {"rank": 2}}, 901)
+    monkeypatch.setattr(gs, "read_events", lambda *_: [old, old_response])
+    monkeypatch.setattr(gs.time, "time", lambda: 1000 + clock_offset)
+    boundary = gs.begin_operation(host)
+    current = event(endpoint, {parameter: 101}, 1000, "C->S")
+    response = event(endpoint, {"status": 0, "result": {"rank": 9}}, 1004)
+    assert gs.practice_receipt([old, old_response], boundary, endpoint, 101, parameter) is None
+    assert gs.practice_receipt([old, old_response, current, response], boundary,
+                               endpoint, 101, parameter) == response["payload"]
+    assert gs.practice_receipt([current, response], boundary, endpoint, 102, parameter) is False
+    assert gs.practice_receipt([old_response], boundary, endpoint, 101, parameter) is None
+
+
+def test_failed_preclick_read_does_not_authorize_historical_receipts(monkeypatch):
+    host = Mock(adb_address="device", adb_path="adb")
+    def fail(*_):
+        raise OSError("unavailable")
+    monkeypatch.setattr(gs, "read_events", fail)
+    monkeypatch.setattr(gs.time, "time", lambda: 2000)
+    boundary = gs.begin_operation(host)
+    assert boundary["request_snapshot"] is False
+    assert gs.practice_receipt(battle(), boundary, "/battle/practicebattle", 101,
+                               "enemy_user_id") is None
+
+
 def offer():
     return {"enemy_party": {"1": {"slot": {str(i): {"serial_id": 1 if i == 1 else None} for i in range(1, 7)}}},
             "enemy_sword": {"1": {"sword_id": 118, "level": 90, "mobile": 40}}}
@@ -76,6 +109,24 @@ def test_unknown_game_member_and_unreadable_screen_never_become_empty(monkeypatc
     member = host._scan_member(152)
     assert member["type"] == "未知"
     assert host._judge([member])[0] == "躲"
+
+
+@pytest.mark.parametrize("count", [1, 3, 5, 6])
+def test_confirmed_empty_slots_are_not_unknown_members(count):
+    body = offer()
+    body["enemy_party"]["1"]["slot"] = {
+        str(i): {"serial_id": i if i <= count else None} for i in range(1, 7)}
+    body["enemy_sword"] = {str(i): {"serial_id": i, "sword_id": 202,
+                                    "level": 82} for i in range(1, count + 1)}
+    members = gs.practice_members(body)
+    assert len(members) == count
+    assert all(m["id"] is not None for m in members)
+    assert PracticeMixin()._judge(members)[0] == "打"
+
+
+def test_unknown_members_are_still_rejected_without_repeated_or_false_roster_reason():
+    member = {"name": "未识别成员", "type": "未知", "id": None}
+    assert PracticeMixin()._judge([member] * 3) == ("躲", ["未识别成员身份未确认"])
 
 
 def test_known_list_results_and_order_do_not_read_stamps():

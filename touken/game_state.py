@@ -224,9 +224,11 @@ def _repair_entries(body):
 def begin_operation(maa):
     """Capture the pre-click boundary; never change the game to obtain evidence."""
     events = []
+    request_snapshot = False
     if getattr(maa, "adb_address", None):
         try:
             events = read_events(maa.adb_path, maa.adb_address)
+            request_snapshot = True
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             pass
     repairs, repair_at = set(), None
@@ -243,6 +245,7 @@ def begin_operation(maa):
               and state["hp_times"][serial][0] >= state["combat_at"]
               and state["hp_times"][serial][1] >= state["combat_index"]}
     return {"after": int(time.time()),
+            "request_snapshot": request_snapshot,
             "requests": {_request_key(e) for e in events if e.get("direction") == "C->S"},
             "repairs": repairs,
             "repair_known": repair_at is not None and 0 <= now - repair_at <= FACT_MAX_AGE,
@@ -574,7 +577,12 @@ def practice_receipt(events, boundary, endpoint, enemy_id, parameter, *, ignore_
     result = None
     for event in events:
         at = youzu_log._event_epoch(event)
-        if event.get("endpoint") != endpoint or at is None or at < boundary["after"]:
+        # A successful pre-click snapshot identifies old requests directly.
+        # Device request times, server response times and the PC clock differ;
+        # comparing those clocks can discard the request for this very click.
+        if event.get("endpoint") != endpoint:
+            continue
+        if not boundary.get("request_snapshot") and (at is None or at < boundary["after"]):
             continue
         if event.get("direction") == "C->S":
             if _request_key(event) not in boundary["requests"]:
