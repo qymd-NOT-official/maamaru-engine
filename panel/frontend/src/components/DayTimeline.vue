@@ -138,7 +138,7 @@ async function stopConductor() {
   try {
     await api.setDayConductor(false)
     await load()
-    conductorMessage.value = '后续时段不会自动开工；已经开工的这一段仍需在执务台停止。'
+    conductorMessage.value = '这份今日安排及它带出的远征已停止，独立安排不受影响。'
   } catch (error) {
     conductorMessage.value = error instanceof Error ? error.message : '大总管没改成，请重试'
     await load()
@@ -331,6 +331,7 @@ const STATE_LABELS: Record<string, string> = {
   expired: '已跳过',
   missed: '已错过',
   failed_unknown: '派遣失败',
+  cancelled: '已取消',
   running: '远征中',
   awaiting_collect: '待收菜',
 }
@@ -423,7 +424,7 @@ function blockEndMin(block: DayScheduleBlock): number | null {
 }
 
 function conductorBlockFor(block: DayScheduleBlock): DayConductorBlock | undefined {
-  if (!data.value?.conductor.enabled) return undefined
+  if (!data.value) return undefined
   return data.value.conductor.blocks.find(
     candidate => candidate.start_min === block.start_min && candidate.kind === block.kind && candidate.script === block.script)
 }
@@ -432,6 +433,7 @@ const STATUS_TEXT: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, stri
   running: '正在跑',
   ended: '已收工',
   missed: '换日未跑',
+  cancelled: '已取消',
 }
 
 function blockStatusText(block: DayConductorBlock): string {
@@ -452,6 +454,7 @@ const STATUS_CLASSES: Partial<Record<Exclude<ConductorBlockStatus, 'pending'>, s
   blocked: 'is-failed',
   interrupted: 'is-failed',
   missed: 'is-expired',
+  cancelled: 'is-expired',
 }
 
 function blockStatusClass(block: DayConductorBlock): string {
@@ -1261,7 +1264,7 @@ const caption = computed(() => {
               <button v-for="s in lane.suggestions" :key="`suggest-${s.key}`" type="button" class="tl-block tlx-suggest" :style="{ left: dragLeft(s.key, s.left) + '%', width: s.width + '%' }" :title="s.title" :disabled="!!adoptingSuggestion || prefsBusy" @pointerdown="startDrag($event, s.key, 'expeditionSuggestion', s.suggestion.start_min)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" @click="!suppressClick && openExpeditionPopup(lane.team, s.left, s.suggestion)">{{ s.text }}</button>
               <div v-if="expeditionPopup?.team === lane.team" class="tl-popover" :style="{left: popoverLeft(expeditionPopup?.left || 0)}">
                 <strong>部队{{ TEAM_NAMES[lane.team] }}远征 {{ expeditionPopup?.suggestion?.map_code || expeditionPopup?.slot?.map_code }}</strong>
-                <div class="tl-popover-actions"><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="configureExpedition">配置</button><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="removeExpeditionFromPopup">{{ expeditionPopup.suggestion || !expeditionPopup.slot?.will_run ? (adoptingSuggestion || togglingExpedition ? '启用中…' : '启用') : '移除' }}</button></div>
+                <div class="tl-popover-actions"><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition || expeditionPopup.slot?.configurable === false" @click="configureExpedition">配置</button><button type="button" :disabled="!!adoptingSuggestion || !!togglingExpedition" @click="removeExpeditionFromPopup">{{ expeditionPopup.suggestion || !expeditionPopup.slot?.will_run ? (adoptingSuggestion || togglingExpedition ? '启用中…' : '启用') : '移除' }}</button></div>
               </div>
             </div>
           </template>

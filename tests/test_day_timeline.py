@@ -140,12 +140,13 @@ class DayTimelineExpeditionTests(unittest.TestCase):
         items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
         self.assertEqual(items, [])
 
-    def test_near_start_forced_not_toggleable(self):
+    def test_near_start_forced_can_be_cancelled_but_not_reconfigured(self):
         now = _today_at(8, 0)
         day_start = _today_at(0, 0)
         forced = {"k": _forced_record(2, "B3", now + 30)}
         items = dtl._expedition_items(_cfg([]), now, day_start, forced=forced)
-        self.assertFalse(items[0]["toggleable"])
+        self.assertTrue(items[0]["toggleable"])
+        self.assertFalse(items[0]["configurable"])
 
     def test_running_record_shows_as_running_block(self):
         now = _today_at(12, 0)

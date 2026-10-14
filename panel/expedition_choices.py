@@ -106,15 +106,6 @@ def _write_sets(skipped: dict, forced: dict, path: Path) -> None:
     temporary.replace(path)
 
 
-def cancel_forced(path: Path | None = None) -> None:
-    """取消已采纳的班次，转存为跳过记录并保留备份。新采纳的班仍可单独执行。"""
-    path = CHOICES_PATH if path is None else path
-    with _WRITE_LOCK:
-        skipped, forced = load_choice_sets(path)
-        if forced:
-            _write_sets({**skipped, **forced}, {}, path)
-
-
 def set_skipped(*, key: str, team_no: int, map_code: str,
                 planned_at: float, skipped: bool,
                 path: Path = CHOICES_PATH) -> dict:
@@ -190,6 +181,7 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
         for old_key in stale:
             forced_map.pop(old_key, None)
         if forced:
+            owner = forced_map.get(replace_key or key, {}).get('plan_id')
             if replace_key:
                 forced_map.pop(replace_key, None)
             forced_map[key] = {"team_no": team_no, "map_code": map_code,
@@ -198,6 +190,8 @@ def set_forced_adhoc(*, key: str, team_no: int, map_code: str,
                                "duration_min": int(duration_min)}
             forced_map[key].update(sakura_before_dispatch=bool(sakura_before_dispatch),
                                    repair_threshold=repair_threshold)
+            if owner:
+                forced_map[key]['plan_id'] = owner
             if formation_id:
                 forced_map[key].update(formation_id=formation_id, formation_name=formation_name,
                                        formation_signature=formation_signature)

@@ -2376,8 +2376,15 @@ def api_execute_today():
 
 @app.post("/api/today/stop")
 def api_stop_today():
-    from .today_execution import stop_today
+    from .plan_control import stop_today
     return stop_today(get_runner())
+
+
+@app.post("/api/expedition-stop")
+def api_stop_expeditions():
+    from .plan_control import cancel_expeditions
+    cancel_expeditions(get_runner(), disable_schedule=True)
+    return {'ok': True, 'message': '远征安排已关闭，待派班次已取消；其他任务继续执行。'}
 
 
 @app.post("/api/day-conductor/resume-raid")
@@ -2401,7 +2408,7 @@ async def api_resume_day_raid(request: Request):
 
 @app.put("/api/day-conductor")
 async def api_day_conductor(request: Request):
-    from .day_conductor import arm, disarm, projection
+    from .day_conductor import arm
     from .day_plan import load_plan
 
     body = await request.json()
@@ -2411,7 +2418,8 @@ async def api_day_conductor(request: Request):
     if enabled and _ledger_mode():
         raise HTTPException(403, "纯净账房模式不能自动开工")
     if not enabled:
-        disarm()
+        from .plan_control import stop_today
+        stop_today(get_runner())
     else:
         plan = load_plan()
         if not plan:
@@ -2442,28 +2450,39 @@ async def api_set_day_expedition_slot(request: Request):
     will_run = body.get("will_run") if isinstance(body, dict) else None
     if not isinstance(key, str) or type(will_run) is not bool:
         raise HTTPException(400, "请选择今天的一班远征")
-    timeline = _day_timeline_payload()
-    slot = next((item for item in timeline["expeditions"] if item["key"] == key), None)
-    if not slot or not slot["toggleable"]:
-        raise HTTPException(409, "这班已临近开班、已处理，或排班里被关掉了；请刷新时间表")
-    if ADHOC_KEY_MARK in key:
-        # 自描述班：点掉 = 删 forced 记录；点回 = 按块上的自描述信息重写
-        set_forced_adhoc(
-            key=key, team_no=int(slot["team_no"]), map_code=slot["map_code"],
-            start_min=int(slot["time_min"]),
-            duration_min=int(slot.get("duration_min") or 0),
-            sakura_before_dispatch=slot.get('sakura_before_dispatch', False),
-            repair_threshold=slot.get('repair_threshold', 'light'),
-            planned_at=time.strftime("%Y-%m-%dT%H:%M:%S",
-                                     time.localtime(float(slot["planned_at"]))),
-            forced=will_run)
+    from .scheduler import CONTROL_LOCK
+    with CONTROL_LOCK:
+        timeline = _day_timeline_payload()
+        slot = next((item for item in timeline["expeditions"] if item["key"] == key), None)
+        if not slot or not slot["toggleable"]:
+            raise HTTPException(409, "这班已临近开班、已处理，或排班里被关掉了；请刷新时间表")
+        if not will_run:
+            from .plan_control import cancel_expeditions
+            cancel_expeditions(get_runner(), keys={key}, intentions={key: slot})
+            return {'ok': True}
+        if ADHOC_KEY_MARK in key:
+            # 已校验的显式启用，按块上的自描述信息重建授权。
+            authorized = set_forced_adhoc(
+                key=key, team_no=int(slot["team_no"]), map_code=slot["map_code"],
+                start_min=int(slot["time_min"]),
+                duration_min=int(slot.get("duration_min") or 0),
+                sakura_before_dispatch=slot.get('sakura_before_dispatch', False),
+                repair_threshold=slot.get('repair_threshold', 'light'),
+                planned_at=time.strftime("%Y-%m-%dT%H:%M:%S",
+                                         time.localtime(float(slot["planned_at"]))),
+                forced=will_run)
+            from .plan_control import authorize_expeditions
+            authorize_expeditions({key: authorized[key]})
+            return {"ok": True}
+        if will_run and not slot["base_enabled"] and not slot.get("entry_enabled", True):
+            raise HTTPException(409, "这班在排班设置里被关掉了，先去排班里打开再来点")
+        set_slot_intention(key=slot["key"], team_no=slot["team_no"],
+                           map_code=slot["map_code"], planned_at=slot["planned_at"],
+                           will_run=will_run, base_enabled=bool(slot["base_enabled"]))
+        from .plan_control import authorize_expeditions
+        authorize_expeditions({key: {**slot, 'planned_at': time.strftime(
+            '%Y-%m-%dT%H:%M:%S', time.localtime(float(slot['planned_at'])))}})
         return {"ok": True}
-    if will_run and not slot["base_enabled"] and not slot.get("entry_enabled", True):
-        raise HTTPException(409, "这班在排班设置里被关掉了，先去排班里打开再来点")
-    set_slot_intention(key=slot["key"], team_no=slot["team_no"],
-                       map_code=slot["map_code"], planned_at=slot["planned_at"],
-                       will_run=will_run, base_enabled=bool(slot["base_enabled"]))
-    return {"ok": True}
 
 
 @app.get("/api/day-timeline/expedition-settings/{code}")
@@ -2505,85 +2524,89 @@ async def api_adopt_day_expedition_suggestion(request: Request):
     if team_no not in expedition_advisor.VALID_TEAMS \
             or not isinstance(map_code, str) or not map_code:
         raise HTTPException(400, "请选一条远征建议")
-    timeline = _day_timeline_payload()
-    configured = "source_start_min" in body or bool(body.get("source_key"))
-    source_key = body.get("source_key") or ""
-    if not isinstance(source_key, str):
-        raise HTTPException(400, "请选择今天的一班远征")
-    if source_key:
-        suggestion = next((item for item in timeline["expeditions"] if item["key"] == source_key and item.get("toggleable")), None)
-        if not suggestion or ":adhoc:" not in source_key:
-            raise HTTPException(409, "这班已临近开班或已处理，请刷新时间表")
-        if suggestion["team_no"] != team_no or suggestion["map_code"] != map_code:
-            raise HTTPException(400, "请保留这班的部队和远征图")
-    else:
-        candidates = [item for item in timeline.get("expedition_suggestions") or []
-                      if item.get("team_no") == team_no and item.get("map_code") == map_code]
-        # Time advances while the player reads the popup or another task runs.
-        # Match the actual team/map recommendation, not its moving clock value.
-        source_min = body.get("source_start_min", start_min)
-        if type(source_min) is not int:
-            raise HTTPException(400, '请选择有效的出发时间')
-        suggestion = min(candidates, key=lambda item: abs(item['start_min'] - source_min)) if candidates else None
-    if not suggestion:
-        raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
-    if configured:
-        now_min = int((time.time() - timeline["day_start"]) // 60)
-        if start_min < now_min or start_min > 1679:
-            raise HTTPException(400, "请选择现在至次日03:59之间的出发时间")
-        meta = expedition_advisor.load_maps()[map_code]
-        duration = int(meta["duration_min"])
-        for item in timeline["expeditions"]:
-            if item["key"] == source_key or not item.get("will_run"):
-                continue
-            if item["team_no"] != team_no and item["map_code"] != map_code:
-                continue
-            begin = item["time_min"]
-            if start_min < begin + item["duration_min"] + 10 and start_min + duration > begin:
-                raise HTTPException(409, "这支部队或远征图在该时间已有安排，请换个出发时间")
-        parties = expedition_advisor.party_levels_from_situation(STATE_DIR / "youzu_home_situation.json")
-        preset = None
-        if body.get("formation_id"):
-            preset = next((item for item in expedition_advisor.expedition_formation_options(team_no, parties)
-                           if item["formation_id"] == body["formation_id"]
-                           and item["formation_signature"] == body.get("formation_signature")), None)
-            if not preset:
-                raise HTTPException(409, "预设已变更或刀剑不可用，请重新选择")
-        party = preset["party"] if preset else (parties or {}).get(team_no)
-        shortfall = expedition_advisor._type_shortfall(meta, party)
-        detail = expedition_advisor._level_shortfall(meta, party)
-        if shortfall or detail:
-            raise HTTPException(400, detail or expedition_advisor._type_block_detail(team_no, party, shortfall))
-        suggestion = {**suggestion, "duration_min": duration,
-                      "formation_id": preset["formation_id"] if preset else "",
-                      "formation_name": preset["formation_name"] if preset else "",
-                      "formation_signature": preset["formation_signature"] if preset else ""}
-    elif (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
-        raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
-    if not configured:
-        start_min = int(suggestion['start_min'])
-    today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"] + start_min * 60))
-    key = adhoc_key(today, team_no, start_min)
-    _, forced = load_choice_sets()
-    if key in forced and key != source_key:
-        raise HTTPException(409, "这班已经点上了，到点会单独派出")
-    set_forced_adhoc(
-        key=key, replace_key=source_key, team_no=team_no, map_code=map_code, start_min=start_min,
-        duration_min=int(suggestion.get("duration_min") or 0),
-        formation_id=suggestion.get("formation_id") or "",
-        formation_name=suggestion.get("formation_name") or "",
-        formation_signature=suggestion.get("formation_signature") or "",
-        sakura_before_dispatch=body.get('sakura_before_dispatch', suggestion.get('sakura_before_dispatch', False)),
-        repair_threshold=body.get('repair_threshold', suggestion.get('repair_threshold', 'light')),
-        planned_at=time.strftime(
-            "%Y-%m-%dT%H:%M:%S",
-            time.localtime(timeline["day_start"] + start_min * 60)))
-    fresh = _day_timeline_payload()
-    return {"ok": True,
-            "expeditions": fresh.get("expeditions") or [],
-            "expedition_suggestions": fresh.get("expedition_suggestions") or [],
-            "expedition_help": fresh.get("expedition_help"),
-            "expedition_advice_note": fresh.get("expedition_advice_note")}
+    from .scheduler import CONTROL_LOCK
+    with CONTROL_LOCK:
+        timeline = _day_timeline_payload()
+        configured = "source_start_min" in body or bool(body.get("source_key"))
+        source_key = body.get("source_key") or ""
+        if not isinstance(source_key, str):
+            raise HTTPException(400, "请选择今天的一班远征")
+        if source_key:
+            suggestion = next((item for item in timeline["expeditions"] if item["key"] == source_key and item.get("configurable", item.get("toggleable"))), None)
+            if not suggestion or ":adhoc:" not in source_key:
+                raise HTTPException(409, "这班已临近开班或已处理，请刷新时间表")
+            if suggestion["team_no"] != team_no or suggestion["map_code"] != map_code:
+                raise HTTPException(400, "请保留这班的部队和远征图")
+        else:
+            candidates = [item for item in timeline.get("expedition_suggestions") or []
+                          if item.get("team_no") == team_no and item.get("map_code") == map_code]
+            # Time advances while the player reads the popup or another task runs.
+            # Match the actual team/map recommendation, not its moving clock value.
+            source_min = body.get("source_start_min", start_min)
+            if type(source_min) is not int:
+                raise HTTPException(400, '请选择有效的出发时间')
+            suggestion = min(candidates, key=lambda item: abs(item['start_min'] - source_min)) if candidates else None
+        if not suggestion:
+            raise HTTPException(409, "这条建议已经变了，刷新时间表再看看")
+        if configured:
+            now_min = int((time.time() - timeline["day_start"]) // 60)
+            if start_min < now_min or start_min > 1679:
+                raise HTTPException(400, "请选择现在至次日03:59之间的出发时间")
+            meta = expedition_advisor.load_maps()[map_code]
+            duration = int(meta["duration_min"])
+            for item in timeline["expeditions"]:
+                if item["key"] == source_key or not item.get("will_run"):
+                    continue
+                if item["team_no"] != team_no and item["map_code"] != map_code:
+                    continue
+                begin = item["time_min"]
+                if start_min < begin + item["duration_min"] + 10 and start_min + duration > begin:
+                    raise HTTPException(409, "这支部队或远征图在该时间已有安排，请换个出发时间")
+            parties = expedition_advisor.party_levels_from_situation(STATE_DIR / "youzu_home_situation.json")
+            preset = None
+            if body.get("formation_id"):
+                preset = next((item for item in expedition_advisor.expedition_formation_options(team_no, parties)
+                               if item["formation_id"] == body["formation_id"]
+                               and item["formation_signature"] == body.get("formation_signature")), None)
+                if not preset:
+                    raise HTTPException(409, "预设已变更或刀剑不可用，请重新选择")
+            party = preset["party"] if preset else (parties or {}).get(team_no)
+            shortfall = expedition_advisor._type_shortfall(meta, party)
+            detail = expedition_advisor._level_shortfall(meta, party)
+            if shortfall or detail:
+                raise HTTPException(400, detail or expedition_advisor._type_block_detail(team_no, party, shortfall))
+            suggestion = {**suggestion, "duration_min": duration,
+                          "formation_id": preset["formation_id"] if preset else "",
+                          "formation_name": preset["formation_name"] if preset else "",
+                          "formation_signature": preset["formation_signature"] if preset else ""}
+        elif (suggestion.get("formation_id") or "") != (body.get("formation_id") or "") or (suggestion.get("formation_signature") or "") != (body.get("formation_signature") or ""):
+            raise HTTPException(409, "预设建议已经变了，刷新时间表再看看")
+        if not configured:
+            start_min = int(suggestion['start_min'])
+        today = time.strftime("%Y-%m-%d", time.localtime(timeline["day_start"] + start_min * 60))
+        key = adhoc_key(today, team_no, start_min)
+        _, forced = load_choice_sets()
+        if key in forced and key != source_key:
+            raise HTTPException(409, "这班已经点上了，到点会单独派出")
+        authorized = set_forced_adhoc(
+            key=key, replace_key=source_key, team_no=team_no, map_code=map_code, start_min=start_min,
+            duration_min=int(suggestion.get("duration_min") or 0),
+            formation_id=suggestion.get("formation_id") or "",
+            formation_name=suggestion.get("formation_name") or "",
+            formation_signature=suggestion.get("formation_signature") or "",
+            sakura_before_dispatch=body.get('sakura_before_dispatch', suggestion.get('sakura_before_dispatch', False)),
+            repair_threshold=body.get('repair_threshold', suggestion.get('repair_threshold', 'light')),
+            planned_at=time.strftime(
+                "%Y-%m-%dT%H:%M:%S",
+                time.localtime(timeline["day_start"] + start_min * 60)))
+        from .plan_control import authorize_expeditions
+        authorize_expeditions({key: authorized[key]})
+        fresh = _day_timeline_payload()
+        return {"ok": True,
+                "expeditions": fresh.get("expeditions") or [],
+                "expedition_suggestions": fresh.get("expedition_suggestions") or [],
+                "expedition_help": fresh.get("expedition_help"),
+                "expedition_advice_note": fresh.get("expedition_advice_note")}
 
 
 @app.put("/api/expedition-help-prefs")
@@ -2642,8 +2665,8 @@ async def api_save_day_schedule(request: Request):
     plan = {"day_start": timeline["day_start"],
             "event_end_at": activity.get("event_end_at"), "blocks": blocks}
     if blocks == []:
-        from .day_conductor import disarm
-        disarm()
+        from .plan_control import stop_today
+        stop_today(get_runner())
         save_plan(plan["day_start"], plan["event_end_at"], [])
         timeline = _day_timeline_payload()
         return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
@@ -2747,8 +2770,8 @@ async def api_save_schedule(request: Request):
             from .scheduler import clear_takeover_flag
             clear_takeover_flag()
             if was_enabled:
-                from .expedition_choices import cancel_forced
-                cancel_forced()
+                from .plan_control import cancel_expeditions
+                cancel_expeditions(get_runner(), disable_schedule=True)
         return {"ok": True, "count": len(clean)}
 
 

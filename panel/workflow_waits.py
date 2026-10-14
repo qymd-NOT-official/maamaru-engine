@@ -45,6 +45,9 @@ def _save(runs, path=None):
 
 def park(run_id, config_path, params, deadline, resume, name, path=None, script="workflow"):
     with LOCK:
+        from .plan_control import plan_is_authorized
+        if not plan_is_authorized(params.get('plan_id')):
+            return False
         runs = load(path)
         root = params.get("workflow_wait_root") or run_id
         # 续跑过程被取消后，不允许下一段等待把取消状态复活。
@@ -115,6 +118,11 @@ def resume_due(now, runner, path=None):
         runs = load(path)
         for record in sorted(runs.values(), key=lambda r: r.get("wake_at", 0)):
             if record.get("status") != "waiting" or now < record["wake_at"]:
+                continue
+            from .plan_control import plan_is_authorized
+            if not plan_is_authorized(record['params'].get('plan_id')):
+                record.update(status='cancelled', reason='所属今日安排已停止或变更')
+                _save(runs, path)
                 continue
             if record["params"].get("workflow_resume", {}).get("reason") == "expedition":
                 deadline = record["params"].get("scheduled_deadline")

@@ -113,6 +113,7 @@ export const api = {
   deleteCustomFormation: (id: string, server = '') => request<{ ok: boolean }>(`/api/custom-formations/${encodeURIComponent(id)}?server=${server}`, { method: 'DELETE' }),
   stop: () => request<{ ok: boolean }>('/api/scripts/stop', { method: 'POST' }),
   stopToday: () => request<{ ok: boolean; message: string }>('/api/today/stop', { method: 'POST' }),
+  stopExpeditions: () => request<{ ok: boolean; message: string }>('/api/expedition-stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
   cancelWorkflowWait: (id: string) => request<{ ok: boolean }>(`/api/workflows/waits/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   homeLayout: () => request<HomeLayout>('/api/home-layout'),

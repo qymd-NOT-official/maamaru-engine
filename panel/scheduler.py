@@ -2,6 +2,7 @@
 """远征计划：常用安排、攻略预设与自定义时刻表。"""
 
 import json
+import shutil
 import threading
 import time
 from datetime import datetime, timedelta
@@ -27,7 +28,8 @@ SLOT_READY = "ready"                      # 即将接管（15 秒预告窗口）
 SLOT_DISPATCHED = "dispatched"            # 已确认派出（终态）
 SLOT_EXPIRED = "expired"                  # 超过允许延迟，明确跳过（终态）
 SLOT_FAILED = "failed_unknown"            # 连续 3 次无法确认结果（终态）
-TERMINAL_STATES = {SLOT_DISPATCHED, SLOT_EXPIRED, SLOT_FAILED}
+SLOT_CANCELLED = "cancelled"              # 玩家撤销了本班授权（终态）
+TERMINAL_STATES = {SLOT_DISPATCHED, SLOT_EXPIRED, SLOT_FAILED, SLOT_CANCELLED}
 
 TAKEOVER_PREVIEW_SEC = 15     # ready 预告窗口
 RETRY_AFTER_SEC = 300         # 门卫拒绝/结果未确认后的冷却
@@ -146,8 +148,13 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict):
-    _SCHED_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2),
-                           encoding="utf-8")
+    with CONTROL_LOCK:
+        _SCHED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temporary = _SCHED_PATH.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+        if _SCHED_PATH.exists():
+            shutil.copy2(_SCHED_PATH, _SCHED_PATH.with_suffix('.json.bak'))
+        temporary.replace(_SCHED_PATH)
 
 
 def load_entries() -> list:
@@ -352,6 +359,7 @@ def adhoc_due(cfg: dict, forced: dict, now: float, today: str) -> list:
         if last_runs.get(key):
             continue
         out.append({"key": key, "team_no": team_no, "map_code": map_code,
+                    **({'plan_id': record['plan_id']} if record.get('plan_id') else {}),
                     "sakura_before_dispatch": bool(record.get("sakura_before_dispatch", False)),
                     "repair_threshold": record.get("repair_threshold", "light"),
                     "late_min": int(late),
@@ -437,6 +445,7 @@ def _new_slot(job: dict, cfg: dict, now: float) -> dict:
         planned_ts = now
     return {
         "key": job["key"], "team_no": job["team_no"], "map_code": job["map_code"],
+        **({'plan_id': job['plan_id']} if job.get('plan_id') else {}),
         "planned_at": planned_at, "state": SLOT_WAITING_UNKNOWN,
         "blocked_reason": "", "next_retry_at": 0.0,
         "expires_at": planned_ts + _grace_min(cfg["automation"]) * 60,
@@ -575,6 +584,13 @@ def tick(cfg: dict, due: list, now: float, *, runner_busy: bool,
                 if slots[job["key"]].get(field) != value:
                     slots[job["key"]][field] = value
                     changed = True
+        if job['key'] != inflight_key and slots[job['key']].get('state') not in TERMINAL_STATES:
+            slot = slots[job['key']]
+            if slot.get('plan_id') != job.get('plan_id'):
+                slot.pop('plan_id', None)
+                if job.get('plan_id'):
+                    slot['plan_id'] = job['plan_id']
+                changed = True
 
     for key in list(slots.keys()):
         slot = slots[key]
@@ -667,7 +683,14 @@ def due_jobs(cfg: dict, now: float) -> list:
            if auto.get('mode') == 'preset' else
            _custom_due(cfg, local.tm_hour * 60 + local.tm_min, today, choices, forced))
     due += adhoc_due(cfg, forced, now, today)
-    return due if auto.get('enabled') else forced_only(due, forced)
+    due = due if auto.get('enabled') else forced_only(due, forced)
+    if any(job.get('plan_id') for job in due):
+        from . import day_conductor
+        from .plan_control import plan_is_authorized
+        state = day_conductor.load_state(day_conductor.STATE_PATH) or {}
+        # 子班不能仅靠残留记录执行；父安排已取消或被替换时，授权立即失效。
+        due = [job for job in due if plan_is_authorized(job.get('plan_id'), state)]
+    return due
 
 
 def sync_takeover_flag(cfg: dict, now: float | None = None) -> bool:
@@ -839,6 +862,7 @@ def start_scheduler(config_path: str, emit_fn):
                 run_id = runner.start("dispatch", config_path, {
                     "team_no": str(slot["team_no"]), "map_code": slot["map_code"],
                     "scheduled": True, "slot_key": slot["key"],
+                    **({'plan_id': slot['plan_id']} if slot.get('plan_id') else {}),
                     **({"sakura_before_dispatch": slot.get("sakura_before_dispatch", False),
                         "repair_threshold": slot.get("repair_threshold", "light")}
                        if ":adhoc:" in slot["key"] else {}),

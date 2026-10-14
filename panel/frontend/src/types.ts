@@ -1391,6 +1391,7 @@ export interface FlowTestResult {
 
 // ── 远征排班：班次实况（automation.slot_states 的前端投影）──
 export type ExpeditionSlotState =
+  | 'cancelled'       // 玩家取消派遣
   | 'pending'         // 还没到点
   | 'waiting_busy'    // 到点但自家任务在跑
   | 'waiting_unknown' // 接管门卫没过 / 游戏没在跑 / 上次派遣没确认
@@ -1481,6 +1482,7 @@ export interface DayTimelineExpedition {
   /** 今天到底跑不跑：排班开着且未跳过，或被单班强制启用 */
   will_run: boolean
   toggleable: boolean
+  configurable?: boolean
 }
 
 export interface DayTimelineRun {
@@ -1552,6 +1554,7 @@ export interface DayBooking {
 }
 
 export type ConductorBlockStatus =
+  | 'cancelled'
   | 'pending'
   | 'running'
   | 'ended'

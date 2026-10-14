@@ -75,6 +75,7 @@ class ScriptRunner:
         self._current_run_id: str | None = None
         self._current_script: str | None = None
         self._current_workflow: dict | None = None
+        self._current_execution: dict = {}
         self._workflow_snapshot: dict | None = None
         self._current_started: float | None = None  # 启动时间戳，仪表盘算已跑多久
         self._on_message = None  # callback(message_dict)
@@ -101,6 +102,11 @@ class ScriptRunner:
         return self._current_run_id
 
     @property
+    def current_execution(self) -> dict:
+        """当前执行的安排归属，仅供定向取消，不暴露玩法参数。"""
+        return dict(self._current_execution) if self.is_running else {}
+
+    @property
     def last_run_result(self) -> tuple[str | None, str | None]:
         return self._last_run_id, self._last_run_status
 
@@ -123,6 +129,9 @@ class ScriptRunner:
         with self._lock:
             if self.is_running:
                 return None
+            from .plan_control import plan_is_authorized
+            if not plan_is_authorized((params or {}).get('plan_id')):
+                return None
             if (params or {}).get("workflow_wait_root"):
                 from .workflow_waits import load
                 if load().get(params["workflow_wait_root"], {}).get("status") != "launching":
@@ -133,6 +142,8 @@ class ScriptRunner:
             run_id = uuid.uuid4().hex[:12]
             self._current_run_id = run_id
             self._current_script = script_name
+            self._current_execution = {key: (params or {})[key]
+                                       for key in ('plan_id', 'slot_key', 'scheduled') if key in (params or {})}
             self._current_started = time.time()
             self._last_output = time.time()
             self._stop_reason = ""

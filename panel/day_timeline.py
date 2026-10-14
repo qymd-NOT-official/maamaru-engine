@@ -107,6 +107,7 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
     auto = cfg.get("automation", {}) if isinstance(cfg, dict) else {}
     slots = auto.get("slot_states", {})
     last_runs = auto.get("last_runs", {})
+    from .plan_control import plan_is_authorized
     items = []
     for key, record in (forced or {}).items():
         if not isinstance(record, dict):
@@ -138,11 +139,13 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
             state = "pending" if planned_ts > now else "missed"
             blocked_reason = ""
             late_min = max(0, int((now - planned_ts) / 60))
+        if record.get('plan_id') and state != scheduler.SLOT_DISPATCHED and not plan_is_authorized(record['plan_id']):
+            state, blocked_reason = scheduler.SLOT_CANCELLED, '所属今日安排已停止或变更'
         # 自描述班时长以记录为准；排班引用班查收益表
         duration = (int(record["duration_min"])
                     if is_adhoc_record(record)
                     else durations.get(map_code, 0))
-        will_run = state not in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED)
+        will_run = state not in (scheduler.SLOT_EXPIRED, scheduler.SLOT_FAILED, scheduler.SLOT_CANCELLED)
         items.append({
             "key": key, "kind": "forced", "planned_at": planned_ts,
             **{field: record[field] for field in ("formation_id", "formation_name") if record.get(field)},
@@ -161,9 +164,9 @@ def _forced_expedition_items(cfg: dict, now: float, day_start: float,
             "skipped_today": False,
             "forced_today": True,
             "will_run": will_run,
-            # 还没进状态机终态、又没临近开班的班可以点掉（取消 forced）
-            "toggleable": (state not in scheduler.TERMINAL_STATES
-                           and planned_ts > now + 60),
+            # 未确认派出前仍可取消；临近开班只限制改时间，不限制撤销。
+            "toggleable": state not in scheduler.TERMINAL_STATES,
+            'configurable': state not in scheduler.TERMINAL_STATES and planned_ts > now + 60,
         })
     return items
 

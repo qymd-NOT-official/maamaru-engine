@@ -1,4 +1,4 @@
-"""Issue #10: stop all dispatch sources, retain uncertain history, then allow a new daily plan."""
+"""Issue #10: cancellation follows ownership across dispatches, workers and parked continuations."""
 import asyncio
 import json
 import time
@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from panel import day_conductor as dc, expedition_choices as ec, scheduler as s, server
-from panel.today_execution import execute_today, stop_today
+from panel.today_execution import execute_today
+from panel.plan_control import stop_today
+from panel import workflow_waits as waits
 from tests.test_day_conductor import FakeRunner, timeline
 
 
@@ -17,6 +19,10 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(s, '_SCHED_PATH', tmp_path / 'schedule.json')
     monkeypatch.setattr(s, 'STATE_DIR', tmp_path)
     monkeypatch.setattr(ec, 'CHOICES_PATH', tmp_path / 'choices.json')
+    monkeypatch.setattr(waits, 'PATH', tmp_path / 'waits.json')
+    monkeypatch.setattr(dc, 'STATE_PATH', tmp_path / 'conductor.json')
+    monkeypatch.setattr(s, 'load_choice_sets', lambda: ec.load_choice_sets(ec.CHOICES_PATH))
+    monkeypatch.setattr(server, 'get_runner', lambda: Mock(is_running=False, current_execution={}))
     s.save_config(s._defaults())
     return dict(state_path=tmp_path / 'conductor.json', choices_path=ec.CHOICES_PATH)
 
@@ -29,30 +35,34 @@ def test_stop_cancels_departures_and_old_block_without_replaying(status, isolate
     old_block = dict(kind='workflow', workflow_id='builtin-daily', start_min=minute,
                      status=status, run_id='old-run')
     dc._save(dict(version=2, enabled=status in {'running', 'pending'},
-                  day_start=day_start, today_execution=True, unified_today=True,
+                  day_start=day_start, today_execution=True, unified_today=True, plan_id='plan-a',
                   blocks=[old_block]), isolated['state_path'])
     key = ec.adhoc_key(time.strftime('%Y-%m-%d'), 4, minute)
     ec._write_sets({}, {key: dict(team_no=4, map_code='B2', start_min=minute,
-                                duration_min=180, planned_at=now)}, isolated['choices_path'])
+                                duration_min=180, planned_at=now, plan_id='plan-a'),
+        'independent': dict(team_no=5, map_code='B1', planned_at=now+3600)}, isolated['choices_path'])
     cfg = s.load_config()
     cfg['automation']['enabled'] = True
     cfg['automation']['slot_states'] = {key: dict(key=key, team_no=4, map_code='B2',
-        state=s.SLOT_WAITING_BUSY, expires_at=now + 900)}
+        state=s.SLOT_WAITING_BUSY, expires_at=now + 900, plan_id='plan-a')}
     s.save_config(cfg)
     s.takeover_flag_path().write_text('{}', encoding='utf-8')
     runner = FakeRunner()
-    runner.stop = Mock()
+    runner.is_running = status == 'running'
+    runner.current_run_id = 'old-run'
+    runner.stop = Mock(side_effect=lambda **kw: setattr(runner, 'is_running', False))
     with patch.object(s, 'expedition_records', return_value={}):
         stop_today(runner, now=now, **isolated)
-    runner.stop.assert_called_once()
+    assert runner.stop.call_count == int(status == 'running')
     assert runner.calls == []
     assert not s.takeover_flag_path().exists()
     assert not s.has_pending_dispatch(s.load_config(), now)
-    assert not s.load_config()['automation']['enabled']
+    assert s.load_config()['automation']['enabled']
     skipped, forced = ec.load_choice_sets(isolated['choices_path'])
-    assert key in skipped and not forced
+    assert key in skipped and set(forced) == {'independent'}
+    assert s.load_config()['automation']['slot_states'][key]['state'] == s.SLOT_CANCELLED
     stopped = dc.load_state(isolated['state_path'])
-    assert not stopped['enabled'] and stopped['blocks'] == []
+    assert not stopped['enabled'] and stopped['blocks'][0]['status'] == 'cancelled'
     assert stopped['cancelled_arrangements'][0]['blocks'] == [old_block]
     # The previous interrupted state is still recoverable from backup.
     assert json.loads(isolated['state_path'].with_suffix('.json.bak').read_text())['blocks'] == [old_block]
@@ -64,6 +74,7 @@ def test_stop_cancels_departures_and_old_block_without_replaying(status, isolate
                       plan_path=tmp_path / 'plan.json', **isolated)
     armed = dc.load_state(isolated['state_path'])
     assert armed['enabled'] and armed['blocks'][0]['status'] == 'pending'
+    assert armed['plan_id'] != 'plan-a'
     assert armed['cancelled_arrangements'] == stopped['cancelled_arrangements']
     assert runner.calls == []  # New work starts only through the normal conductor.
 
@@ -107,33 +118,35 @@ def test_stop_endpoint_uses_complete_stop_service():
     from fastapi.testclient import TestClient
     runner = Mock()
     with patch.object(server, 'get_runner', return_value=runner), patch(
-            'panel.today_execution.stop_today', return_value={'ok': True, 'message': '已停止'}) as stop:
+            'panel.plan_control.stop_today', return_value={'ok': True, 'message': '已停止'}) as stop:
         assert TestClient(server.app).post('/api/today/stop').json()['ok']
     stop.assert_called_once_with(runner)
 
 
-def test_stop_still_stops_worker_if_choice_save_fails(isolated):
-    old = {'key': dict(team_no=4, map_code='B2', planned_at=time.time())}
+def test_stop_still_stops_owned_worker_if_choice_save_fails(isolated):
+    dc._save(dict(version=2, enabled=True, day_start=0, plan_id='plan-a',
+                  blocks=[dict(kind='daily', start_min=0, status='running', run_id='owned')]), isolated['state_path'])
+    old = {'key': dict(team_no=4, map_code='B2', planned_at=time.time(), plan_id='plan-a')}
     ec._write_sets({}, old, ec.CHOICES_PATH)
-    runner = Mock()
+    runner = Mock(is_running=True, current_run_id='owned', current_execution={'plan_id': 'plan-a'})
     with patch.object(ec, '_write_sets', side_effect=OSError('disk full')):
         with pytest.raises(OSError):
             stop_today(runner, **isolated)
-    runner.stop.assert_called_once()
+    runner.stop.assert_called_once_with(cancel_waits=False)
     assert ec.load_choice_sets(ec.CHOICES_PATH)[1] == old
-    assert not s.load_config()['automation']['enabled']
+    assert not dc.load_state(isolated['state_path'])['enabled']
 
 
-def test_stop_preserves_route_settings(isolated):
+def test_stop_without_daily_plan_preserves_independent_settings(isolated):
     cfg = s._defaults()
     cfg['automation'].update(enabled=True, teams=[2, 4, 5])
     s.save_config(cfg)
     ec._write_sets({}, {'old': dict(team_no=4, map_code='B2')}, ec.CHOICES_PATH)
     with patch.object(s, 'expedition_records', return_value={}):
         stop_today(Mock(), **isolated)
-    assert not s.load_config()['automation']['enabled']
+    assert s.load_config()['automation']['enabled']
     assert s.load_config()['automation']['teams'] == [2, 4, 5]
-    assert not ec.load_choice_sets(ec.CHOICES_PATH)[1]
+    assert 'old' in ec.load_choice_sets(ec.CHOICES_PATH)[1]
 
 
 def test_poll_cannot_overwrite_a_player_stop_with_its_old_snapshot(isolated):

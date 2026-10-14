@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -108,37 +109,6 @@ def compose_daily_plan(timeline: dict, preset: dict) -> dict:
             'daily_done': False, 'uses_saved_raid': False}
 
 
-def stop_today(runner, *, state_path: Path = dc.STATE_PATH,
-               choices_path: Path = ec.CHOICES_PATH, now: float | None = None) -> dict:
-    """玩家明确叫停：留存旧安排，解除旧任务门闩，并停止所有今日派遣。"""
-    import time
-
-    now = time.time() if now is None else now
-    with dc._LOCK, scheduler.CONTROL_LOCK:
-        state = dc.disarm(state_path)
-        cfg = scheduler.load_config()
-        cfg['automation']['enabled'] = False
-        # 先禁止再启动，再停子进程；停止中途失败也不能继续插队。
-        try:
-            scheduler.save_config(cfg)
-            scheduler.clear_takeover_flag()
-            ec.cancel_forced(choices_path)
-        finally:
-            runner.stop()
-        if state:
-            history = list(state.get('cancelled_arrangements', []))
-            history.append({'stopped_at': now, 'day_start': state['day_start'],
-                            'blocks': state['blocks']})
-            # 未确认的执行结果留在历史里，不冒充完成，也不自动续跑。
-            state.update(cancelled_arrangements=history, today_execution=False,
-                         blocks=[block for block in state['blocks'] if block['status'] == 'ended'])
-            dc._save(state, state_path)
-        scheduler.tick(cfg, [], now, runner_busy=False, emulator_ok=True,
-                       records=scheduler.expedition_records())
-        scheduler.save_config(cfg)
-    return {'ok': True, 'message': '已停止当前任务和今日安排，关闭自动排班并取消已采纳的远征。旧任务记录已保留，可重新安排日课和远征。'}
-
-
 def execute_today(runner, timeline_fn, raid_settings_fn, *,
                   state_path: Path = dc.STATE_PATH, plan_path: Path = dp.PLAN_PATH,
                   choices_path: Path = ec.CHOICES_PATH, daily_preset: dict | None = None) -> dict:
@@ -147,7 +117,7 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         old = dc.load_state(state_path)
         same_day = old and old.get("day_start") == timeline["day_start"]
         if same_day and any(b["status"] in {"interrupted", "blocked"} for b in old["blocks"]):
-            raise ValueError("还有中断的安排；要重新开工，请先点「停止今日安排（含远征）」结束旧安排")
+            raise ValueError("还有中断的安排；要重新开工，请先点「停止今日安排」结束旧安排")
         if same_day and old.get("today_execution") and (daily_preset is None or old.get("unified_today")) and (
                 old.get("enabled") or all(b["status"] == "ended" for b in old["blocks"])):
             return {"ok": True, "message": "今日安排已经完成了。" if all(b["status"] == "ended" for b in old["blocks"]) else "今日安排已经接班了。"}
@@ -179,6 +149,7 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
               for record in records.values()]]}
         candidate = dc.arm(plan, validation_timeline, workflow_id, settings, state_path, persist=False) if plan["blocks"] else {
             "version": 2, "day_start": plan["day_start"], "blocks": [], "enabled": False,
+            'plan_id': uuid.uuid4().hex,
             "plan_signature": dc._plan_signature(plan)}
         if plan["daily_done"]:
             for block in candidate["blocks"]:
@@ -189,10 +160,16 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         candidate["today_execution"] = True
         if daily_preset is not None:
             candidate['unified_today'] = True
+        for record in records.values():
+            record['plan_id'] = candidate['plan_id']
         skipped, forced = ec.load_choice_sets(choices_path)
-        for key, record in records.items():
-            if key in forced and forced[key] != record:
-                raise ValueError("这班远征已有安排，请刷新后再试")
+        for key, record in list(records.items()):
+            if key in forced:
+                if {k: v for k, v in forced[key].items() if k != 'plan_id'} != {
+                        k: v for k, v in record.items() if k != 'plan_id'}:
+                    raise ValueError("这班远征已有安排，请刷新后再试")
+                # 相同的独立班次可以继续执行，但不能被本次日课收编。
+                records.pop(key)
         snapshots = {p: p.read_bytes() if p.exists() else None
                      for p in (plan_path, state_path, choices_path)}
         try:
@@ -200,6 +177,8 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
             dc._save(candidate, state_path)
             if records:
                 ec._write_sets(skipped, {**forced, **records}, choices_path)
+                from .plan_control import authorize_expeditions
+                authorize_expeditions(records, timeline['now'])
         except OSError:
             # Keep the original schedules, including absent-file semantics; never delete user data.
             for path, content in snapshots.items():

@@ -11,7 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
 
@@ -149,19 +149,18 @@ class ExpeditionChoiceTests(unittest.TestCase):
         timeline = {"expeditions": [slot]}
         client = TestClient(server.app)
         with patch.object(server, "_day_timeline_payload", return_value=timeline), \
-             patch.object(ec, "set_slot_intention") as writer:
+             patch("panel.plan_control.cancel_expeditions") as writer:
             response = client.put("/api/day-timeline/expedition-slot",
                                   json={"key": slot["key"], "will_run": False})
             self.assertEqual(response.status_code, 200)
-            writer.assert_called_once_with(
-                key=slot["key"], team_no=2, map_code="B3",
-                planned_at=slot["planned_at"], will_run=False,
-                base_enabled=True)
+            self.assertEqual(writer.call_args.kwargs['keys'], {slot['key']})
+            self.assertEqual(writer.call_args.kwargs['intentions'], {slot['key']: slot})
             slot["toggleable"] = False
             blocked = client.put("/api/day-timeline/expedition-slot",
                                  json={"key": slot["key"], "will_run": True})
             self.assertEqual(blocked.status_code, 409)
             self.assertEqual(writer.call_count, 1)
+
 
 
 class ChoiceSetTests(unittest.TestCase):
@@ -315,7 +314,11 @@ class ExpeditionSlotEndpointTests(unittest.TestCase):
 
         with patch.object(server, "_day_timeline_payload",
                           return_value={"expeditions": [self.slot]}), \
-             patch.object(ec, "set_slot_intention", side_effect=to_temp):
+             patch.object(ec, "set_slot_intention", side_effect=to_temp), \
+             patch.object(ec, "CHOICES_PATH", self.path), \
+             patch.object(scheduler, "_SCHED_PATH", self.path.parent / 'schedule.json'), \
+             patch.object(scheduler, "STATE_DIR", self.path.parent), \
+             patch.object(server, "get_runner", return_value=Mock(is_running=False)):
             return TestClient(server.app).put("/api/day-timeline/expedition-slot",
                                               json=payload)
 
@@ -354,28 +357,19 @@ class ExpeditionSlotEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertFalse(self.path.exists())
 
-    def test_adhoc_key_goes_to_set_forced_adhoc(self):
-        """自描述班（建议采纳的）走 set_forced_adhoc：点掉删记录、点回重写。"""
+    def test_adhoc_cancel_uses_the_same_cancellation_service(self):
         key = ec.adhoc_key(time.strftime("%Y-%m-%d"), 4, 600)
         slot = {"key": key, "team_no": 4, "map_code": "B3",
                 "planned_at": _today_at(10), "time_min": 600,
                 "duration_min": 90, "toggleable": True}
-        client = TestClient(server.app)
-        with patch.object(server, "_day_timeline_payload",
-                          return_value={"expeditions": [slot]}), \
-             patch.object(ec, "set_forced_adhoc") as writer, \
-             patch.object(ec, "set_slot_intention") as legacy:
-            response = client.put("/api/day-timeline/expedition-slot",
-                                  json={"key": key, "will_run": False})
-            self.assertEqual(response.status_code, 200)
-            legacy.assert_not_called()
-            kwargs = writer.call_args.kwargs
-            self.assertEqual(kwargs["key"], key)
-            self.assertEqual(kwargs["team_no"], 4)
-            self.assertEqual(kwargs["map_code"], "B3")
-            self.assertEqual(kwargs["start_min"], 600)
-            self.assertEqual(kwargs["duration_min"], 90)
-            self.assertFalse(kwargs["forced"])
+        with patch.object(server, "_day_timeline_payload", return_value={"expeditions": [slot]}), \
+             patch("panel.plan_control.cancel_expeditions") as cancel:
+            response = TestClient(server.app).put('/api/day-timeline/expedition-slot',
+                                                  json={'key': key, 'will_run': False})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(cancel.call_args.kwargs['keys'], {key})
+        self.assertEqual(cancel.call_args.kwargs['intentions'], {key: slot})
+
 
 
 if __name__ == "__main__":

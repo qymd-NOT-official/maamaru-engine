@@ -14,6 +14,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from touken.runtime_paths import STATE_DIR
@@ -25,7 +26,7 @@ from .day_plan import load_plan, review_plan
 STATE_PATH = STATE_DIR / "day_conductor.json"
 BUILTIN_ID = "builtin-scheduled-raid"
 _BLOCK_STATUSES = {"pending", "running", "ended",
-                   "interrupted", "missed", "blocked"}
+                   "interrupted", "missed", "blocked", "cancelled"}
 _BLOCK_KINDS = {"raid", "activity", "workflow", "daily"}
 _LOCK = threading.RLock()
 
@@ -287,6 +288,8 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
                     if matched.get("status") in {"ended", "interrupted", "missed"}:
                         block.update(matched)
         state = {"version": 2, "enabled": True,
+                 'plan_id': (old.get('plan_id') if old and not old.get('cancelled_at')
+                             and old.get('day_start') == plan['day_start'] else None) or uuid.uuid4().hex,
                  "day_start": plan["day_start"],
                  "plan_signature": _plan_signature(plan),
                  "blocks": blocks}
@@ -296,15 +299,6 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
             state["workflow_id"] = workflow_id
             state["workflow_name"] = raid_spec["name"]
         if persist:
-            _save(state, path)
-        return state
-
-
-def disarm(path: Path = STATE_PATH) -> dict | None:
-    with _LOCK:
-        state = load_state(path)
-        if state and state.get("enabled"):
-            state["enabled"] = False
             _save(state, path)
         return state
 
@@ -429,6 +423,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
                  raid_settings_fn, plan: dict, config_path: str, now: float,
                  emit_fn) -> bool:
     """ runner 空闲时对一块做开工前预检并启动；返回是否真的点着了火。"""
+    ownership = {'plan_id': state['plan_id']} if state.get('plan_id') else {}
     kind = block.get("kind")
     if kind == "raid":
         try:
@@ -453,6 +448,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             emit_fn("conductor", f"[大总管] 本段没有开工：{block['reason']}")
             return False
         run_id = runner.start("workflow", config_path, {
+            **ownership,
             "workflow_id": state.get("workflow_id") or BUILTIN_ID,
             "scheduled_raid_runs": block["runs"],
             "scheduled_workflow_signature": block.get("workflow_signature"),
@@ -472,6 +468,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             emit_fn("conductor", f"[大总管] 本段没有开工：{block['reason']}")
             return False
         run_id = runner.start("scheduled_gameplay", config_path, {
+            **ownership,
             "script": block["script"], "runs": block["runs"],
             "event_key": block["event_key"], "gameplay_signature": block["gameplay_signature"],
             "scheduled_deadline": min(state["day_start"] + day_timeline.DAY_MINUTES * 60,
@@ -499,7 +496,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
             block["reason"] = "任务流改过了，请重新开启大总管"
         else:
             run_id = runner.start("workflow", config_path,
-                                  {"workflow_id": block["workflow_id"],
+                                  {**ownership, "workflow_id": block["workflow_id"],
                                    **({"scheduled_deadline": state["day_start"] + day_timeline.DAY_MINUTES * 60} if block["workflow_id"] == "builtin-daily" else {}),
                                    **({"daily_recommended_runs": block["daily_recommended_runs"]} if "daily_recommended_runs" in block else {})})
             if not run_id:
@@ -511,7 +508,7 @@ def _start_block(block: dict, state: dict, runner, timeline_fn,
         emit_fn("conductor", f"[大总管] 本段没有开工：{block['reason']}")
         return False
     # daily：日出而作，直接过。
-    run_id = runner.start("daily", config_path, {})
+    run_id = runner.start("daily", config_path, ownership)
     if not run_id:
         return False
     block.update(status="running", run_id=run_id, started_at=now)

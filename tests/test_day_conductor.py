@@ -4,13 +4,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
 
 from panel import day_conductor as dc
 from panel import day_plan as dp
 from panel import server  # noqa: F401 - register gameplay workflow nodes
+from panel.plan_control import stop_today
 from panel.day_plan import load_plan, save_plan
 from touken.flow_control import FlowAborted
 
@@ -109,7 +110,7 @@ class DayConductorTests(unittest.TestCase):
             self.tick(DAY + 670 * 60)
         self.assertEqual(len(self.runner.calls), 2)
         params = self.runner.calls[-1][2]
-        self.assertEqual(params, {"workflow_id": "wf1"})
+        self.assertEqual(params, {"workflow_id": "wf1", "plan_id": dc.load_state(self.state_path)["plan_id"]})
         self.assertNotIn("scheduled_raid_runs", params)
 
     def test_rearm_preserves_interrupted_run_even_when_settings_change(self):
@@ -217,12 +218,17 @@ class DayConductorTests(unittest.TestCase):
         self.assertEqual(state["blocks"][0]["status"], "interrupted")
         self.assertEqual(state["blocks"][0]["reason"], "任务流失败，后续已停用")
 
-    def test_disarm_preserves_current_run_but_prevents_next_block(self):
+    def test_stop_today_cancels_current_run_and_prevents_next_block(self):
         self.arm()
         self.tick(DAY + 600 * 60)
-        dc.disarm(self.state_path)
+        from panel import workflow_waits, scheduler
+        self.runner.stop = Mock(side_effect=lambda **kw: setattr(self.runner, 'is_running', False))
+        with patch.object(workflow_waits, 'PATH', self.state_path.with_suffix('.waits.json')), patch.object(
+                scheduler, '_SCHED_PATH', self.state_path.with_suffix('.schedule.json')):
+            stop_today(self.runner, state_path=self.state_path, choices_path=self.state_path.with_suffix('.choices.json'))
         self.assertFalse(dc.load_state(self.state_path)["enabled"])
-        self.assertTrue(self.runner.is_running)
+        self.assertFalse(self.runner.is_running)
+        self.assertEqual(dc.load_state(self.state_path)['blocks'][0]['status'], 'cancelled')
         self.assertEqual(len(self.runner.calls), 1)
 
     def test_midnight_and_0359_tasks_start_before_rollover(self):
@@ -289,7 +295,7 @@ class DayConductorTests(unittest.TestCase):
             self.tick(DAY + 600 * 60)
         script, _, params = self.runner.calls[0]
         self.assertEqual(script, "workflow")
-        self.assertEqual(params, {"workflow_id": "wf1"})
+        self.assertEqual(params, {"workflow_id": "wf1", "plan_id": dc.load_state(self.state_path)["plan_id"]})
         self.assertEqual(dc.load_state(self.state_path)["blocks"][0]["status"],
                          "running")
 
@@ -328,7 +334,7 @@ class DayConductorTests(unittest.TestCase):
         self.tick(DAY + 600 * 60)
         script, _, params = self.runner.calls[0]
         self.assertEqual(script, "daily")
-        self.assertEqual(params, {})
+        self.assertEqual(params, {"plan_id": dc.load_state(self.state_path)["plan_id"]})
         self.assertIn("一键日课开工", self.messages[-1])
         self.assertEqual(dc.load_state(self.state_path)["blocks"][0]["label"],
                          "一键日课")
@@ -343,7 +349,7 @@ class DayConductorTests(unittest.TestCase):
         before = self.state_path.read_text(encoding="utf-8")
         with patch.object(Path, "replace", side_effect=OSError("busy")):
             with self.assertRaises(OSError):
-                dc.disarm(self.state_path)
+                stop_today(Mock(is_running=False), state_path=self.state_path)
         self.assertEqual(self.state_path.read_text(encoding="utf-8"), before)
 
     def test_mixed_flow_keeps_other_steps_and_requires_one_raid(self):
@@ -513,7 +519,7 @@ class ScheduleEndpointTests(unittest.TestCase):
 
     def _patches(self, find_preset=None):
         real_arm = dc.arm
-        real_disarm = dc.disarm
+        from panel.plan_control import stop_today as real_stop
         real_save = dp.save_plan
 
         def arm_to_temp(plan, timeline, workflow_id, raid_settings, **kwargs):
@@ -529,7 +535,8 @@ class ScheduleEndpointTests(unittest.TestCase):
             patch.object(server, "_load_panel_settings",
                          return_value={"params": {"raid": {}}}),
             patch.object(dc, "arm", side_effect=arm_to_temp),
-            patch.object(dc, "disarm", side_effect=lambda: real_disarm(self.state_path)),
+            patch("panel.plan_control.stop_today", side_effect=lambda runner: real_stop(
+                runner, state_path=self.state_path, choices_path=self.state_path.parent / "choices.json")),
             patch.object(dp, "save_plan", side_effect=save_to_temp),
         ]
         if find_preset is not None:

@@ -132,10 +132,18 @@ async function stopToday() {
   busy.value = true
   try {
     const result = await api.stopToday()
-    running.value = false
+    running.value = (await api.scripts()).running
     message.value = result.message
     emit('saved')
   } catch (err) { message.value = err instanceof Error ? err.message : '暂时没能叫停，请重试' }
+  finally { busy.value = false }
+}
+async function stopExpeditions() {
+  busy.value = true
+  try {
+    message.value = (await api.stopExpeditions()).message
+    emit('saved')
+  } catch (err) { message.value = err instanceof Error ? err.message : '远征安排未能关闭，请重试' }
   finally { busy.value = false }
 }
 </script>
@@ -145,10 +153,11 @@ async function stopToday() {
     <header class="daily-heading"><div><small>本丸执务单</small><h3>今日安排</h3></div><span class="daily-count">日课已选 {{ enabledCount }} 项</span></header>
     <p v-if="loading">正在取出日课设置…</p>
     <section v-if="!loading && preset" class="daily-planned-expeditions">
-      <div class="daily-expedition-title"><label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> <strong>规划远征</strong></label><details class="daily-help"><summary aria-label="规划远征说明">?</summary><p>远征与日课分别执行；派遣占用游戏时先等它让出位置，失败、暂停或取消不会连带停掉日课。已单独开启的远征排班仍按原安排运行。</p></details></div>
+      <div class="daily-expedition-title"><label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> <strong>规划远征</strong></label><details class="daily-help"><summary aria-label="规划远征说明">?</summary><p>开工时一起安排远征；停止今日安排会取消这次带出的远征，保留单独安排的班次。关闭远征安排则取消全部待派班次，日课继续执行。</p></details></div>
       <label>优先攒什么 <select :value="timeline.expedition_help.resource_focus || ''" :disabled="busy || running" @change="setResourceFocus"><option value="">交给狐之助建议</option><option v-for="resource in ['小判','木炭','玉钢','冷却材','砥石','委托符','加速符']" :key="resource" :value="resource">{{ resource }}</option></select></label>
       <label>每队 <select :value="timeline.expedition_help.rounds_per_team" :disabled="busy || running" @change="setRounds"><option v-for="n in [0,1,2,3,4,5]" :value="n" :key="n">{{ n }} 次</option></select></label>
       <div class="daily-team-picker"><span>部队</span> <button v-for="team in [1,2,3,4,5]" :key="team" :aria-pressed="timeline.expedition_help.available_teams.includes(team)" :disabled="busy || running" @click="toggleTeam(team)" :aria-label="`规划远征部队${team}`">{{ ['一','二','三','四','五'][team - 1] }}</button></div>
+      <button v-if="timeline.expedition_schedule_enabled || timeline.expeditions.some(slot => slot.will_run && slot.state !== 'running' && slot.state !== 'dispatched')" class="daily-save" type="button" :disabled="busy" @click="stopExpeditions">关闭远征安排</button>
     </section>
 
     <div v-if="!loading && preset" class="daily-settings-layout">
@@ -198,7 +207,7 @@ async function stopToday() {
       <label>结束后<select v-model="after" :disabled="busy || running"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></select></label>
       <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button class="daily-save" :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间执行今日安排' : '一键执行今日安排' }}</button></div></div>
     </footer>
-    <button v-if="!loading && preset" class="daily-stop" :disabled="busy" @click="stopToday">停止今日安排（含远征）</button>
+    <button v-if="!loading && preset" class="daily-stop" :disabled="busy" @click="stopToday">停止今日安排</button>
     <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份今日安排替换旧的任务时段；远征排班仍保留。</p>
     <p v-if="message" role="status">{{ message }}</p><button v-if="!loading && !preset" @click="load">重新加载</button>
   </section>
