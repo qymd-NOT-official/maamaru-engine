@@ -240,3 +240,75 @@ def test_fresh_body_stays_on_formation_and_navigation_never_detours_home():
     with patch.object(training, 'latest_party', return_value=data):
         assert finish(training.fresh_body_stream(host, 3))[0] is data
     assert calls == ['编队']
+
+
+def test_corrupt_pending_is_archived_and_released(tmp_path):
+    path = tmp_path / 'pending.json'
+    path.write_text('{broken', encoding='utf-8')
+    with patch.object(training, 'PENDING', path):
+        assert training.pending_restore() is None
+    assert not path.exists()
+    assert list(tmp_path.glob('*.corrupt-*.bak'))
+
+
+def test_expired_pending_retires_instead_of_blocking(tmp_path):
+    import time
+    path = tmp_path / 'pending.json'
+    snapshot = {'1': {'serial_id': '101'}}
+    fresh = {'version': 1, 'team_no': 3, 'snapshot': snapshot,
+             'status': 'training', 'started_at': time.time()}
+    stale = dict(fresh, started_at=time.time() - training.PENDING_MAX_AGE - 1)
+    path.write_text(json.dumps(stale), encoding='utf-8')
+    with patch.object(training, 'PENDING', path):
+        assert training.pending_restore() is None
+        assert json.loads(path.read_text(encoding='utf-8'))['status'] == 'expired'
+    path.write_text(json.dumps(fresh), encoding='utf-8')
+    with patch.object(training, 'PENDING', path):
+        assert training.pending_restore()['status'] == 'training'
+
+
+def test_player_rebuilt_team_is_taken_over_not_overwritten(tmp_path):
+    # 玩家手动重建了队伍（两人以上且与快照不同）：不许再加载旧记录覆盖，
+    # 记 taken_over 翻篇放行
+    data = body()
+    snapshot = training.team_snapshot(data, 3)
+    pending = {'version': 1, 'team_no': 3, 'snapshot': snapshot,
+               'status': 'training', 'started_at': 100}
+    data['party']['3']['slot'] = {'1': {'serial_id': '201'}, '2': {'serial_id': '202'}}
+    data['sword'].update({'201': {'sword_id': '3', 'protect': '1', 'level': '30', 'fatigue': '49'},
+                          '202': {'sword_id': '3', 'protect': '1', 'level': '30', 'fatigue': '49'}})
+    agent = Agent(data)
+    with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)):
+        result, messages = finish(training.restore_stream(agent, pending))
+    assert result
+    assert 'restore' not in agent.calls
+    assert pending['status'] == 'taken_over'
+    assert any('玩家已接手' in m for m in messages)
+
+
+def test_player_dispatched_team_is_taken_over(tmp_path):
+    data = body()
+    snapshot = training.team_snapshot(data, 3)
+    pending = {'version': 1, 'team_no': 3, 'snapshot': snapshot,
+               'status': 'training', 'started_at': 100}
+    data['party']['3']['status'] = '2'  # 玩家手动把队伍派出远征了
+    agent = Agent(data)
+    with patch.object(training, 'PENDING', tmp_path / 'pending.json'), \
+            patch.object(training, 'fresh_body_stream', side_effect=lambda *a, **kw: stream_result(data)):
+        result, messages = finish(training.restore_stream(agent, pending))
+    assert result
+    assert 'restore' not in agent.calls
+    assert pending['status'] == 'taken_over'
+
+
+def test_invalid_pending_record_retires_instead_of_blocking(tmp_path):
+    path = tmp_path / 'pending.json'
+    path.write_text(json.dumps({'version': 1, 'team_no': 3, 'status': 'training',
+                                'snapshot': {'1': {'serial_id': '101'}}}), encoding='utf-8')
+    agent = Agent(body())
+    with patch.object(training, 'PENDING', path):
+        result, messages = finish(training.recover_stream(agent))
+    assert result
+    assert json.loads(path.read_text(encoding='utf-8'))['status'] == 'invalid'
+    assert any('翻篇' in m for m in messages)

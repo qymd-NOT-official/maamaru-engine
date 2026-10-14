@@ -9,6 +9,20 @@ from .selection_identity import client_events, successful_body
 
 PENDING = STATE_DIR / 'expedition_sakura_pending.json'
 SHELL = {'team_ui_ocr': {'expected': '部队编成', 'roi': [480, 0, 800, 60]}}
+# 恢复旗标最长有效期：借队补花都是当天事，超期一律按玩家已接手翻篇，
+# 不许一面旧旗标卡死全部出阵（玩家优先原则，2026-10-14 老大亲定）
+PENDING_MAX_AGE = 24 * 3600
+
+
+def _occupied(snapshot):
+    return sum(1 for row in snapshot.values() if row.get('serial_id'))
+
+
+def _retire_pending(pending, status):
+    pending['status'] = status
+    pending.pop('record_body', None)
+    PENDING.write_text(json.dumps(pending, ensure_ascii=False, indent=2),
+                       encoding='utf-8')
 
 
 def latest_party(events, after):
@@ -118,8 +132,25 @@ def restore_stream(agent, pending):
     # after interruption enters formation once, never detours via home.
     backup = pending.get('record_body')
     body = record_body(agent, backup, pending['started_at']) if backup else (yield from fresh_body_stream(agent, team, after=time.time() - 1))
+    # 玩家优先：先对账队伍现状。玩家手动重建过队伍（两人以上且与快照
+    # 不同——训练中的队伍永远只有一名队长）或把队伍手动派出了远征，
+    # 都说明玩家已接手；抱着旧快照恢复只会覆盖玩家的队伍或永远卡死，
+    # 记一笔翻篇，以现状为准。
+    current = None
+    if body:
+        party = (body.get('party') or {}).get(str(team), {})
+        try:
+            current = team_snapshot(body, team)
+        except ValueError:
+            current = None
+        taken_over = (current is None and str(party.get('status') or '1') != '1') or (
+            current is not None and current != snapshot and _occupied(current) >= 2)
+        if taken_over:
+            _retire_pending(pending, 'taken_over')
+            yield '[远征补花] 队伍已被手动改动或派出，按玩家已接手翻篇，以现状为准'
+            return True
     try:
-        already_restored = not backup and bool(body) and team_snapshot(body, team) == snapshot
+        already_restored = not backup and current is not None and current == snapshot
     except ValueError:
         already_restored = False
     if not already_restored and (not body or not record_matches(body, snapshot)):
@@ -151,9 +182,24 @@ def pending_restore():
         return None
     try:
         pending = json.loads(PENDING.read_text(encoding='utf-8'))
-        return pending if pending.get('status') != 'restored' else None
     except (OSError, ValueError, AttributeError):
-        return {'status': 'unreadable'}
+        # 文件损坏就没有恢复依据，留着只会永久卡死全部出阵——改名留档放行
+        try:
+            PENDING.rename(PENDING.with_name(
+                f'expedition_sakura_pending.corrupt-{int(time.time())}.bak'))
+        except OSError:
+            pass
+        return None
+    if pending.get('status') == 'restored':
+        return None
+    started = pending.get('started_at')
+    if isinstance(started, (int, float)) and time.time() - started > PENDING_MAX_AGE:
+        try:
+            _retire_pending(pending, 'expired')
+        except OSError:
+            pass
+        return None
+    return pending
 
 
 def recover_stream(agent):
@@ -165,8 +211,13 @@ def recover_stream(agent):
             or set(pending['snapshot']) != {str(n) for n in range(1, 7)}
             or any(not isinstance(row, dict) or 'serial_id' not in row
                    for row in pending['snapshot'].values())):
-        yield '[远征补花] ✗ 上次恢复记录无法读取，暂不派遣'
-        return False
+        # 结构无效的记录永远恢复不成，卡死不如留档翻篇（玩家优先）
+        try:
+            _retire_pending(pending, 'invalid')
+        except OSError:
+            pass
+        yield '[远征补花] 上次恢复记录无效，已留档翻篇，按现状继续'
+        return True
     agent._expedition_sakura_active = True
     try:
         return (yield from restore_stream(agent, pending))
