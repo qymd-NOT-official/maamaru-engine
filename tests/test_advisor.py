@@ -414,6 +414,14 @@ class GetPlanningTests(unittest.TestCase):
     def test_end_to_end_with_fake_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "goals.json"
+            # 大阪城卡片的期次会随真实排期滚动，测试钉住一个旧期次，
+            # 保证「窗口净收益算进预测」这个前提不随仓库数据过期。
+            (Path(tmp) / advisor.EVENTS_META_LOCAL).write_text(
+                json.dumps({"大阪城": {
+                    "start_date": "2026-08-13", "end_date": "2026-08-27",
+                    "start_at": "2026-08-13T10:00:00+08:00",
+                    "end_at": "2026-08-27T05:00:00+08:00",
+                }}, ensure_ascii=False), encoding="utf-8")
             with patch("touken.advisor._today", return_value=date(2026, 8, 25)):
                 advisor.add_goal(path, resource="小判", target=100000,
                                  deadline=_day(10))
