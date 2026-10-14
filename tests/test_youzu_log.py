@@ -767,7 +767,7 @@ def test_home_situation_collects_repair_duty_and_event_points(tmp_path):
 
 # ---------------------------------------------------------------- 出阵链日志验伤
 
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timedelta, timezone
 
 from touken.flows.battle import BattleMixin
 
@@ -798,7 +798,7 @@ def _fake_pull(path):
 
 
 def test_log_injury_status_fresh(tmp_path, monkeypatch):
-    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = _dt.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
     f = _injury_log(tmp_path, ts,
                     {"111": ("45", "45", "118"), "222": ("30", "79", "118")})
     monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(f))
@@ -839,7 +839,7 @@ def test_log_injury_status_disabled_by_config(monkeypatch):
 
 def test_combined_injury_uses_current_game_hp(tmp_path, monkeypatch):
     """完整新鲜血量作准，画面误识别不能覆盖。"""
-    ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = _dt.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
     f = _injury_log(tmp_path, ts,
                     {"111": ("45", "45", "118"), "222": ("45", "45", "118")})
     monkeypatch.setattr(youzu_log, "pull_log", _fake_pull(f))
