@@ -650,7 +650,8 @@ class BattleMixin:
         self._pick_team(team_no)
         if rotate_captain:
             try:
-                yield from self._rotate_captain_here(rotate_captain_margin)
+                yield from self._rotate_captain_here(rotate_captain_margin,
+                                                     team_no=team_no)
             except Exception as exc:
                 # 换队长只调站位，不可绕过后续伤势/刀装安全检查；OCR
                 # 临时失手也不应把整次活动伪装成失败。

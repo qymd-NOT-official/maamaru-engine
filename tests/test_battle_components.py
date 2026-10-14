@@ -932,8 +932,8 @@ class _SafeDepartHost(BattleMixin):
         self.steps.append("injury")
         return self._injury
 
-    def _rotate_captain_here(self, margin=10):
-        self.steps.append(f"rotate:{margin}")
+    def _rotate_captain_here(self, margin=10, team_no=None):
+        self.steps.append(f"rotate:{margin}:team{team_no}")
         yield "[换队长] done"
 
     def _click_depart(self, cfg):
@@ -1159,7 +1159,7 @@ class SafeDepartChainTests(unittest.TestCase):
         msgs, result = _drain_chain(
             host, rotate_captain=True, rotate_captain_margin=20)
         self.assertEqual(result, (True, False))
-        self.assertEqual(host.steps[:3], ["pick", "rotate:20", "injury"])
+        self.assertEqual(host.steps[:3], ["pick", "rotate:20:team3", "injury"])
         self.assertIn("[换队长] done", msgs)
 
     def test_refill_popup_declined_cancels_and_stops(self):

@@ -337,7 +337,8 @@ class SortieMixin:
             # 用户实测能直接拖人换位，不用绕路编队页；差距不到阈值会自动跳过） ==========
             if rotate_captain:
                 try:
-                    for rot_msg in self._rotate_captain_here(rotate_captain_margin):
+                    for rot_msg in self._rotate_captain_here(
+                            rotate_captain_margin, team_no=team_no):
                         yield rot_msg
                 except Exception as exc:
                     yield f"[出阵] 自动换队长翻车（不影响出阵）: {exc}"

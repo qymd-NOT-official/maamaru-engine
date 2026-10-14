@@ -9,9 +9,14 @@
 
 流程（全本丸轮刷，只选上锁且等级大于1的刀，不按标签筛选）：
   编队 → 解散指定部队 → 替换列表按樱吹雪升序
-  → 选已上锁、等级>1、疲劳≤49的刀 → 取消期间限定/远战勾选 → 自动装备刀装
+  → 选人吃全刀池游戏数据（上锁、等级>1、疲劳≤49、不在任何部队），
+    名单 OCR 只负责定位候选的行坐标；数据缺失/过期回退画面逐行核对
+  → 取消期间限定/远战勾选 → 自动装备刀装
   → 队长单挑1-1，复用既有出阵保护 → 疲劳100 → 全部卸装
   → 换下一振，达到本次数量或没有候选时收工
+
+数据纪律（与 _check_fatigue 同口径）：FACT_MAX_AGE=600 秒内才算数，
+任一字段缺失/过期整个数据视图作废、回退视觉，绝不拿半残数据放行。
 
 
 坐标（真机校准，1280x720）：
@@ -44,10 +49,12 @@ _EQUIP_BACK = (135, 25)   # 更换装备页返回箭头
 _DRAG_X = 200
 _DRAG_MS = 1000   # 起步时长，实际取 max(此值, 拖动距离×2.5)
 
-# 换队长读疲劳：成员信息列整列 OCR（x 覆盖"疲劳 xx/100"文本）后按 y
+# 换队长的行坐标：成员信息列整列 OCR（x 覆盖"疲劳 xx/100"文本）按 y
 # 归位。血泪（2026-09-21 六号位隐形事故）：编队页行距 ~98px、部队选择页
-# ~94.5px，写死六行坐标会在底部行累积 60px+ 偏差，5/6 号位疲劳整个
-# 读空——累的人对轮换隐形。两页不再共用行坐标假设。
+# ~94.5px，写死六行坐标会在底部行累积 60px+ 偏差，5/6 号位整个读丢——
+# 累的人对轮换隐形。现在换队长的「决策」改吃全队疲劳数据，OCR 只剩
+# 「拖完名单找行坐标」的点击定位职责；行坐标仍按 y 归位、不写死，
+# 两页不共用行坐标假设。
 _FATIGUE_COL = (285, 100, 435, 710)      # 疲劳列整列 ROI（xyxy）
 _FIRST_ROW_Y = (140, 260)                # 首行疲劳 y 合理范围（两页均 ~196-199）
 _FATIGUE_TO_ROW_CY = 36                  # 疲劳行 y → 行中心（拖拽/名字定位用）
@@ -219,25 +226,60 @@ class SakuraMixin:
         yield f"[刷花] 客户端已确认部队{team_no}{cleared_label}，接下来选队长，单人轮刷"
         return True
 
-    def _rotate_captain_here(self, margin: int = 10):
+    def _rotate_team_fatigue(self, team_no):
+        """全队疲劳（游戏数据口径，同 _check_fatigue）：{slot: {"fatigue", "name"}}。
+
+        任一位缺失/过期整个返回 None——半残数据绝不喂给换队长决策
+        （2026-09-21 就是 5/6 号位读空让红脸队员对轮换隐形）。
         """
-        在当前页原地换队长：整列 OCR 读全队疲劳，最低的拖到队长位，拖完复查。
+        from .. import youzu_log
+        from ..game_state import available_events, fatigue_value, sword_facts
+        events = available_events(self.maa)
+        values = {}
+        for slot in range(1, 7):
+            fatigue = fatigue_value(events, team_no, slot)
+            if fatigue is None:
+                return None
+            values[slot] = {"fatigue": fatigue, "name": None}
+        state = sword_facts(events)
+        roster = state["parties"].get(str(team_no), {})
+        for slot, info in values.items():
+            serial = str(roster.get(str(slot), ""))
+            info["name"] = youzu_log._sword_name(
+                state["swords"].get(serial, {}).get("sword_id"), sword_db)
+        return values
+
+    def _rotate_captain_here(self, margin: int = 10, team_no: int | None = None):
+        """
+        在当前页原地换队长：全队疲劳以游戏数据为准（fresh 才用，缺了回退
+        整列 OCR 读数决策），最低的拖到队长位，拖完复查。
 
         调用前必须已停在目标部队的成员列表页（部队标签已切好）。
         编队页和出阵前的部队选择页都能拖人换位，但两页行距不同
-        （编队 ~98px、部队选择 ~94.5px），所以读数走整列 OCR 按 y
-        归位，不写死行坐标——写死会在底部行累积偏差，2026-09-21
-        出过 5/6 号位疲劳读空、红脸队员对轮换隐形的事故。
+        （编队 ~98px、部队选择 ~94.5px），行坐标走整列 OCR 按 y
+        归位，不写死行坐标——写死会在底部行累积偏差，2026-09-21 出过
+        5/6 号位疲劳读空、红脸队员对轮换隐形的事故。数据在册时决策不
+        再吃 OCR 读数（88 认成 86 不影响判断），OCR 只管拖点定位。
+
+        Args:
+            team_no: 画面里停着的部队号。给了且数据新鲜，全队疲劳直接吃
+                游戏数据；没给或数据过期，回退整列 OCR 读数（老行为）。
 
         Yields:
             str: 执行状态消息
         """
+        facts = self._rotate_team_fatigue(team_no) if team_no is not None else None
         rows = self._read_rows_fatigue()
-        if not rows:
-            yield "[换队长] 全队疲劳读不齐（在远征？界面不对？），本轮不换"
-            return
-
-        values = {slot: value for slot, (fy, value) in rows.items()}
+        if facts is None:
+            if not rows:
+                yield "[换队长] 全队疲劳读不齐（在远征？界面不对？），本轮不换"
+                return
+            values = {slot: value for slot, (fy, value) in rows.items()}
+        else:
+            values = {slot: info["fatigue"] for slot, info in facts.items()}
+            if not rows:
+                yield "[换队长] 数据在册但画面行定位不到（界面不对？），本轮不换"
+                return
         captain = values.get(1)
         if captain is None:
             yield "[换队长] 队长位读不到疲劳（空位？），跳过"
@@ -255,16 +297,23 @@ class SakuraMixin:
                    f"差不到 {margin}，不值得折腾，收工")
             return
 
-        # 读个名字好汇报（名字在疲劳行上方，同 _swap_tired_in 的相对位置）。
-        # OCR 老眼昏花会漏字（"夜左文字"），过名册校正成标准名再上日志
+        # 拖点只能从画面拿：数据管决策，OCR 管行坐标。关键行定位不全
+        # 宁可不换——没有坐标乱拖就是拖错人。
+        if low_slot not in rows or 1 not in rows:
+            yield "[换队长] 队长位和最低位的画面行没定位全，本轮不换"
+            return
         low_fy = rows[low_slot][0]
         cy_low = low_fy - _FATIGUE_TO_ROW_CY
         cy_top = rows[1][0] - _FATIGUE_TO_ROW_CY
-        name_tokens = self.maa.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
-        name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
-        found_name = sword_db.find_by_name(name_raw, fuzzy=False)
-        recognized_name = (found_name[1].get("name_zh") or found_name[1]["name"]
-                           if found_name else None)
+        # 名字好汇报：数据在册直接用名册名（OCR 漏字"夜左文字"绕不过
+        # 名册校正）；OCR 兜底决策时才读画面名字再校正。
+        recognized_name = facts[low_slot]["name"] if facts is not None else None
+        if not recognized_name:
+            name_tokens = self.maa.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
+            name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
+            found_name = sword_db.find_by_name(name_raw, fuzzy=False)
+            recognized_name = (found_name[1].get("name_zh") or found_name[1]["name"]
+                               if found_name else None)
         name = recognized_name or f"{low_slot}号位"
         yield f"[换队长] {name} 疲劳 {low} 全队最低，拖去队长位（原队长 {captain}/100）"
 
@@ -277,13 +326,14 @@ class SakuraMixin:
                            duration if attempt == 1 else int(duration * 1.5))
             time.sleep(2.0)
 
-            # 拖完复查：队长位的疲劳应该变成刚才那位最低值
+            # 拖完复查：队长位的疲劳应该变成刚才那位最低值（换位不改
+            # 疲劳，数据不会因此刷新，复查仍看画面）。疲劳复读会 OCR 错字
+            # （88 认成 86）：用队长位的名字再核一遍。
             after = self._read_rows_fatigue()
             after_values = {s: v for s, (f, v) in after.items()}
             if after_values.get(1) == low:
                 yield f"[换队长] ✓ 换好了，{name} 上任队长，去吃疲劳加成吧"
                 return
-            # 疲劳复读会 OCR 错字（88 认成 86）：用队长位的名字再核一遍
             if after:
                 cap_fy = after[1][0]
                 cap_tokens = self.maa.ocr_all(
@@ -377,11 +427,70 @@ class SakuraMixin:
 
     # ==================== 换人：找疲劳低的换进来 ====================
 
+    def _sakura_pool_candidates(self, threshold: int):
+        """全刀池选人（游戏数据）：上锁、等级>1、疲劳 < threshold、且不在
+        任何部队里的刀，按疲劳升序。
+
+        数据必须新鲜完整才作数：最近的全量刀快照在 FACT_MAX_AGE 内、五支
+        部队编成各自新鲜（候选要排除在编队员，半残编成会把别人的队长拖
+        进刷花队）、每个字段都有新鲜观测。任何一项缺失/过期返回 None，
+        调用方回退画面逐行核对——绝不拿半残数据放行。
+        """
+        from .. import youzu_log
+        from ..game_state import (FACT_MAX_AGE, available_events,
+                                  successful_body, sword_facts)
+        events = available_events(self.maa)
+        now = time.time()
+        full_at = max(((youzu_log._event_epoch(e) or 0) for e in events
+                       if e.get("endpoint") in youzu_log._SWORD_FULL_ENDPOINTS
+                       and successful_body(e) is not None), default=0)
+        if not 0 <= now - full_at <= FACT_MAX_AGE:
+            return None
+        state = sword_facts(events)
+        excluded = set()
+        for team in ("1", "2", "3", "4", "5"):
+            slots = state["parties"].get(team)
+            if slots is None:
+                return None  # 部队编成没读全：在编排除表不可信
+            times = state["slot_times"].get(team) or {}
+            if slots and any(not 0 <= now - at <= FACT_MAX_AGE
+                             for at in times.values()):
+                return None
+            excluded.update(s for s in map(str, slots.values())
+                            if s not in ("", "0"))
+        found = []
+        for serial, row in state["swords"].items():
+            times = state["field_times"].get(serial, {})
+            if any(not 0 <= now - times.get(field, 0) <= FACT_MAX_AGE
+                   for field in ("fatigue", "level", "protect")):
+                continue
+            raw = row.get("fatigue")
+            if isinstance(raw, bool) or isinstance(raw, float) and not raw.is_integer():
+                continue
+            fatigue = youzu_log._int(raw, None)
+            if fatigue is None or not 0 <= fatigue < threshold:
+                continue
+            if str(row.get("protect")) != "1":
+                continue
+            if youzu_log._int(row.get("level"), 0) <= 1:
+                continue
+            if serial in excluded:
+                continue
+            sword_id = youzu_log._int(row.get("sword_id"), 0)
+            sword = sword_db.find_game_sword(sword_id) if sword_id > 0 else None
+            if not sword:
+                continue
+            found.append({"serial_id": serial, "fatigue": fatigue,
+                          "name": sword[1].get("name_zh") or sword[1]["name"]})
+        return sorted(found, key=lambda item: item["fatigue"])
+
     def _swap_tired_in(self, slot: int, threshold: int):
         """
-        编队页点那行的"替换"→ 刀剑男士选择列表逐行 OCR 疲劳，
-        第一个低于 threshold 的点"决定"换进来（此时已经在编队页）。
-        Returns: 是否换人成功（yield from 接返回值）
+        编队页点那行的"替换"→ 刀剑男士选择列表选人换进来（此时已经在编队页）。
+        选人决策吃全刀池游戏数据（上锁、等级>1、疲劳 < threshold、不在任何
+        部队），OCR 只在名单里定位候选的行坐标；数据缺失/过期回退画面逐行
+        核对，扫描上限依旧如实汇报，不脑补"全员飘花"。
+        Returns: True/False 为定论，None=没核实出来（yield from 接返回值）
         """
         cy = _ROW_CY[slot - 1]
         self.maa.click(Point(_SWAP_X, cy))
@@ -394,6 +503,100 @@ class SakuraMixin:
             yield "[刷花·换人] 樱吹雪升序未确认，停止"
             return None
 
+        candidates = self._sakura_pool_candidates(threshold)
+        if candidates is not None and not candidates:
+            # 全刀池数据新鲜完整：没一把符合条件的刀 = 全员飘花，这是
+            # 数据定论，不是"没扫完"。
+            yield "[刷花·换人] 全刀池核对：没有累的上锁刀，全员飘花，收工"
+            return False
+        if candidates:
+            picked = yield from self._swap_candidates_in(candidates)
+            if picked is not None:
+                return picked
+            yield "[刷花·换人] 名单跟数据对不上，改用画面逐行核对"
+        return (yield from self._swap_tired_in_by_ocr(threshold))
+
+    def _selection_rows(self, tokens):
+        """刀剑男士选择列表：疲劳列 token 按 y 聚类成行
+        → [(疲劳行y, 疲劳值, 名册名或 None)]。行位置随滚动会飘，不写死；
+        名字按行上方 ROI 单读再过名册校正，校正不出返回 None——定位没
+        核实的行不允许盲点（同名同疲劳的还有别的振）。
+        """
+        lines = {}  # y 聚类 -> 该行 token（±12px 算同一行）
+        for t, p in tokens:
+            key = round(p.y / 12)
+            lines.setdefault(key, []).append((p.x, t, p.y))
+        rows = []
+        for group in lines.values():
+            group.sort()
+            text = "".join(t for _, t, _ in group)
+            if "疲劳" not in text:
+                continue
+            value = _parse_fatigue_text(text)
+            if value is None:
+                continue
+            fy = group[0][2]
+            name_tokens = self.maa.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
+            raw_name = max((t for t, _ in name_tokens), key=len, default="")
+            found = sword_db.find_by_name(raw_name, fuzzy=False)
+            name = (found[1].get('name_zh') or found[1]['name']) if found else None
+            rows.append((fy, value, name))
+        rows.sort()
+        return rows
+
+    def _swap_candidates_in(self, candidates):
+        """数据已选定候选（疲劳升序）：在名单里逐页定位候选行——疲劳+名
+        字双对上、且锁和等级经画面核实，才点「决定」换进来。
+        Returns: True/False 定论；None = 名单里定位不到任何候选（数据与
+        画面分歧），交回视觉兜底。
+        """
+        seen_pages = set()
+        for page in range(_SEL_MAX_PAGES):
+            image = self.maa.screenshot(force=True)
+            # 整列 OCR 按 y 分行找"疲劳"——列表滚动后行位置会飘，不写死行坐标
+            tokens = self.maa.ocr_all(roi_4to4(460, 100, 620, 700))
+            fingerprint = tuple((t, round(p.y)) for t, p in tokens)
+            if fingerprint in seen_pages:
+                return None
+            seen_pages.add(fingerprint)
+            rows = self._selection_rows(tokens)
+            for fy, value, name in rows:
+                for cand in candidates:
+                    if value != cand["fatigue"] or name != cand["name"]:
+                        continue
+                    # 定位到候选行。锁和等级仍以画面为准核实一遍：数据说的
+                    # 是池子里那一振（serial），名单行万一是同刀异振（比如
+                    # 没锁的那振），点下去就违背上锁纪律了。
+                    if not self._sakura_candidate_eligible(image, fy):
+                        yield f"[刷花·换人] {cand['name']}这行锁/等级没核实，跳过"
+                        continue
+                    yield f"[刷花·换人] 名单第{page + 1}页找到 {cand['name']} 疲劳{value}，换！"
+                    self._sakura_selection_at = time.time()
+                    self.maa.click(Point(_SEL_DECIDE_X, fy - 40))
+                    time.sleep(1.5)
+                    # 可能有确认弹窗
+                    self.maa.screenshot(force=True)
+                    pt = self.maa.template_match("通用_确定.png", threshold=0.7)
+                    if pt:
+                        self.maa.click(pt)
+                        time.sleep(1.5)
+                    if self._wait_list_closed():
+                        return True
+                    yield f"[刷花·换人] {cand['name']}目前无法选入，看下一振"
+            if rows and min(v for _, v, _ in rows) > candidates[-1]["fatigue"]:
+                # 升序名单已经翻过所有候选的疲劳还没影：名单跟数据对不上
+                return None
+            # 本页没有候选，翻页
+            self.maa.swipe(640, 550, 640, 200, 800)
+            time.sleep(2.0)
+        return None
+
+    def _swap_tired_in_by_ocr(self, threshold: int):
+        """数据不在册时的老路：名单逐页 OCR 疲劳，第一个低于 threshold、
+        且锁和等级画面核实过的点「决定」；翻页重复或扫到上限都如实回报，
+        不把"没扫完"说成全员飘花。
+        Returns: True/False 为定论，None=没核实出来（yield from 接返回值）
+        """
         seen_pages = set()
         for page in range(_SEL_MAX_PAGES):
             image = self.maa.screenshot(force=True)
