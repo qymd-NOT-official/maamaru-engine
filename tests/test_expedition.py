@@ -1,9 +1,11 @@
 import json
+import time
 import unittest
 from unittest.mock import patch
 
 import numpy as np
 
+from touken import game_state
 from touken.flows.daily import DailyMixin
 from touken.flows.expedition import ExpeditionMixin
 from touken.flows.report_judge import _is_fail
@@ -204,6 +206,121 @@ class DispatchVerifyTests(unittest.TestCase):
         self.assertTrue(any("未确认本次" in m for m in logs))
         self.assertFalse(any("已出发" in m for m in logs))
         save.assert_not_called()
+
+
+def _team_hp_events(team=2, hp="5", hp_max="45", at=None):
+    """一份 JSON 验伤吃得动的部队血量事实（party/list 全量快照）。"""
+    event = {"direction": "S->C", "endpoint": "/party/list", "status": 200,
+             "payload": {"status": 0,
+                         "now_time": time.time() if at is None else at,
+                         "sword": {"111": {"serial_id": "111", "sword_id": 118,
+                                           "hp": hp, "hp_max": hp_max}},
+                         "party": {str(team): {"slot": {"1": {"serial_id": "111"}}}}}}
+    return [event]
+
+
+class _InjuryMaa(DispatchVerifyTests.Maa):
+    """带数据通道的派遣现场：记录模板调用，可按需给重伤章一个命中点。"""
+
+    def __init__(self, map_visible=True, stamp_hit=False):
+        super().__init__(map_visible)
+        self.adb_path = "adb"
+        self.adb_address = "addr"
+        self.stamp_hit = stamp_hit
+        self.tpl_calls = []
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        self.tpl_calls.append(template)
+        if template == "重伤.png" and self.stamp_hit:
+            return Point(1, 1)
+        return None
+
+
+class DispatchJsonInjuryTests(unittest.TestCase):
+    """派遣前重伤检查改 JSON 优先：数据新鲜先信数据，缺失/过旧才看重伤章。
+    安全约束优先——两条路判出重伤都拒派。"""
+    CONFIG = DispatchVerifyTests.CONFIG
+
+    def _flow(self, maa):
+        return DispatchVerifyTests._flow(self, maa)
+
+    def test_json_heavy_injury_blocks_before_any_template(self):
+        maa = _InjuryMaa()
+        flow = self._flow(maa)
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(game_state, "read_events",
+                             return_value=_team_hp_events(hp="5")), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
+        refusal = next(m for m in logs if "游戏数据验出重伤" in m)
+        self.assertTrue(any("日志验伤" in m for m in logs))
+        self.assertTrue(_is_fail(refusal))  # 拒派必须成绩单见红，不许假绿
+        self.assertFalse(any("已出发" in m for m in logs))
+        self.assertEqual(maa.tpl_calls, [])  # 数据作准，画面章看都不看
+        save.assert_not_called()
+
+    def test_json_healthy_team_skips_stamp_and_dispatches(self):
+        maa = _InjuryMaa()
+        flow = self._flow(maa)
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(game_state, "read_events",
+                             return_value=_team_hp_events(hp="45")), \
+                patch.object(flow, "_dispatch_game_result",
+                             return_value={"payload": {"status": 0}}), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
+        self.assertTrue(any("全员满血" in m for m in logs))
+        self.assertTrue(any("已出发" in m for m in logs))
+        self.assertNotIn("重伤.png", maa.tpl_calls)  # 满血数据在账，不猜画面
+        save.assert_called_once()
+
+    def test_stale_json_falls_back_to_stamp(self):
+        maa = _InjuryMaa()
+        flow = self._flow(maa)
+        stale = _team_hp_events(hp="45", at=time.time() - 700)
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(game_state, "read_events", return_value=stale), \
+                patch.object(flow, "_dispatch_game_result",
+                             return_value={"payload": {"status": 0}}), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
+        self.assertIn("重伤.png", maa.tpl_calls)  # 数据过旧，回退画面兜底
+        self.assertTrue(any("已出发" in m for m in logs))
+        save.assert_called_once()
+
+    def test_json_unavailable_falls_back_and_stamp_still_blocks(self):
+        maa = _InjuryMaa(stamp_hit=True)
+        flow = self._flow(maa)
+        with patch("touken.flows.expedition.time.sleep"), \
+                patch.object(game_state, "read_events",
+                             side_effect=OSError("adb 不在")), \
+                patch.object(flow, "_record_dispatch") as save:
+            logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
+        self.assertTrue(any("检测到重伤标记" in m for m in logs))
+        self.assertFalse(any("已出发" in m for m in logs))
+        self.assertNotIn(("远征开始", "exact"), maa.ocr_modes)  # 没走到出发按钮
+        save.assert_not_called()
+
+    def test_report_helper_respects_config_switch_and_missing_adb(self):
+        flow = self._flow(_InjuryMaa())
+        flow.config = {**self.CONFIG,
+                       "injury_check": {"use_youzu_log": False}}
+        with patch.object(game_state, "read_events") as read:
+            self.assertEqual(flow._dispatch_injury_report(2, {}), (None, None))
+            read.assert_not_called()
+        flow = self._flow(DispatchVerifyTests.Maa())  # 没有 adb_address
+        with patch.object(game_state, "read_events") as read:
+            self.assertEqual(flow._dispatch_injury_report(2, {}), (None, None))
+            read.assert_not_called()
+
+    def test_report_helper_reuses_cached_events(self):
+        flow = self._flow(_InjuryMaa())
+        cache = {}
+        with patch.object(game_state, "read_events",
+                          return_value=_team_hp_events(hp="5")) as read:
+            self.assertEqual(flow._dispatch_injury_report(2, cache)[0], "重伤")
+            flow._dispatch_injury_report(2, cache)
+        self.assertEqual(read.call_count, 1)
 
 
 # ==================== 结算观察哨（收菜/扫地/导航共用） ====================
@@ -416,6 +533,115 @@ class SettlementObserverTests(unittest.TestCase):
         flow = _SettleFlow(maa)
         self.assertIsNone(_observe(flow, seen=[]))
         self.assertEqual(flow.events, [])
+
+
+class SettlementArbitrationTests(unittest.TestCase):
+    """结算记账仲裁：同一次结算有新鲜 JSON 收据时账本以收据为准，画面 OCR
+    逐项对一遍、只留旁证日志；收据缺失才走视觉记账兜底。"""
+
+    def _receipt(self, ts=None, team=2, era=1, slot=1, rewards=None):
+        return {"ts": time.time() if ts is None else ts,
+                "event_type": "expedition.settled",
+                "payload": {"team_no": team, "era": era, "slot": slot,
+                            "map_code": "A1", "captain": None,
+                            "rewards": {"木炭": 15, "玉钢": 22}
+                            if rewards is None else rewards,
+                            "rewards_status": "confirmed",
+                            "evidence_source": "youzu_log",
+                            "endpoint": "/conquest/complete",
+                            "receipt_key": "arbitration-test"}}
+
+    def _observe_with_receipt(self, receipt):
+        maa = _SettleMaa(_bright_frame(),
+                         _settle_texts(result_tokens=[("大成功", Point(700, 60))]))
+        flow = _SettleFlow(maa)
+        flow._settlement_receipt_for = lambda obs: receipt
+        with patch("builtins.print") as printer:
+            obs = _observe(flow, seen=[])
+        return flow, obs, printer
+
+    @staticmethod
+    def _printed(printer):
+        return " ".join(str(c.args[0]) for c in printer.call_args_list)
+
+    def test_json_receipt_wins_and_ocr_never_books(self):
+        flow, obs, printer = self._observe_with_receipt(self._receipt())
+        self.assertTrue(obs["new"])
+        self.assertEqual(flow.events, [])  # 账本一条没动
+        printed = self._printed(printer)
+        self.assertIn("一致", printed)
+        self.assertIn("账本以游戏数据为准", printed)
+
+    def test_ocr_json_conflict_is_logged_without_touching_ledger(self):
+        receipt = self._receipt(rewards={"木炭": 10, "玉钢": 22})
+        flow, obs, printer = self._observe_with_receipt(receipt)
+        self.assertTrue(obs["new"])
+        self.assertEqual(flow.events, [])  # 冲突也不许 OCR 进账本
+        printed = self._printed(printer)
+        self.assertIn("对不上", printed)
+        self.assertIn("木炭", printed)
+        self.assertIn("画面读 15、数据 10", printed)
+        self.assertIn("账本以游戏数据为准", printed)
+
+    def test_no_receipt_keeps_visual_booking(self):
+        maa = _SettleMaa(_bright_frame(),
+                         _settle_texts(result_tokens=[("成功", Point(700, 60))]))
+        flow = _SettleFlow(maa)
+        flow._settlement_receipt_for = lambda obs: None
+        obs = _observe(flow, seen=[])
+        self.assertTrue(obs["new"])
+        settled = [p for t, p in flow.events if t == "expedition.settled"]
+        self.assertEqual(len(settled), 1)
+        changes = [p for t, p in flow.events if t == "resource.change"]
+        self.assertEqual({c["resource"] for c in changes}, {"木炭", "玉钢"})
+
+    def _complete_event(self, at, team=2, field=1):
+        return {"direction": "S->C", "endpoint": "/conquest/complete",
+                "status": 200,
+                "payload": {"status": 0, "now_time": at,
+                            "party_no": team, "field_id": field, "reward": []}}
+
+    def _flow_with_adb(self):
+        maa = _SettleMaa(_bright_frame(), _settle_texts())
+        maa.adb_path = "adb"
+        maa.adb_address = "addr"
+        return _SettleFlow(maa)
+
+    def test_receipt_lookup_matches_fresh_same_team_map(self):
+        flow = self._flow_with_adb()
+        with patch.object(game_state, "read_events",
+                          return_value=[self._complete_event(time.time())]):
+            receipt = flow._settlement_receipt_for(
+                {"team_no": 2, "era": 1, "slot": 1})
+        self.assertIsNotNone(receipt)
+        self.assertEqual(receipt["payload"]["team_no"], 2)
+
+    def test_receipt_lookup_rejects_stale_wrong_team_or_wrong_map(self):
+        flow = self._flow_with_adb()
+        with patch.object(game_state, "read_events", return_value=[
+                self._complete_event(time.time() - 700)]):  # 过期旧账
+            self.assertIsNone(flow._settlement_receipt_for(
+                {"team_no": 2, "era": 1, "slot": 1}))
+        with patch.object(game_state, "read_events", return_value=[
+                self._complete_event(time.time(), team=3)]):
+            self.assertIsNone(flow._settlement_receipt_for(
+                {"team_no": 2, "era": 1, "slot": 1}))
+        with patch.object(game_state, "read_events", return_value=[
+                self._complete_event(time.time(), field=2)]):  # 时代1卡位2
+            self.assertIsNone(flow._settlement_receipt_for(
+                {"team_no": 2, "era": 1, "slot": 1}))
+
+    def test_receipt_lookup_without_adb_never_pulls(self):
+        flow = _SettleFlow(_SettleMaa(_bright_frame(), _settle_texts()))
+        with patch.object(game_state, "read_events") as read:
+            self.assertIsNone(flow._settlement_receipt_for({"team_no": 2}))
+            read.assert_not_called()
+
+    def test_receipt_lookup_survives_pull_failure(self):
+        flow = self._flow_with_adb()
+        with patch.object(game_state, "read_events",
+                          side_effect=OSError("adb 不在")):
+            self.assertIsNone(flow._settlement_receipt_for({"team_no": 2}))
 
 
 class SpecialUnknownSampleTests(unittest.TestCase):

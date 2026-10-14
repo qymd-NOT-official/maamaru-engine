@@ -6,7 +6,7 @@
   目录 → 远征 → 选时代卡（固定坐标，一行五个，左右可翻页）
   → OCR 点小图名字（小图卡一行四张，名字是文字，不玩固定坐标）
   → 点"部队选择"按钮 → 常规部队选择界面 → 选部队 tab
-  → 【保命】重伤检查，有重伤绝不派遣
+  → 【保命】重伤检查（游戏数据新鲜先信数据，缺失才看重伤章），有重伤绝不派遣
   → 点"远征开始" → 二次确认弹窗点"确认"（道具复选框默认不勾）
   → "出发远征"卷轴过场（不用跳过，几秒自己完）
   → 验证：小图卡上"远征时间"变成红色"远征中"
@@ -219,10 +219,19 @@ class ExpeditionMixin:
         time.sleep(0.5)
 
         # ========== 6. 【保命】重伤检查 ==========
-        self.maa.screenshot(force=True)
-        if self.maa.template_match(cfg["injury_stamp"]["template"]):
-            yield "[远征] 🛑 检测到重伤标记！按规矩绝不派遣，停。去修刀吧"
-            return
+        # 游戏数据新鲜就先信数据（全队血量一个不缺才算数，缺一员都算「不知道」）；
+        # 数据缺失、过旧才回退重伤章模板。宁停不放，两条路判出重伤都拒派。
+        log_injury, detail = self._dispatch_injury_report(team_no, {})
+        if detail is not None:
+            yield f"[远征] 📋 日志验伤：{detail}"
+            if log_injury == "重伤":
+                yield "[远征] 🛑 游戏数据验出重伤！按规矩绝不派遣，停。去修刀吧"
+                return
+        else:
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["injury_stamp"]["template"]):
+                yield "[远征] 🛑 检测到重伤标记！按规矩绝不派遣，停。去修刀吧"
+                return
 
         # ========== 7. 点"远征开始" ==========
         start = self.maa.template_match(cfg["start_button"]["template"])
@@ -289,6 +298,38 @@ class ExpeditionMixin:
             return expedition_started(events, team_no, (era - 1) * 4 + slot, after)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return None
+
+    def _dispatch_injury_report(self, team_no: int, cache: dict):
+        """派遣前 JSON 验伤（照出阵链的规矩）：游戏血量新鲜且全队一个不缺才作准，
+        返回 (最高伤势, 人话明细)；拉不到、数据过旧、成员缺数据一律返回
+        (None, None)——「不知道」就回退重伤章模板，绝不拿半残数据放行。
+
+        cache 在一次派遣链内复用同一批事件，免去重复拉取；原始日志解析完即焚。
+        """
+        cfg = {}
+        if isinstance(getattr(self, "config", None), dict):
+            cfg = self.config.get("injury_check", {}) or {}
+        if not cfg.get("use_youzu_log", True):
+            return None, None
+        if not getattr(self.maa, "adb_address", None):
+            return None, None
+        try:
+            if "events" not in cache:
+                from ..game_state import read_events
+                cache["events"] = read_events(self.maa.adb_path,
+                                              self.maa.adb_address)
+            from ..game_state import injury_report
+            report = injury_report(cache["events"], team_no,
+                                   max_age=float(cfg.get("max_age_sec", 600)))
+        except Exception:
+            return None, None
+        if not report:
+            return None, None
+        hurt = [m for m in report["members"] if m["injury"]]
+        detail = ("、".join(f"{m['label'] or m['name']}{m['injury']}"
+                            f"(hp{m['hp']}/{m['hp_max']})" for m in hurt)
+                  if hurt else "全员满血")
+        return report["max_injury"], detail
 
     def _record_dispatch(self, team_no, era, slot, map_name):
         """Countdown is a display record; failure to save does not undo departure."""
@@ -542,6 +583,8 @@ class ExpeditionMixin:
 
         诚实契约：认不清的一律记 unknown——结果字样读不出不会默认成「成功」，
         资源行读不出不会默认成「没给」，道具栏有内容认不出不会默认成「空」。
+        记账另有仲裁：同一次结算有新鲜 JSON 收据时账本以收据为准，画面数字
+        只留旁证日志（见 _record_visual_settlement）。
 
         只观察、不点击——翻页/跳过永远是调用方的动作。
         seen 是调用方（一轮收菜/扫地/导航）持有的像素指纹列表：同一屏没翻动
@@ -595,7 +638,13 @@ class ExpeditionMixin:
         return obs
 
     def _record_visual_settlement(self, obs, sequence):
-        if hasattr(self, "record_event"):
+        # 记账仲裁：同一次结算有新鲜 JSON 收据时，账本以收据为准（收据由数据
+        # 同步落账，按 receipt_key 幂等不会重复），画面 OCR 逐项对一遍、只留
+        # 旁证日志，不重复记账；收据缺失才走视觉记账兜底。
+        receipt = self._settlement_receipt_for(obs)
+        if receipt is not None:
+            self._log_settlement_corroboration(obs, receipt, sequence)
+        elif hasattr(self, "record_event"):
             payload = {k: v for k, v in obs.items() if k != "new"}
             payload["sequence"] = sequence
             self.record_event("expedition.settled", **payload)
@@ -626,6 +675,57 @@ class ExpeditionMixin:
                     _save_exp_record(rec)
             except Exception:
                 pass
+
+    def _settlement_receipt_for(self, obs):
+        """给这份画面观察找对应的 JSON 结算收据：同部队、同图（画面读得出
+        时代卡位就比，读不出只认部队）、且 10 分钟内——同一队会反复去同一张
+        图，只认刚回来的那份，旧账不作数。数据通道不在或拉取失败返回 None，
+        调用方回退视觉记账。
+        """
+        if not getattr(self.maa, "adb_address", None):
+            return None
+        from ..game_state import read_events, expedition_settlements
+        try:
+            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            receipts = expedition_settlements(events, 0)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return None
+        now = time.time()
+        best = None
+        for receipt in receipts:
+            payload = receipt["payload"]
+            if ((obs.get("team_no") and payload["team_no"] != obs["team_no"])
+                    or (obs.get("era") and payload["era"] != obs["era"])
+                    or (obs.get("slot") and payload["slot"] != obs["slot"])):
+                continue
+            if not 0 <= now - receipt["ts"] <= 600:
+                continue
+            if best is None or receipt["ts"] > best["ts"]:
+                best = receipt
+        return best
+
+    @staticmethod
+    def _log_settlement_corroboration(obs, receipt, sequence):
+        """JSON 收据在账：OCR 数字与收据逐项对一遍，结果只写日志不碰账本。"""
+        payload = receipt["payload"]
+        json_rewards = payload.get("rewards") or {}
+        diffs = []
+        for resource, amount in (obs.get("rewards") or {}).items():
+            if json_rewards.get(resource) != amount:
+                diffs.append(f"{resource}：画面读 {amount}、数据 {json_rewards.get(resource)}")
+        for entry in obs.get("special_rewards") or []:
+            if json_rewards.get(entry["name"]) != entry["amount"]:
+                diffs.append(
+                    f"{entry['name']}：画面读 {entry['amount']}、"
+                    f"数据 {json_rewards.get(entry['name'])}")
+        note = f"部队{payload['team_no']} {payload.get('map_code') or ''}".strip()
+        if sequence:
+            note += f"（第{sequence}份）"
+        if diffs:
+            print(f"[远征] ⚠️ {note} 结算画面与游戏数据对不上："
+                  f"{'；'.join(diffs)}。账本以游戏数据为准，画面数字仅留作旁证")
+        else:
+            print(f"[远征] 📎 {note} 结算画面与游戏数据一致，账本以游戏数据为准")
 
     @staticmethod
     def _settlement_fingerprint(cfg, img):
