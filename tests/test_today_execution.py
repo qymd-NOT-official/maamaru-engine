@@ -127,7 +127,7 @@ class TodayExecutionTests(unittest.TestCase):
             self.assertEqual(plan['blocks'], [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': 600}])
             state = dc.load_state(self.paths['state_path'])
             keys = list(ec.load_choice_sets(self.paths['choices_path'])[1])
-            with patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}), patch(
+            with patch('panel.scheduler.due_jobs', return_value=[{'key': keys[0]}]), patch('panel.workflow_waits.resume_due'), patch('panel.workflow_waits.load', return_value={}), patch(
                     'panel.scheduler.load_config', return_value={'automation': {'slot_states': {
                         keys[0]: {'state': 'ready', 'expires_at': self.day['now'] + 30}}}}):
                 dc.tick(self.day['now'], self.runner, lambda: self.day, lambda: {}, 'config.json',

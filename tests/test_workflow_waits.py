@@ -104,6 +104,7 @@ def test_raid_resume_waits_for_expedition_preview_and_stops_at_deadline(tmp_path
     monkeypatch.setattr(scheduler, "takeover_flag_path", lambda: tmp_path / "flag.json")
     slots = {"one": {"state": "ready", "expires_at": 200}}
     monkeypatch.setattr(scheduler, "load_config", lambda: {"automation": {"slot_states": slots}})
+    monkeypatch.setattr(scheduler, "due_jobs", lambda cfg, now: [{"key": "one"}])
     resume = {**state(), "reason": "expedition", "remaining_runs": 3}
     params = {"scheduled_deadline": 150}
     waits.park("root", "qa", params, 100, resume, "联队战")

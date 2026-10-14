@@ -131,10 +131,9 @@ onMounted(load)
 async function stopToday() {
   busy.value = true
   try {
-    await api.setDayConductor(false)
-    await api.stop()
+    const result = await api.stopToday()
     running.value = false
-    message.value = '已叫停今日安排，后续时段不会自动开工。'
+    message.value = result.message
     emit('saved')
   } catch (err) { message.value = err instanceof Error ? err.message : '暂时没能叫停，请重试' }
   finally { busy.value = false }
@@ -199,7 +198,7 @@ async function stopToday() {
       <label>结束后<select v-model="after" :disabled="busy || running"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></select></label>
       <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button class="daily-save" :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间执行今日安排' : '一键执行今日安排' }}</button></div></div>
     </footer>
-    <button v-if="timeline.conductor.enabled || running" class="daily-stop" :disabled="busy" @click="stopToday">{{ running ? '停止当前任务和今日安排' : '停止今日安排' }}</button>
+    <button v-if="!loading && preset" class="daily-stop" :disabled="busy" @click="stopToday">停止今日安排（含远征）</button>
     <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份今日安排替换旧的任务时段；远征排班仍保留。</p>
     <p v-if="message" role="status">{{ message }}</p><button v-if="!loading && !preset" @click="load">重新加载</button>
   </section>

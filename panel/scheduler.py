@@ -12,6 +12,8 @@ from .expedition_choices import (adhoc_planned_date, is_adhoc_record,
                                  is_forced, is_skipped, load_choice_sets)
 
 _SCHED_PATH = SCHEDULE_PATH
+# 巡检与玩家的停止/保存操作共用，防止旧巡检覆盖刚保存的选择。
+CONTROL_LOCK = threading.RLock()
 _MAPS_PATH = (Path(__file__).resolve().parent.parent
               / "touken" / "data" / "expedition_maps.json")
 
@@ -648,10 +650,24 @@ def has_pending_dispatch(cfg: dict, now: float) -> bool:
     auto = cfg.get("automation", {})
     if auto.get("paused_until", "") > time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)):
         return False
+    due_keys = {job['key'] for job in due_jobs(cfg, now)}
     return any(slot.get("state") in {SLOT_READY, SLOT_WAITING_BUSY}
                and now <= float(slot.get("expires_at", now) or 0)
                and (slot.get("state") == SLOT_READY or now >= float(slot.get("next_retry_at", 0) or 0))
-               for slot in auto.get("slot_states", {}).values())
+               for key, slot in auto.get("slot_states", {}).items() if key in due_keys)
+
+
+def due_jobs(cfg: dict, now: float) -> list:
+    """按当前开关、时刻与单班选择计算；旧状态本身不是派遣授权。"""
+    auto = cfg.get('automation', {})
+    local = time.localtime(now)
+    choices, forced = load_choice_sets()
+    today = time.strftime('%Y-%m-%d', local)
+    due = (_preset_due(cfg, local.tm_hour * 60 + local.tm_min, today, choices, forced)
+           if auto.get('mode') == 'preset' else
+           _custom_due(cfg, local.tm_hour * 60 + local.tm_min, today, choices, forced))
+    due += adhoc_due(cfg, forced, now, today)
+    return due if auto.get('enabled') else forced_only(due, forced)
 
 
 def sync_takeover_flag(cfg: dict, now: float | None = None) -> bool:
@@ -777,76 +793,69 @@ def start_scheduler(config_path: str, emit_fn):
         from .script_runner import get_runner
         runner = get_runner()
         inflight = None  # (slot_key, 派遣前该队的 dispatched_at)
-        while True:
-            try:
-                cfg = load_config()
-                auto = cfg.get("automation", {})
-                now = time.time()
-                records = expedition_records()
-                changed = False
-                if inflight and not runner.is_running:
-                    slot_key, before = inflight
-                    inflight = None
-                    events, resolved = resolve_inflight(
-                        cfg, slot_key, before, now, records, read_dispatch_result())
-                    changed = changed or resolved
-                    for _, msg in events:
-                        emit_fn("scheduler", msg)
-                paused = auto.get("paused_until", "")
-                pause_active = bool(paused and paused > time.strftime("%Y-%m-%d %H:%M:%S"))
-                now_min = int(time.strftime("%H")) * 60 + int(time.strftime("%M"))
-                today = time.strftime("%Y-%m-%d")
-                choices, forced = load_choice_sets()
-                due = (_preset_due(cfg, now_min, today, choices, forced)
-                       if auto.get("mode") == "preset"
-                       else _custom_due(cfg, now_min, today, choices, forced))
-                # 自描述 forced 班（建议引擎采纳的班）不走 preset/custom 投影，
-                # 两种模式下都照常到点进状态机
-                due += adhoc_due(cfg, forced, now, today)
-                if not auto.get("enabled"):
-                    # 总开关关着：只有今日强制启用的班照常走状态机，其余照旧不跑
-                    due = forced_only(due, forced)
-                if pause_active or (not auto.get("enabled") and not due):
-                    # 暂停/停用且无强制班 = 不接管：接管旗标必须清掉，不然玩法循环会
-                    # 为一个不会来的排班白白提前收工
-                    clear_takeover_flag()
-                    suspended = tick(cfg, [], now, runner_busy=False,
-                                     emulator_ok=True, records=records,
-                                     inflight_key=inflight[0] if inflight else None)
-                    changed = changed or suspended["changed"]
-                    if changed:
-                        save_config(cfg)
-                    time.sleep(5)
-                    continue
-                # 自家派遣子进程在跑不算「忙」：别的班照常评估，只是起不来
-                busy = runner.is_running and runner.current_script != "dispatch"
-                outcome = tick(cfg, due, now,
-                               runner_busy=busy,
-                               # 已授权的排班由派遣入口负责开模拟器、登录。
-                               # 此处再要求游戏预先在线，会把冷启动挡在入口外。
-                               emulator_ok=True,
-                               records=records,
-                               inflight_key=inflight[0] if inflight else None)
-                changed = changed or outcome["changed"]
-                for _, msg in outcome["events"]:
+        def _poll():
+            nonlocal inflight
+            cfg = load_config()
+            auto = cfg.get("automation", {})
+            now = time.time()
+            records = expedition_records()
+            changed = False
+            if inflight and not runner.is_running:
+                slot_key, before = inflight
+                inflight = None
+                events, resolved = resolve_inflight(
+                    cfg, slot_key, before, now, records, read_dispatch_result())
+                changed = changed or resolved
+                for _, msg in events:
                     emit_fn("scheduler", msg)
-                slot = outcome["start"]
-                if slot is not None:
-                    run_id = runner.start("dispatch", config_path, {
-                        "team_no": str(slot["team_no"]), "map_code": slot["map_code"],
-                        "scheduled": True, "slot_key": slot["key"],
-                        **({"sakura_before_dispatch": slot.get("sakura_before_dispatch", False),
-                            "repair_threshold": slot.get("repair_threshold", "light")}
-                           if ":adhoc:" in slot["key"] else {}),
-                        **{key: slot[key] for key in ("formation_id", "formation_signature") if slot.get(key)}})
-                    if run_id:
-                        inflight = (slot["key"], records.get(
-                            str(slot["team_no"]), {}).get("dispatched_at"))
-                        emit_fn("scheduler",
-                                f"[排班] 🕐 开始派遣 {_slot_label(slot)}")
-                sync_takeover_flag(cfg, now)
+            paused = auto.get("paused_until", "")
+            pause_active = bool(paused and paused > time.strftime("%Y-%m-%d %H:%M:%S"))
+            due = due_jobs(cfg, now)
+            if pause_active or (not auto.get("enabled") and not due):
+                # 暂停/停用且无强制班 = 不接管：接管旗标必须清掉，不然玩法循环会
+                # 为一个不会来的排班白白提前收工
+                clear_takeover_flag()
+                suspended = tick(cfg, [], now, runner_busy=False,
+                                 emulator_ok=True, records=records,
+                                 inflight_key=inflight[0] if inflight else None)
+                changed = changed or suspended["changed"]
                 if changed:
                     save_config(cfg)
+                return
+            # 自家派遣子进程在跑不算「忙」：别的班照常评估，只是起不来
+            busy = runner.is_running and runner.current_script != "dispatch"
+            outcome = tick(cfg, due, now,
+                           runner_busy=busy,
+                           # 已授权的排班由派遣入口负责开模拟器、登录。
+                           # 此处再要求游戏预先在线，会把冷启动挡在入口外。
+                           emulator_ok=True,
+                           records=records,
+                           inflight_key=inflight[0] if inflight else None)
+            changed = changed or outcome["changed"]
+            for _, msg in outcome["events"]:
+                emit_fn("scheduler", msg)
+            slot = outcome["start"]
+            if slot is not None:
+                run_id = runner.start("dispatch", config_path, {
+                    "team_no": str(slot["team_no"]), "map_code": slot["map_code"],
+                    "scheduled": True, "slot_key": slot["key"],
+                    **({"sakura_before_dispatch": slot.get("sakura_before_dispatch", False),
+                        "repair_threshold": slot.get("repair_threshold", "light")}
+                       if ":adhoc:" in slot["key"] else {}),
+                    **{key: slot[key] for key in ("formation_id", "formation_signature") if slot.get(key)}})
+                if run_id:
+                    inflight = (slot["key"], records.get(
+                        str(slot["team_no"]), {}).get("dispatched_at"))
+                    emit_fn("scheduler",
+                            f"[排班] 🕐 开始派遣 {_slot_label(slot)}")
+            sync_takeover_flag(cfg, now)
+            if changed:
+                save_config(cfg)
+
+        while True:
+            try:
+                with CONTROL_LOCK:
+                    _poll()
             except Exception as exc:
                 print(f"[时刻表] 异常: {exc}", flush=True)
             time.sleep(5)

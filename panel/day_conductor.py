@@ -290,6 +290,8 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
                  "day_start": plan["day_start"],
                  "plan_signature": _plan_signature(plan),
                  "blocks": blocks}
+        if old and old.get("cancelled_arrangements"):
+            state["cancelled_arrangements"] = old["cancelled_arrangements"]
         if raid_spec:
             state["workflow_id"] = workflow_id
             state["workflow_name"] = raid_spec["name"]

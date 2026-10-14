@@ -106,6 +106,15 @@ def _write_sets(skipped: dict, forced: dict, path: Path) -> None:
     temporary.replace(path)
 
 
+def cancel_forced(path: Path | None = None) -> None:
+    """取消已采纳的班次，转存为跳过记录并保留备份。新采纳的班仍可单独执行。"""
+    path = CHOICES_PATH if path is None else path
+    with _WRITE_LOCK:
+        skipped, forced = load_choice_sets(path)
+        if forced:
+            _write_sets({**skipped, **forced}, {}, path)
+
+
 def set_skipped(*, key: str, team_no: int, map_code: str,
                 planned_at: float, skipped: bool,
                 path: Path = CHOICES_PATH) -> dict:

@@ -2374,6 +2374,12 @@ def api_execute_today():
         raise HTTPException(409, str(exc)) from exc
 
 
+@app.post("/api/today/stop")
+def api_stop_today():
+    from .today_execution import stop_today
+    return stop_today(get_runner())
+
+
 @app.post("/api/day-conductor/resume-raid")
 async def api_resume_day_raid(request: Request):
     from .day_conductor import resume_raid
@@ -2684,60 +2690,66 @@ def _clean_schedule_blocks(blocks) -> list[dict]:
 async def api_save_schedule(request: Request):
     from .scheduler import load_config, save_config
     body = await request.json()
-    cfg = load_config()
-    entries = body.get("entries", [])
-    # 只留前端该给的字段，别什么都往里塞
-    clean = [{
-        "time": str(e.get("time", ""))[:5],
-        "team_no": int(e.get("team_no", 2)),
-        "map_code": str(e.get("map_code", "")),
-        "map_name": str(e.get("map_name", "")),
-        "enabled": bool(e.get("enabled", True)),
-        "last_fired": str(e.get("last_fired", "")),
-    } for e in entries if e.get("time") and e.get("map_code")]
-    common = []
-    for row in body.get("common_plan", []):
+    from .scheduler import CONTROL_LOCK
+    with CONTROL_LOCK:
+        cfg = load_config()
+        was_enabled = cfg["automation"].get("enabled", False)
+        entries = body.get("entries", [])
+        # 只留前端该给的字段，别什么都往里塞
+        clean = [{
+            "time": str(e.get("time", ""))[:5],
+            "team_no": int(e.get("team_no", 2)),
+            "map_code": str(e.get("map_code", "")),
+            "map_name": str(e.get("map_name", "")),
+            "enabled": bool(e.get("enabled", True)),
+            "last_fired": str(e.get("last_fired", "")),
+        } for e in entries if e.get("time") and e.get("map_code")]
+        common = []
+        for row in body.get("common_plan", []):
+            try:
+                team = int(row.get("team_no"))
+            except Exception:
+                continue
+            if team not in range(1, 6):
+                continue
+            formation_id = str(row.get("formation_id") or "")
+            if formation_id:
+                from touken.custom_formations import find_formation, load_formations
+                preset = find_formation(load_formations(), formation_id)
+                if preset is None or preset.get("target_team") != team:
+                    formation_id = ""
+            common.append({
+                "team_no": team,
+                "map_code": str(row.get("map_code", "")),
+                "enabled": bool(row.get("enabled", False)),
+                "formation_id": formation_id,
+            })
+        auto_in = body.get("automation", {})
+        auto = cfg.get("automation", {})
         try:
-            team = int(row.get("team_no"))
-        except Exception:
-            continue
-        if team not in range(1, 6):
-            continue
-        formation_id = str(row.get("formation_id") or "")
-        if formation_id:
-            from touken.custom_formations import find_formation, load_formations
-            preset = find_formation(load_formations(), formation_id)
-            if preset is None or preset.get("target_team") != team:
-                formation_id = ""
-        common.append({
-            "team_no": team,
-            "map_code": str(row.get("map_code", "")),
-            "enabled": bool(row.get("enabled", False)),
-            "formation_id": formation_id,
+            max_delay = int(auto_in.get("max_delay_min", auto.get("max_delay_min", 30)))
+        except (TypeError, ValueError):
+            max_delay = 30
+        auto.update({
+            "enabled": bool(auto_in.get("enabled", False)),
+            "mode": auto_in.get("mode") if auto_in.get("mode") in ("preset", "custom") else "preset",
+            "preset": str(auto_in.get("preset", "小判")),
+            "start_time": str(auto_in.get("start_time", "08:00"))[:5],
+            "teams": [int(x) for x in auto_in.get("teams", [2, 3, 4])][:3],
+            "capitalist": bool(auto_in.get("capitalist", False)),
+            "sakura_before_dispatch": bool(auto_in.get("sakura_before_dispatch", auto.get("sakura_before_dispatch", False))),
+            "paused_until": str(auto_in.get("paused_until", auto.get("paused_until", ""))),
+            "max_delay_min": min(1440, max(1, max_delay)),
         })
-    auto_in = body.get("automation", {})
-    auto = cfg.get("automation", {})
-    try:
-        max_delay = int(auto_in.get("max_delay_min", auto.get("max_delay_min", 30)))
-    except (TypeError, ValueError):
-        max_delay = 30
-    auto.update({
-        "enabled": bool(auto_in.get("enabled", False)),
-        "mode": auto_in.get("mode") if auto_in.get("mode") in ("preset", "custom") else "preset",
-        "preset": str(auto_in.get("preset", "小判")),
-        "start_time": str(auto_in.get("start_time", "08:00"))[:5],
-        "teams": [int(x) for x in auto_in.get("teams", [2, 3, 4])][:3],
-        "capitalist": bool(auto_in.get("capitalist", False)),
-        "sakura_before_dispatch": bool(auto_in.get("sakura_before_dispatch", auto.get("sakura_before_dispatch", False))),
-        "paused_until": str(auto_in.get("paused_until", auto.get("paused_until", ""))),
-        "max_delay_min": min(1440, max(1, max_delay)),
-    })
-    cfg.update({"entries": clean, "common_plan": common, "automation": auto})
-    save_config(cfg)
-    if not auto["enabled"]:
-        from .scheduler import clear_takeover_flag
-        clear_takeover_flag()
-    return {"ok": True, "count": len(clean)}
+        cfg.update({"entries": clean, "common_plan": common, "automation": auto})
+        save_config(cfg)
+        if not auto["enabled"]:
+            from .scheduler import clear_takeover_flag
+            clear_takeover_flag()
+            if was_enabled:
+                from .expedition_choices import cancel_forced
+                cancel_forced()
+        return {"ok": True, "count": len(clean)}
 
 
 @app.post("/api/expedition-pause")
@@ -2745,20 +2757,22 @@ async def api_pause_expedition(request: Request):
     from .scheduler import load_config, save_config
     body = await request.json()
     minutes = int(body.get("minutes", 0))
-    cfg = load_config()
-    if minutes <= 0:
-        until = ""
-    elif minutes >= 999:
-        until = time.strftime("%Y-%m-%d") + " 23:59:59"
-    else:
-        until = time.strftime("%Y-%m-%d %H:%M:%S",
-                              time.localtime(time.time() + minutes * 60))
-    cfg["automation"]["paused_until"] = until
-    save_config(cfg)
-    if until:
-        from .scheduler import clear_takeover_flag
-        clear_takeover_flag()
-    return {"ok": True, "paused_until": until}
+    from .scheduler import CONTROL_LOCK
+    with CONTROL_LOCK:
+        cfg = load_config()
+        if minutes <= 0:
+            until = ""
+        elif minutes >= 999:
+            until = time.strftime("%Y-%m-%d") + " 23:59:59"
+        else:
+            until = time.strftime("%Y-%m-%d %H:%M:%S",
+                                  time.localtime(time.time() + minutes * 60))
+        cfg["automation"]["paused_until"] = until
+        save_config(cfg)
+        if until:
+            from .scheduler import clear_takeover_flag
+            clear_takeover_flag()
+        return {"ok": True, "paused_until": until}
 
 
 # ── API：状态 ──
