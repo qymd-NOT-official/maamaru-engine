@@ -8,7 +8,9 @@ import re
 import time
 
 from ..maa_adapter import roi_4to4
-from ..game_state import begin_operation, confirm_operation
+from ..youzu_log import _event_epoch, _int
+from ..game_state import (FACT_MAX_AGE, available_events, begin_operation,
+                          confirm_operation, successful_body)
 
 # 「任务达成报酬一览」弹窗格子几何（1280×720 实测，证据 tmp/task_probe_2.png）：
 # 标题顶部正中；物品格横排，首格 x=311、格距 110、格宽 104；
@@ -27,6 +29,31 @@ _CLAIM_BUTTON_THRESHOLD = 0.95
 _POPUP_ICONS = (("资源/icon木炭.png", "木炭"), ("资源/icon玉钢.png", "玉钢"),
                 ("资源/icon冷却材.png", "冷却材"), ("资源/icon砥石.png", "砥石"),
                 ("资源/icon委托符.png", "委托符"), ("资源/icon小判.png", "小判"))
+
+
+def _mission_reward_claimable(events, *, now=None):
+    """/mission/index 预检：还有任务停在「达成待领」就 True，没有就 False。
+
+    任务行只有 status 字段（1=进行中 2=达成待领 3=已领取），不带 tab
+    归属，所以只能回答「整个任务界面有没有可领」这个全局问题。报文缺失、
+    最新一份过期或坏包返回 None，调用方照旧走按钮模板兜底。
+    口径来源：2026-09-28 真实报文——领取成功的 finish_mission_ids 与领取前
+    status=2 的清单完全一致，领完齐刷刷变 3。
+    """
+    now = time.time() if now is None else now
+    for event in reversed(events):
+        body = successful_body(event)
+        if body is None or event.get("endpoint") != "/mission/index":
+            continue
+        at = _event_epoch(event)
+        if at is None or not 0 <= now - at <= FACT_MAX_AGE:
+            return None
+        rows = body.get("mission")
+        if not isinstance(rows, dict):
+            return None
+        return any(_int(row.get("status"), -1) == 2
+                   for row in rows.values() if isinstance(row, dict))
+    return None
 
 
 class RewardsMixin:
@@ -258,6 +285,16 @@ class RewardsMixin:
         # 2. 领取各标签页奖励
         tabs = task_config.get("tabs", {})
         for tab_name, tab_coord in tabs.items():
+            # JSON 预检先行：/mission/index 确认没有「达成待领」任务时，这
+            # 一页的一键领取点了也是白点（空 tab 瞎点就是这么来的）。任务行
+            # 不带 tab 归属，预检给的是全局答案，只用来全拦，不替按钮模板做
+            # 决定；数据缺失/过期返回 None，照旧落到下面的模板兜底。
+            claimable = _mission_reward_claimable(available_events(self.maa))
+            if claimable is False:
+                if hasattr(self, "record_event"):
+                    self.record_event("task_rewards.none", tab=tab_name)
+                yield f"[TASK] {tab_name} 数据确认没有可领奖励，跳过"
+                continue
             # 活动任务标签会随运营开放/撤下，不能永久删配置。点击前只在旧活动
             # 按钮自己的局部区域确认纵排“活动”；不能全屏搜，弹窗背后的出阵
             # 菜单也有“活动”。标签不存在时旧坐标会落到主线，必须禁止点击。
