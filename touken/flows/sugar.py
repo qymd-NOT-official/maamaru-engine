@@ -19,6 +19,8 @@
   收件箱：筛选 (990,126) 物品种类 (1011,305) 全刀剑 (803,380) 确定 (640,625)
           一键领取 (1180,620) 奖励确认X (1144,48) 购买详情X (972,154) 收件箱X (1248,32)
   习合：标签模板 习合.png；本体行心 y [166,268,369,470,572,666]，选择 x≈1220
+        隐藏无法习合的刀剑 (142,102)，红勾区域 x[133,151] y[93,112]
+        （2026-10-15 MAAAdapter 运行截图校准；进入本体列表后确认开启）
         本体名字 OCR roi x[160,290] y[cy+12,cy+50]
         一键选择 (1203,481) 习合开始模板 习合开始.png（蓝才命中）
         确认弹窗 确认 (785,630)；返回箭头 (141,25)；跳动画安全点 (290,550)
@@ -27,6 +29,7 @@
 import time
 
 from ..maa_adapter import roi_4to4, Point
+from ..flow_control import FlowAborted
 
 _MAX_NO_PROGRESS = 3  # 连续三次未完成习合才停止；成功一次即清零
 
@@ -183,14 +186,12 @@ class SugarMixin:
         for nav_msg in self.navigate_to_stream("强化"):
             yield nav_msg
         if self.current_location != "强化":
-            yield "[炼糖·习合] 到达强化失败"
-            return 0
+            raise FlowAborted("炼糖：到达强化失败，停止操作")
         time.sleep(1.5)
 
         tab = self.maa.template_match("习合.png", threshold=0.75)
         if not tab:
-            yield "[炼糖·习合] 没找到习合标签，放弃"
-            return 0
+            raise FlowAborted("炼糖：没找到习合标签，停止操作")
         self.maa.click(tab)
         time.sleep(2.0)
 
@@ -199,15 +200,19 @@ class SugarMixin:
         stalled = 0
         while True:
             if stalled >= _MAX_NO_PROGRESS:
-                yield "[炼糖·习合] 连续 3 次重选都没能完成习合，本轮先收工"
-                break
+                raise FlowAborted("炼糖：连续 3 次重选都没能完成习合，停止操作，未确认喂完")
             self.maa.screenshot(force=True)
             if not in_materials:
+                yield from self._sugar_ensure_filter_stream()
                 # 游戏隐藏无法习合的本体；始终选择当前第一行，不按刀名排除。
                 btn = self.maa.template_match(
                     "选择png.png", roi_4to4(1150, 121, 1275, 211), threshold=0.75)
                 if not btn:
-                    yield "[炼糖·习合] 第一行没有可选本体，结束本圈习合"
+                    btn = self.maa.ocr("选择", roi_4to4(1180, 125, 1255, 215))
+                if not btn:
+                    if self.maa.ocr("乱舞", roi_4to4(540, 120, 665, 690)):
+                        raise FlowAborted("炼糖：列表仍有刀剑，但未识别到选择按钮，停止操作，未确认喂完")
+                    yield "[炼糖·习合] 已确认隐藏无法习合的刀剑，列表没有可选本体，结束本圈习合"
                     break
                 self.maa.click(btn)
                 time.sleep(2.0)
@@ -281,8 +286,9 @@ class SugarMixin:
 
             outcome = confirm_operation(self.maa, boundary, "union")
             if outcome is not True:
-                yield "[炼糖·习合] 未确认习合结果，本轮停止，不再重复消耗素材" if outcome is None else "[炼糖·习合] 游戏拒绝本次习合，本轮停止"
-                break
+                reason = ("未确认习合结果，停止操作，不再重复消耗素材"
+                          if outcome is None else "游戏拒绝本次习合，停止操作")
+                raise FlowAborted(f"炼糖：{reason}")
             stalled = 0
             successes += 1
             yield f"[炼糖·习合] 完成第 {successes} 轮习合"
@@ -293,12 +299,41 @@ class SugarMixin:
                     break
                 self.maa.click(Point(290, 550))
             else:
-                yield "[炼糖·习合] 习合已完成，但回不到素材界面，本轮收工"
-                break
+                raise FlowAborted("炼糖：习合已完成，但回不到素材界面，停止操作，未确认喂完")
             # 留在当前本体，下一轮继续一键选择，不往返本体列表。
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
         return successes
+
+    def _sugar_filter_checked(self) -> bool | None:
+        """读取同源 BGR 运行帧里的红勾；截图或勾选框不明确时返回未知。"""
+        image = self.maa.screenshot()
+        if image is None or image.shape != (720, 1280, 3):
+            return None
+        region = image[93:112, 133:151]
+        white = (region > 200).all(axis=2).sum()
+        if white < region.shape[0] * region.shape[1] / 2:
+            return None
+        red = ((region[..., 2] > 140) & (region[..., 1] < 110) & (region[..., 0] < 110)).sum()
+        return bool(red > 10)
+
+    def _sugar_ensure_filter_stream(self):
+        self.maa.screenshot(force=True)
+        label = roi_4to4(155, 80, 405, 120)
+        if not self.maa.ocr("隐藏无法习合的刀剑", label):
+            raise FlowAborted("炼糖：未确认习合本体列表，停止操作")
+        checked = self._sugar_filter_checked()
+        if checked is None:
+            raise FlowAborted("炼糖：未识别隐藏无法习合的刀剑勾选状态，停止操作")
+        if checked:
+            return
+        self.maa.click(Point(142, 102))
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        if (not self.maa.ocr("隐藏无法习合的刀剑", label)
+                or self._sugar_filter_checked() is not True):
+            raise FlowAborted("炼糖：未能开启隐藏无法习合的刀剑，停止操作")
+        yield "[炼糖·习合] 已自动开启隐藏无法习合的刀剑"
 
     def _sugar_close_popup(self):
         """挡路的弹窗能认出 X 就点 X；认不出就点弹窗左下的取消位

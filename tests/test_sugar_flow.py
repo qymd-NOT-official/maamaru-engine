@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
 
+import numpy as np
+
+from touken.flow_control import FlowAborted
 from touken.flows.sugar import SugarMixin
 
 
@@ -17,9 +20,16 @@ class Game:
         #        "once" 蹦一次怪弹窗、有关闭X / "stuck" 关不掉
         self.popup = popup
         self.popup_seen = False
+        self.filter_checked = True
+        self.filter_clicks = 0
+        self.filter_click_works = True
+        self.list_visible = True
 
     def screenshot(self, **kwargs):
-        pass
+        image = np.full((720, 1280, 3), 255, dtype=np.uint8)
+        if self.filter_checked:
+            image[96:100, 138:143] = (20, 20, 190)
+        return image
 
     def template_match(self, name, *args, **kwargs):
         if name == "习合.png":
@@ -37,11 +47,20 @@ class Game:
         return None
 
     def ocr(self, text, *args):
+        if text == "隐藏无法习合的刀剑":
+            return self.state == "list" and self.list_visible
+        if text in ("选择", "乱舞"):
+            return None
         if text == "是否确认":
             return self.state == "confirm"
         return self.state == "materials"
 
     def click(self, target):
+        if getattr(target, "to_tuple", lambda: None)() == (142, 102):
+            self.filter_clicks += 1
+            if self.filter_click_works:
+                self.filter_checked = not self.filter_checked
+            return
         if target == "tab":
             return
         if target == "closeX":
@@ -101,9 +120,11 @@ class SugarFlowTests(unittest.TestCase):
     @patch("touken.flows.sugar.time.sleep")
     def test_confirmed_operation_survives_animation_timeout(self, sleep):
         flow = Flow(timeout=True)
-        messages = list(flow._shugo_loop_stream(False))
+        messages = []
+        with self.assertRaisesRegex(FlowAborted, "回不到素材界面"):
+            messages.extend(flow._shugo_loop_stream(False))
         self.assertTrue(any("完成第" in message for message in messages))
-        self.assertIn("收工：炼了 1 轮", messages[-1])
+        self.assertEqual(flow.maa.feeds, 1)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_dry_run_does_not_feed(self, sleep):
@@ -128,10 +149,11 @@ class SugarFlowTests(unittest.TestCase):
             if flow.maa.state == "list":
                 flow.maa.body = 0
         flow.maa.click = click
-        messages = list(flow._shugo_loop_stream(False))
+        messages = []
+        with self.assertRaisesRegex(FlowAborted, "连续 3 次重选"):
+            messages.extend(flow._shugo_loop_stream(False))
         self.assertEqual(flow.maa.picks, 3)
         self.assertFalse(any("完成第" in message for message in messages))
-        self.assertIn("收工：炼了 0 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
     def test_swallowed_tap_recovers_by_reclicking(self, sleep):
@@ -153,7 +175,93 @@ class SugarFlowTests(unittest.TestCase):
     @patch("touken.flows.sugar.time.sleep")
     def test_stuck_popup_ends_loop_without_crash(self, sleep):
         flow = Flow(popup="stuck")
-        messages = list(flow._shugo_loop_stream(False))
+        messages = []
+        with self.assertRaises(FlowAborted):
+            messages.extend(flow._shugo_loop_stream(False))
         self.assertEqual(flow.maa.feeds, 0)
         self.assertIn("没等到确认弹窗", "".join(messages))
-        self.assertIn("收工：炼了 0 轮", messages[-1])
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_disabled_filter_is_enabled_before_selecting(self, sleep):
+        flow = Flow()
+        flow.maa.filter_checked = False
+        list(flow._shugo_loop_stream(False))
+        self.assertTrue(flow.maa.filter_checked)
+        self.assertEqual(flow.maa.filter_clicks, 1)
+        self.assertEqual(flow.maa.feeds, 3)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_enabled_filter_is_not_toggled_off(self, sleep):
+        flow = Flow()
+        list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.filter_clicks, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_failed_filter_toggle_stops_before_selecting(self, sleep):
+        flow = Flow()
+        flow.maa.filter_checked = False
+        flow.maa.filter_click_works = False
+        with self.assertRaisesRegex(FlowAborted, "未能开启"):
+            list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.filter_clicks, 1)
+        self.assertEqual(flow.maa.picks, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_wrong_page_does_not_toggle_or_select(self, sleep):
+        flow = Flow()
+        flow.maa.list_visible = False
+        with self.assertRaisesRegex(FlowAborted, "未确认习合本体列表"):
+            list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.filter_clicks, 0)
+        self.assertEqual(flow.maa.picks, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_unknown_checkbox_state_does_not_toggle_or_select(self, sleep):
+        for image in (None, np.zeros((720, 1280, 3), dtype=np.uint8),
+                      np.zeros((360, 640, 3), dtype=np.uint8)):
+            with self.subTest(shape=getattr(image, "shape", None)):
+                flow = Flow()
+                flow.maa.screenshot = lambda **kwargs: image
+                with self.assertRaisesRegex(FlowAborted, "未识别.*勾选状态"):
+                    list(flow._shugo_loop_stream(False))
+                self.assertEqual(flow.maa.filter_clicks, 0)
+                self.assertEqual(flow.maa.picks, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_selection_text_recovers_missed_button_template(self, sleep):
+        flow = Flow()
+        original_match = flow.maa.template_match
+        original_ocr = flow.maa.ocr
+        flow.maa.template_match = lambda name, *args, **kwargs: (
+            None if name == "选择png.png" else original_match(name, *args, **kwargs))
+        def ocr(text, *args):
+            if text == "选择":
+                return "body" if flow.maa.state == "list" and flow.maa.body < 2 else None
+            return original_ocr(text, *args)
+        flow.maa.ocr = ocr
+        list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.feeds, 3)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_visible_swords_without_button_are_not_treated_as_empty(self, sleep):
+        flow = Flow()
+        original_match = flow.maa.template_match
+        original_ocr = flow.maa.ocr
+        flow.maa.template_match = lambda name, *args, **kwargs: (
+            None if name == "选择png.png" else original_match(name, *args, **kwargs))
+        flow.maa.ocr = lambda text, *args: text == "乱舞" or original_ocr(text, *args)
+        with self.assertRaisesRegex(FlowAborted, "列表仍有刀剑"):
+            list(flow._shugo_loop_stream(False))
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_animation_timeout_does_not_start_another_inbox_claim(self, sleep):
+        flow = Flow(timeout=True)
+        claims = []
+        def claim(dry_run):
+            claims.append(dry_run)
+            yield from ()
+            return "claimed"
+        flow._inbox_claim_stream = claim
+        with self.assertRaises(FlowAborted):
+            list(flow.sugar_stream())
+        self.assertEqual(len(claims), 1)

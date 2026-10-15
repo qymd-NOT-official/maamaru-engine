@@ -99,10 +99,12 @@ def test_union_returning_to_materials_does_not_claim_success_without_receipt(mon
     monkeypatch.setattr(game_state, "begin_operation", Mock(return_value=boundary()))
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=outcome))
     flow = Flow()
-    messages = list(flow._shugo_loop_stream(False))
+    from touken.flow_control import FlowAborted
+    messages = []
+    with pytest.raises(FlowAborted, match="停止操作"):
+        messages.extend(flow._shugo_loop_stream(False))
     assert flow.maa.feeds == 1
     assert not any("完成第" in message for message in messages)
-    assert "炼了 0 轮" in messages[-1]
 
 
 @pytest.mark.parametrize("outcome", [None, False, True])
