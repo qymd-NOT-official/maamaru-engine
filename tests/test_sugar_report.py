@@ -42,7 +42,7 @@ class ScriptedFlow(SugarMixin):
         yield from ()
         return "blocked"
 
-    def _shugo_loop_stream(self, dry_run):
+    def _shugo_loop_stream(self, dry_run, *, skip_unlocked_seven=False):
         yield from ()
         self.rounds += 1
         return next(self.feeds)

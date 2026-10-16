@@ -10,10 +10,10 @@
   筛选 → 物品种类 → 全刀剑 → 确定 → 一键领取
   → 奖励确认窗关 X → 可能蹦购买详情（劝氪金）关 X
 习合：
-  强化 → 习合标签 → 第一行选择 → 一键选择 → 习合 → 二次确认 → 跳动画
-  → 当前本体能继续则继续；不能则返回，重新选择第一行（游戏隐藏无法习合的刀剑）。
+  强化 → 习合标签 → 逐行选择符合条件的本体 → 一键选择 → 习合 → 二次确认 → 跳动画
+  → 黄锁本体持续喂；未锁本体每次喂后返回列表，乱舞达到 7 级就跳过。
 保护（黄锁）的刀只是当不了素材，游戏原生防误喂；本体该吃吃，
-脚本不检测锁、也不设任何名单——认亮着的「选择」按钮就点
+黄锁本体不设乱舞上限；未锁本体仅选乱舞低于 7 级的刀，不按名字排除。
 
 坐标（真机校准）：
   收件箱：筛选 (990,126) 物品种类 (1011,305) 全刀剑 (803,380) 确定 (640,625)
@@ -53,7 +53,7 @@ class SugarMixin:
             cycle += 1
             yield f"[炼糖] ===== 第 {cycle} 圈 ====="
             inbox = yield from self._inbox_claim_stream(dry_run)
-            fed = yield from self._shugo_loop_stream(dry_run)
+            fed = yield from self._shugo_loop_stream(dry_run, skip_unlocked_seven=True)
             yield f"[炼糖] 第 {cycle} 圈结算：收件={inbox} 喂了={fed} 轮"
             if dry_run:
                 yield "[炼糖] 演习模式只跑一圈，收工"
@@ -177,9 +177,10 @@ class SugarMixin:
 
     # ==================== 习合 ====================
 
-    def _shugo_loop_stream(self, dry_run: bool):
+    def _shugo_loop_stream(self, dry_run: bool, *, skip_unlocked_seven: bool = False):
         """
-        当前本体持续习合，不能继续时返回选择第一行。
+        炼糖开启七级跳过时，未锁本体每次喂后重新按乱舞等级选人。
+        黄锁本体及其他调用方沿用持续习合当前本体的操作。
         Returns: 喂了几轮
         """
         yield "[炼糖·习合] 正在导航到强化..."
@@ -197,6 +198,7 @@ class SugarMixin:
 
         successes = 0
         in_materials = False
+        body_locked = False
         stalled = 0
         while True:
             if stalled >= _MAX_NO_PROGRESS:
@@ -204,16 +206,12 @@ class SugarMixin:
             self.maa.screenshot(force=True)
             if not in_materials:
                 yield from self._sugar_ensure_filter_stream()
-                # 游戏隐藏无法习合的本体；始终选择当前第一行，不按刀名排除。
-                btn = self.maa.template_match(
-                    "选择png.png", roi_4to4(1150, 121, 1275, 211), threshold=0.75)
-                if not btn:
-                    btn = self.maa.ocr("选择", roi_4to4(1180, 125, 1255, 215))
-                if not btn:
-                    if self.maa.ocr("乱舞", roi_4to4(540, 120, 665, 690)):
-                        raise FlowAborted("炼糖：列表仍有刀剑，但未识别到选择按钮，停止操作，未确认喂完")
-                    yield "[炼糖·习合] 已确认隐藏无法习合的刀剑，列表没有可选本体，结束本圈习合"
+                body = yield from self._sugar_find_body_stream(skip_unlocked_seven=skip_unlocked_seven)
+                if body is None:
+                    yield ("[炼糖·习合] 本轮没有可继续喂的本体（未锁乱舞七级及以上已跳过）"
+                           if skip_unlocked_seven else "[炼糖·习合] 本轮没有可继续喂的本体")
                     break
+                btn, body_locked = body
                 self.maa.click(btn)
                 time.sleep(2.0)
                 self.maa.screenshot(force=True)
@@ -230,7 +228,7 @@ class SugarMixin:
                         continue
                 in_materials = True
                 if dry_run:
-                    yield "[炼糖·习合] （演习）已进入第一行本体的素材界面，不动手"
+                    yield "[炼糖·习合] （演习）已进入符合条件本体的素材界面，不动手"
                     self.maa.click(Point(141, 25))
                     return 0
 
@@ -301,10 +299,86 @@ class SugarMixin:
                 self.maa.click(Point(290, 550))
             else:
                 raise FlowAborted("炼糖：习合已完成，但回不到素材界面，停止操作，未确认喂完")
-            # 留在当前本体，下一轮继续一键选择，不往返本体列表。
+            if not body_locked:
+                self.maa.click(Point(141, 25))
+                time.sleep(1.5)
+                in_materials = False
 
         yield f"[炼糖·习合] 收工：炼了 {successes} 轮"
         return successes
+
+    @staticmethod
+    def _sugar_row_locked(image, center_y) -> bool | None:
+        """习合列表锁底色；2026-10-16 MAAAdapter 1280×720 BGR 运行帧校准。"""
+        if image is None or image.shape != (720, 1280, 3):
+            return None
+        region = image[center_y - 35:center_y + 35, 85:94]
+        gold = (region[..., 0] < 70) & (region[..., 1] > 130) & (region[..., 2] > 180)
+        if gold.mean() > 0.6:
+            return True
+        gray = region.max(axis=2).astype("int16") - region.min(axis=2).astype("int16") < 15
+        if gray.mean() > 0.8:
+            return False
+        return None
+
+    def _sugar_find_body_stream(self, *, skip_unlocked_seven: bool = True):
+        import numpy as np
+        from .sword_inventory import parse_levels_cell
+
+        while True:
+            before = self.maa.screenshot(force=True)
+            if before is None:
+                raise FlowAborted("炼糖：本体列表截图失败，停止操作")
+            self.maa.swipe(640, 240, 640, 600, 600)
+            time.sleep(1.5)
+            after = self.maa.screenshot(force=True)
+            if after is None:
+                raise FlowAborted("炼糖：翻页后截图失败，停止操作")
+            if np.array_equal(before[125:690, 1258:1278], after[125:690, 1258:1278]):
+                break
+        unreadable = False
+        while True:
+            image = self.maa.screenshot(force=True)
+            tokens = self.maa.ocr_all(roi_4to4(1180, 121, 1255, 690), image=image)
+            buttons = [point for text, point in tokens
+                       if "".join(text.split()) == "选择" and 164 <= point.y <= 645]
+            if not buttons:
+                for center_y in (166, 268, 369, 470, 572):
+                    button = self.maa.template_match(
+                        "选择png.png", roi_4to4(1150, center_y - 45, 1275, center_y + 45), threshold=0.75)
+                    if button:
+                        buttons.append(button)
+            if not buttons:
+                if self.maa.ocr("乱舞", roi_4to4(540, 120, 665, 690)):
+                    raise FlowAborted("炼糖：列表仍有刀剑，但未识别到选择按钮，停止操作，未确认喂完")
+                return None
+            for row_no, button in enumerate(sorted(buttons, key=lambda point: point.y), 1):
+                if not skip_unlocked_seven:
+                    return button, True
+                locked = self._sugar_row_locked(image, button.y)
+                if locked is True:
+                    return button, True
+                levels = parse_levels_cell(self.maa.ocr_all(
+                    roi_4to4(540, button.y - 46, 665, button.y + 8), image=image))
+                level = levels.get("tou_level")
+                if locked is None or level is None:
+                    unreadable = True
+                    yield f"[炼糖·习合] 当前第 {row_no} 行锁定状态或乱舞等级未读清，先看下一行"
+                    continue
+                if level >= 7:
+                    yield f"[炼糖·习合] 跳过当前第 {row_no} 行：未上黄锁，乱舞 {level} 级"
+                    continue
+                return button, False
+            position = image[125:690, 1258:1278].copy()
+            self.maa.swipe(640, 600, 640, 240, 600)
+            time.sleep(1.5)
+            after = self.maa.screenshot(force=True)
+            if after is None:
+                raise FlowAborted("炼糖：翻页后截图失败，停止操作")
+            if np.array_equal(position, after[125:690, 1258:1278]):
+                if unreadable:
+                    raise FlowAborted("炼糖：部分本体乱舞等级或锁定状态未读清，未确认喂完")
+                return None
 
     def _sugar_filter_checked(self) -> bool | None:
         """读取同源 BGR 运行帧里的红勾；截图或勾选框不明确时返回未知。"""

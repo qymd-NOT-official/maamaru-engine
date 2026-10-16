@@ -5,6 +5,7 @@ import numpy as np
 
 from touken.flow_control import FlowAborted
 from touken.flows.sugar import SugarMixin
+from touken.maa_adapter import Point
 
 
 class Game:
@@ -29,7 +30,16 @@ class Game:
         image = np.full((720, 1280, 3), 255, dtype=np.uint8)
         if self.filter_checked:
             image[96:100, 138:143] = (20, 20, 190)
+        image[131:201, 85:94] = (0, 175, 210)
         return image
+
+    def swipe(self, *args):
+        return True
+
+    def ocr_all(self, roi, image=None):
+        if roi.x == 1180 and self.state == "list" and self.body < 2:
+            return [("选择", Point(1220, 166))]
+        return []
 
     def template_match(self, name, *args, **kwargs):
         if name == "习合.png":
@@ -61,6 +71,8 @@ class Game:
             if self.filter_click_works:
                 self.filter_checked = not self.filter_checked
             return
+        if target == Point(1220, 166):
+            target = "body"
         if target == "tab":
             return
         if target == "closeX":
@@ -97,6 +109,68 @@ class Flow(SugarMixin):
 
     def navigate_to_stream(self, target):
         yield "navigate"
+
+
+class SevenGame(Game):
+    def __init__(self, rows):
+        super().__init__()
+        self.levels = [level for level, locked, remaining in rows]
+        self.locks = [locked for level, locked, remaining in rows]
+        self.remaining = [remaining for level, locked, remaining in rows]
+        self.fed_bodies = []
+        self.page = 0
+
+    def visible(self):
+        rows = [index for index, remaining in enumerate(self.remaining) if remaining]
+        return rows[self.page * 5:(self.page + 1) * 5]
+
+    def screenshot(self, **kwargs):
+        image = super().screenshot(**kwargs)
+        image[120:690, 85:94] = (170, 170, 170)
+        image[125:690, 1258:1278] = 20 * (self.page + 1)
+        for row_no, index in enumerate(self.visible()):
+            center_y = 166 + 101 * row_no
+            if self.locks[index]:
+                image[center_y - 35:center_y + 35, 85:94] = (0, 175, 210)
+        return image
+
+    def swipe(self, x1, y1, x2, y2, duration):
+        if y2 > y1:
+            self.page = max(0, self.page - 1)
+        else:
+            count = sum(remaining > 0 for remaining in self.remaining)
+            self.page = min(max(0, (count - 1) // 5), self.page + 1)
+        return True
+
+    def ocr_all(self, roi, image=None):
+        if self.state != "list":
+            return []
+        if roi.x == 1180:
+            return [("选择", Point(1220, 166 + 101 * row_no)) for row_no, index in enumerate(self.visible())]
+        for row_no, index in enumerate(self.visible()):
+            center_y = 166 + 101 * row_no
+            if roi.y == center_y - 46:
+                level = self.levels[index]
+                return [] if level is None else [(f"刀剑1级乱舞{level}级", Point(600, center_y - 20))]
+        return []
+
+    def template_match(self, name, *args, **kwargs):
+        if name == "选择png.png":
+            return None
+        return super().template_match(name, *args, **kwargs)
+
+    def click(self, target):
+        if isinstance(target, Point) and target.x == 1220:
+            self.body = self.visible()[round((target.y - 166) / 101)]
+            return super().click("body")
+        if self.state == "materials" and target == Point(141, 25):
+            self.state = "list"
+            return
+        confirming = self.state == "confirm"
+        super().click(target)
+        if confirming:
+            self.levels[self.body] += 1
+            self.fed_bodies.append(self.body)
 
 
 class SugarFlowTests(unittest.TestCase):
@@ -247,6 +321,7 @@ class SugarFlowTests(unittest.TestCase):
         flow = Flow()
         original_match = flow.maa.template_match
         original_ocr = flow.maa.ocr
+        flow.maa.ocr_all = lambda *args, **kwargs: []
         flow.maa.template_match = lambda name, *args, **kwargs: (
             None if name == "选择png.png" else original_match(name, *args, **kwargs))
         flow.maa.ocr = lambda text, *args: text == "乱舞" or original_ocr(text, *args)
@@ -265,3 +340,58 @@ class SugarFlowTests(unittest.TestCase):
         with self.assertRaises(FlowAborted):
             list(flow.sugar_stream())
         self.assertEqual(len(claims), 1)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_skips_unlocked_seven_and_feeds_later_bodies(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(7, False, 2), (5, False, 1), (4, False, 1)])
+        messages = list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.fed_bodies, [1, 2])
+        self.assertEqual(flow.maa.remaining[0], 2)
+        self.assertTrue(any("乱舞 7 级" in message for message in messages))
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_unlocked_body_reaching_seven_moves_to_next_body(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(6, False, 3), (4, False, 1)])
+        list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.fed_bodies, [0, 1])
+        self.assertEqual(flow.maa.levels[0], 7)
+        self.assertEqual(flow.maa.remaining[0], 2)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_yellow_locked_body_continues_past_seven(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(7, True, 2), (8, False, 2)])
+        list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.fed_bodies, [0, 0])
+        self.assertEqual(flow.maa.levels[0], 9)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_all_skipped_page_does_not_hide_later_candidates(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(7, False, 1)] * 5 + [(4, False, 1)])
+        list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.fed_bodies, [5])
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_all_seven_returns_without_feeding(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(7, False, 1), (9, False, 1)])
+        list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.feeds, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_unknown_unlocked_level_does_not_get_fed(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(None, False, 1)])
+        with self.assertRaisesRegex(FlowAborted, "未读清"):
+            list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
+        self.assertEqual(flow.maa.feeds, 0)
+
+    @patch("touken.flows.sugar.time.sleep")
+    def test_non_sugar_caller_keeps_feeding_unlocked_seven(self, sleep):
+        flow = Flow()
+        flow.maa = SevenGame([(7, False, 2)])
+        list(flow._shugo_loop_stream(False))
+        self.assertEqual(flow.maa.fed_bodies, [0, 0])
