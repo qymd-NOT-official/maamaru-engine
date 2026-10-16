@@ -30,6 +30,26 @@ class DailyWorkflowTests(unittest.TestCase):
                                                  after=after, daily_mode=daily_mode))
         return agent, messages
 
+    def test_osaka_daily_api_save_reloads_execution_and_checklist_together(self):
+        from fastapi.testclient import TestClient
+        node = _node("osaka", params={"team_no": "3", "floors": 60, "select_floor": True, "target_floor": 88})
+        node["on_error"] = "stop"
+        body = {"id": "builtin-daily", "name": "一键日课", "daily_mode": True,
+                "parameter_version": 1, "nodes": [node], "after": "none",
+                "daily_ui": {"startTime": "", "useRecommendedRuns": False,
+                             "rows": [{"id": "activity", "label": "当期活动", "enabled": True, "nodes": [node]}]}}
+        workflow.save_presets([body])
+        client = TestClient(server.app)
+        result = client.put("/api/workflows/builtin-daily", json=body)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()["preset"]["daily_ui"], body["daily_ui"])
+        reloaded = workflow.load_presets()[0]
+        self.assertEqual(reloaded["nodes"], [node])
+        self.assertEqual(reloaded["daily_ui"], body["daily_ui"])
+        reopened = next(p for p in client.get("/api/workflows").json()["presets"] if p["id"] == "builtin-daily")
+        self.assertEqual(reopened["nodes"], [node])
+        self.assertEqual(reopened["daily_ui"], body["daily_ui"])
+
     def test_builtin_is_read_only_until_saved_and_copy_keeps_daily_behavior(self):
         default = workflow.list_presets()[0]
         self.assertEqual(default["id"], workflow.DAILY_PRESET_ID)

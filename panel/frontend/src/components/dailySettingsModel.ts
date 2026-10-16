@@ -15,7 +15,19 @@ export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
   const def = defs.find(d => d.type === type)
   return {type, on_error: 'stop', params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
 }
-export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string): DailyRow[] {
+const activityTypes = ['raid', 'osaka', 'edocastle', 'hanafuda', 'pumpkin']
+function currentActivity(rows: DailyRow[], defs: WorkflowNodeDef[], available: string[]): DailyRow[] {
+  const row = rows.find(r => r.id === 'activity')
+  if (row && available.length && !available.includes(row.nodes[0]?.type || '')) {
+    const node = makeNode(available[0]!, defs)
+    const team = row.nodes[0]?.params.team_no
+    if (team != null) node.params.team_no = team
+    row.nodes = [node]
+  }
+  return rows
+}
+export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activity: string | string[]): DailyRow[] {
+  const available = typeof activity === 'string' ? (activity ? [activity] : []) : activity
   if (preset.daily_ui?.rows) {
     const saved = clone(preset.daily_ui.rows).filter(row => row.id !== 'boot').map(row => row.id === 'signin' ? {...row, label: '签到'} : row.id === 'expedition' ? {...row, label: '指定远征'} : row)
     if (!saved.some(row => row.id === 'synthesize')) {
@@ -24,14 +36,14 @@ export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activ
       if (old) old.nodes = old.nodes.filter(node => node.type !== 'synthesize')
       saved.splice(saved.findIndex(row => row.id === 'forge') + 1, 0, {id: 'synthesize', label: '合成', enabled: old?.enabled || false, nodes})
     }
-    return saved.filter(row => row.id !== 'custom' || row.nodes.length)
+    return currentActivity(saved.filter(row => row.id !== 'custom' || row.nodes.length), defs, available)
   }
   const used = new Set<WorkflowNode>(preset.nodes.filter(n => ['boot_emulator', 'login'].includes(n.type)))
   const rows = dailyGroups.map(([id, label, ...types]) => {
-    if (id === 'activity' && activity) types = [activity]
+    if (id === 'activity') types = activityTypes
     const found = preset.nodes.filter(n => types.includes(n.type))
     found.forEach(n => used.add(n))
-    return {id: id!, label: label!, enabled: !!found.length || id === 'boot', nodes: types.flatMap(t => { const matches = found.filter(n => n.type === t); return matches.length ? clone(matches) : [makeNode(t, defs)] })}
+    return {id: id!, label: label!, enabled: !!found.length || id === 'boot', nodes: id === 'activity' ? clone(found) : types.flatMap(t => { const matches = found.filter(n => n.type === t); return matches.length ? clone(matches) : [makeNode(t, defs)] })}
   })
   const oldSortie = preset.nodes.find(n => n.type === 'daily_sortie')
   if (oldSortie) {
@@ -50,7 +62,7 @@ export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activ
   }
   const extras = preset.nodes.filter(n => !used.has(n) && !['snapshot', 'ledger_sync'].includes(n.type))
   if (extras.length) rows.push({id:'custom',label:'原有其他步骤',enabled:true,nodes:clone(extras)})
-  return rows
+  return currentActivity(rows, defs, available)
 }
 export function compileDaily(rows: DailyRow[], tail: WorkflowNode[]): WorkflowNode[] {
   return clone([{type:'boot_emulator',params:{},on_error:'stop'}, {type:'login',params:{},on_error:'stop'}, ...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])

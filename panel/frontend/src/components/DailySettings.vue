@@ -23,6 +23,10 @@ const plannedExpeditions = ref(true)
 const running = ref(false)
 const useRecommendedRuns = ref(false)
 const manualActivityParams = ref<WorkflowNode['params'] | null>(null)
+const savedSignature = ref('')
+const activityNotice = ref('')
+const settingsSignature = computed(() => JSON.stringify({ rows: rows.value, after: after.value, startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value }))
+const unsaved = computed(() => !loading.value && settingsSignature.value !== savedSignature.value)
 const recommendation = computed(() => {
   const result = raidDayRecommendation(props.timeline, rows.value.find(r => r.id === 'activity')?.nodes[0]?.type === 'raid')
   return result && result.runs > 99 ? {...result, available: false, reason: '本次建议超过 99 圈，请先调整活动目标或使用手动圈数。'} : result
@@ -52,12 +56,20 @@ async function load() {
     preset.value = listJumpDraft.value || library.presets.find(p => p.id === 'builtin-daily') || null
     listJumpDraft.value = null
     if (!preset.value) throw new Error('默认日课没有加载出来，请重试')
-    rows.value = dailyRows(preset.value, defs.value, activityOptions.value[0]?.script || '')
+    const previousActivity = preset.value.daily_ui?.rows.find(row => row.id === 'activity')?.nodes[0]?.type
+      || preset.value.nodes.find(node => ['raid', 'osaka', 'edocastle', 'hanafuda', 'pumpkin'].includes(node.type))?.type
+      || String(preset.value.nodes.find(node => node.type === 'daily_sortie')?.params.sortie_mode || '')
+    rows.value = dailyRows(preset.value, defs.value, activityOptions.value.map(option => option.script))
     tail.value = clone(preset.value.nodes.filter(n => ['snapshot', 'ledger_sync'].includes(n.type)))
     useRecommendedRuns.value = preset.value.daily_ui?.useRecommendedRuns === true
     manualActivityParams.value = preset.value.daily_ui?.manualActivityParams ? clone(preset.value.daily_ui.manualActivityParams) : null
     plannedExpeditions.value = preset.value.daily_ui?.plannedExpeditions !== false
     after.value = preset.value.after || 'none'; startTime.value = preset.value.daily_ui?.startTime || ''
+    const currentActivity = rows.value.find(row => row.id === 'activity')?.nodes[0]?.type
+    const changed = !!previousActivity && !!currentActivity && previousActivity !== currentActivity
+    if (currentActivity !== 'raid') { useRecommendedRuns.value = false; manualActivityParams.value = null }
+    activityNotice.value = changed ? `原来的${definition(previousActivity)?.label || previousActivity}已不在当期活动中，已切换为${definition(currentActivity!)?.label || currentActivity}。部队保留，其余使用新活动默认设置；请确认后保存。` : ''
+    savedSignature.value = changed ? '' : settingsSignature.value
   } catch (err) { message.value = err instanceof Error ? err.message : '日课加载失败' }
   finally { loading.value = false }
 }
@@ -119,10 +131,14 @@ async function save(start = false) {
       daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined}}
     const result = await api.updateWorkflow(body)
     if (!result.ok) throw new Error('日课没有保存成功')
-    preset.value = body
+    if (!result.preset?.daily_ui) throw new Error('日课设置未完整保存，请重试')
+    preset.value = result.preset
+    rows.value = clone(result.preset.daily_ui.rows)
+    savedSignature.value = settingsSignature.value
+    activityNotice.value = ''
     if (start) {
       message.value = (await api.executeToday()).message
-    } else message.value = '日课设置已保存'
+    } else message.value = '日课设置已保存，重启后仍会使用这份安排'
     emit('saved')
   } catch (err) { message.value = err instanceof Error ? err.message : '保存失败，请重试' }
   finally { busy.value = false }
@@ -151,6 +167,9 @@ async function stopExpeditions() {
 <template>
   <section class="daily-settings" aria-label="一键日课设置">
     <header class="daily-heading"><div><small>本丸执务单</small><h3>今日安排</h3></div><span class="daily-count">日课已选 {{ enabledCount }} 项</span></header>
+    <p v-if="activityNotice" class="daily-muted" role="status">{{ activityNotice }}</p>
+    <p v-if="unsaved" class="daily-muted">有未保存的修改；点击“保存设置”或“一键执行今日安排”后生效。</p>
+    <p v-if="message && (!unsaved || !message.startsWith('日课设置已保存'))" role="status">{{ message }}</p>
     <p v-if="loading">正在取出日课设置…</p>
     <section v-if="!loading && preset" class="daily-planned-expeditions">
       <div class="daily-expedition-title"><label><input v-model="plannedExpeditions" type="checkbox" :disabled="busy || running" /> <strong>规划远征</strong></label><details class="daily-help"><summary aria-label="规划远征说明">?</summary><p>开工时一起安排远征；停止今日安排会取消这次带出的远征，保留单独安排的班次。关闭远征安排则取消全部待派班次，日课继续执行。</p></details></div>
@@ -209,7 +228,7 @@ async function stopExpeditions() {
     </footer>
     <button v-if="!loading && preset" class="daily-stop" :disabled="busy" @click="stopToday">停止今日安排</button>
     <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份今日安排替换旧的任务时段；远征排班仍保留。</p>
-    <p v-if="message" role="status">{{ message }}</p><button v-if="!loading && !preset" @click="load">重新加载</button>
+    <button v-if="!loading && !preset" @click="load">重新加载</button>
   </section>
 </template>
 

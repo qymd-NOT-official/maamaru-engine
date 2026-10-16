@@ -124,7 +124,7 @@ export const api = {
   createWorkflow: (preset: Omit<WorkflowPreset, 'id'>) => request<{ ok: boolean; id?: string }>('/api/workflows', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset),
   }),
-  updateWorkflow: (preset: WorkflowPreset) => request<{ ok: boolean }>(`/api/workflows/${encodeURIComponent(preset.id)}`, {
+  updateWorkflow: (preset: WorkflowPreset) => request<{ ok: boolean; preset: WorkflowPreset }>(`/api/workflows/${encodeURIComponent(preset.id)}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preset),
   }),
   deleteWorkflow: (id: string) => request<{ ok: boolean }>(`/api/workflows/${encodeURIComponent(id)}`, { method: 'DELETE' }),
