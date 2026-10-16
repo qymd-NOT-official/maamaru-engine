@@ -1419,7 +1419,8 @@ class TelemetryStore:
             payload = _loads(row["payload"], {})
             event_type = row["event_type"]
             item = None
-            if event_type == "osaka.koban_session" and row["id"] not in shadowed:
+            if (event_type == "osaka.koban_session" and row["id"] not in shadowed
+                    and not payload.get("summary_only")):
                 delta = payload.get("delta")
                 if isinstance(delta, (int, float)) and delta:
                     item = {"resource": "小判", "delta": delta, "source": event_type,
@@ -1868,18 +1869,19 @@ class TelemetryStore:
             for name in left.keys() | right.keys():
                 if isinstance(left.get(name), (int, float)) and isinstance(right.get(name), (int, float)):
                     deltas[name] = right[name] - left[name]
-        # 挖地小判掉落率实验：没有前后盘点时，用实验自带的开工/收场小判顶上
-        # （run 级盘点 2026-08 退役后，这是挖地成绩单小判差值的主要来源）
         koban_science = None
         if not (before and after):
             sci = [e["payload"] for e in events
                    if e["event_type"] == "osaka.koban_session"
-                   and isinstance(e["payload"].get("before"), (int, float))
-                   and isinstance(e["payload"].get("after"), (int, float))]
+                   and (e["payload"].get("source") == "game_rewards"
+                        and isinstance(e["payload"].get("delta"), (int, float))
+                        or isinstance(e["payload"].get("before"), (int, float))
+                        and isinstance(e["payload"].get("after"), (int, float)))]
             if sci:
                 koban_science = sci[-1]
-                deltas["小判"] = (int(koban_science["after"])
-                                  - int(koban_science["before"]))
+                deltas["小判"] = (int(koban_science["delta"])
+                                  if koban_science.get("source") == "game_rewards"
+                                  else int(koban_science["after"]) - int(koban_science["before"]))
         selected = [e["payload"].get("selected_floor") for e in osaka
                     if e["payload"].get("selected_floor") is not None]
         return {

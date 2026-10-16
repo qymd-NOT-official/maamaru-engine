@@ -318,8 +318,8 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
     """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 必做的回本丸 + 强制 peek。
 
     为什么盘点默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
-    各循环 quick_peek 顺路更新（60s 节流），挖地小判差值由 osaka_stream
-    自带的掉落率实验记账。专程跑腿盘点太磨叽（7-27 日课超时两次的教训）。
+    各循环 quick_peek 顺路更新（60s 节流），挖地小判由 osaka_stream
+    自动统计。专程跑腿盘点太磨叽（7-27 日课超时两次的教训）。
     想给某个任务恢复 run 级盘点就显式传 inventory=True。
 
     - before：任务开始前拍一张；after：任务结束后拍一张（含自然失败——异常
@@ -699,7 +699,6 @@ def _build_osaka(agent, config_path, params):
     team_no = yield from _team_with_preset_stream(agent, params)
     if team_no is None:
         return
-    # 小判掉落率实验由 osaka_stream 自带记账（开关沿用面板 compare_resources）
     yield from agent.osaka_stream(
         max_floors=_run_count(params, 1, "floors"),
         team_no=team_no,
@@ -709,8 +708,7 @@ def _build_osaka(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
-        auto_equip=_bool(params.get("auto_equip", True)),
-        koban_science=_bool(params.get("compare_resources", True)))
+        auto_equip=_bool(params.get("auto_equip", True)))
 
 
 def _build_sakura(agent, config_path, params):
@@ -1175,9 +1173,6 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                 _wrap_inventory("挖地", _build_osaka),
                 params=[_team_field("3"),
                         {**_run_count_field(), "label": "出阵次数"},
-                        {"key": "compare_resources", "type": "toggle",
-                         "label": "小判掉落率实验", "default": True,
-                         "help": "开工和收场时各读一次小判，差值和层数记进日志（测掉落概率用）；识别失败不影响挖地。"},
                         {"key": "select_floor", "type": "toggle",
                          "label": "指定挂机层数", "default": False},
                         {"key": "target_floor", "type": "number",

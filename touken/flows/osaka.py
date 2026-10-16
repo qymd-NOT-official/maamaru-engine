@@ -5,6 +5,39 @@ import re
 import time
 
 from ..maa_adapter import roi_4to4
+from ..game_state import available_events, successful_body, _request_key
+from .. import youzu_log
+
+
+def koban_reward_summary(events, known_requests):
+    pending = {}
+    seen = set()
+    total = 0
+    receipts = 0
+    bosses = 0
+    observed = False
+    for event in events:
+        endpoint = event.get("endpoint")
+        if endpoint not in ("/sally/eventforward", "/battle/battle"):
+            continue
+        key = _request_key(event)
+        if key in seen:
+            continue
+        seen.add(key)
+        if event.get("direction") == "C->S":
+            pending[endpoint] = key not in known_requests
+            continue
+        if event.get("direction") != "S->C" or not pending.pop(endpoint, False):
+            continue
+        body = successful_body(event)
+        if body is None:
+            continue
+        observed = True
+        bosses += bool((body.get("koban") or {}).get("is_boss_defeat"))
+        amount = youzu_log._payload_resource_rewards(body).get("小判", 0)
+        total += amount
+        receipts += bool(amount)
+    return {"delta": total, "receipts": receipts, "bosses": bosses} if observed else None
 
 
 class OsakaMixin:
@@ -22,27 +55,15 @@ class OsakaMixin:
                      _repair_count: int = 0,
                      _speedups_used: int = 0,
                      _team_record_saved: bool = False,
-                     _auto_equip_active: bool = None,
-                     koban_science: bool = True):
-        """挖地外套：小判掉落率实验记账（开工/收场各读一次小判，差值≈掉落）。
-
-        递归续跑会再次经过这里，用 _osaka_koban_open 保证只有最外层记账。
-        finally 里只用 print 不用 yield（用户中途停止时生成器被 close，
-        finally 里 yield 会炸 RuntimeError）；print 走 stdout 一样进日志。
-        koban_science=False 时完全不读不写（面板「小判掉落率实验」开关）。
-        """
+                     _auto_equip_active: bool = None):
+        """从本趟游戏奖励记录自动汇总小判；递归续跑只在最外层结算。"""
         outermost = not getattr(self, "_osaka_koban_open", False)
         if outermost:
-            # 不管测不测都先插旗：不然递归续跑会误以为自己是外层，重复记账
             self._osaka_koban_open = True
-        measure = outermost and koban_science
-        if measure:
+        baseline = available_events(self.maa) if outermost else []
+        known_requests = {_request_key(event) for event in baseline if event.get("direction") == "C->S"}
+        if outermost:
             self._osaka_floors_total = 0
-            self._osaka_koban_before = self._read_koban()
-            if self._osaka_koban_before is not None:
-                yield f"[挖地] 🧪 掉落率实验开测：开工小判 {self._osaka_koban_before}"
-            else:
-                yield "[挖地] 🧪 开工小判没读到（不在本丸？），收场再补"
         try:
             yield from self._osaka_stream_impl(
                 max_floors=max_floors, team_no=team_no,
@@ -58,23 +79,27 @@ class OsakaMixin:
         finally:
             if outermost:
                 self._osaka_koban_open = False
-            if measure:
-                before = getattr(self, "_osaka_koban_before", None)
-                after = self._read_koban()
+            if outermost and baseline:
+                events = available_events(self.maa)
+                summary = koban_reward_summary(events, known_requests)
                 floors_done = getattr(self, "_osaka_floors_total", 0)
-                if before is not None and after is not None:
-                    delta = after - before
+                if summary is not None and summary["bosses"] >= floors_done:
+                    floors_done = summary["bosses"]
+                    delta = summary["delta"]
                     per = f"，平均每层 {delta / floors_done:.1f}" if floors_done else ""
-                    print(f"[挖地] 🧪 收场小判 {after}，这趟变化 {delta:+d}"
+                    print(f"[挖地] 游戏奖励记录：本趟小判 {delta:+d}"
                           f"（挖了 {floors_done} 层{per}）")
                     if hasattr(self, "record_event"):
                         self.record_event("osaka.koban_session",
-                                          before=before, after=after,
                                           delta=delta, floors=floors_done,
-                                          target_floor=target_floor)
-                else:
-                    print(f"[挖地] 🧪 小判记账不全（前{before}/后{after}），"
-                          "这趟掉落率没记上")
+                                          target_floor=target_floor,
+                                          source="game_rewards", summary_only=True,
+                                          receipts=summary["receipts"])
+                    try:
+                        from ..telemetry import get_telemetry_store
+                        youzu_log.write_ledger(get_telemetry_store(), youzu_log.build_ledger(events))
+                    except Exception as exc:
+                        print(f"[挖地] 奖励记录暂未同步到账房：{exc}")
 
     def _osaka_stream_impl(self, max_floors: int = 1, team_no: int = 3,
                      select_floor: bool = False, target_floor: int = 81,
@@ -262,7 +287,7 @@ class OsakaMixin:
                 idle_checks = 0
                 floors += 1
                 total_completed = _completed_floors + floors
-                self._osaka_floors_total = total_completed  # 喂给外套的小判实验
+                self._osaka_floors_total = total_completed
                 if hasattr(self, "record_event"):
                     self.record_event(
                         "osaka.floor_completed",

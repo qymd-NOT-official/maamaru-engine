@@ -144,7 +144,7 @@ def run_flow(flow, max_floors=90):
     with patch("touken.flows.osaka.time.sleep", lambda *_: None):
         return list(flow.osaka_stream(
             max_floors=max_floors, team_no=3, select_floor=False,
-            auto_equip=False, koban_science=False))
+            auto_equip=False))
 
 
 class FloorEndDebounceTests(unittest.TestCase):

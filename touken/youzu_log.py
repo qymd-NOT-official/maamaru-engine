@@ -596,6 +596,8 @@ _ENDPOINT_LABEL = {
     "/monthcard/salary": "月卡俸禄", "/sign/info": "签到", "/sign": "签到",
     "/sally/recovercost": "补充活动手形",
     "/sally/forward": "出阵资源奖励",
+    "/sally/eventforward": "活动行军奖励",
+    "/battle/battle": "战斗奖励",
     "/shop/buy": "万屋购买", "/sword/dismantle_many": "刀解",
     "/sally/parallelpastsally": "异去出阵",
     "/sally/parallelpastrecovercost": "异去恢复探索次数",
@@ -809,8 +811,11 @@ def _payload_resource_rewards(payload) -> dict[str, int]:
     rewards = {}
     if not isinstance(payload, dict):
         return rewards
-    for key in ("reward", "item"):
-        entries = payload.get(key)
+    lists = [(payload.get(key), False) for key in ("reward", "item")]
+    result = payload.get("result")
+    if isinstance(result, dict):
+        lists.append((result.get("reward"), True))
+    for entries, battle_reward in lists:
         if not isinstance(entries, list):
             continue
         for entry in entries:
@@ -826,6 +831,8 @@ def _payload_resource_rewards(payload) -> dict[str, int]:
             else:
                 name = None
             amount = _int(entry.get("item_num"))
+            if battle_reward:
+                amount += _int(entry.get("bonus")) + _int(entry.get("bonus_monthcard_salary"))
             if name and amount > 0:
                 rewards[name] = rewards.get(name, 0) + amount
     return rewards
