@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import ParamField from './ParamField.vue'
+import SegmentedControl from './SegmentedControl.vue'
 import { matchesRule } from '../visibility'
 import { raidDayRecommendation } from './report/planningLinkModel'
 import { compileDaily, dailyRows, listJumpDraft, makeNode, withRecommendedRuns, type DailyRow } from './dailySettingsModel'
@@ -216,6 +217,13 @@ async function stopExpeditions() {
           <p v-if="!definition(node.type)?.params.length" class="daily-muted">无需设置，开工后会按顺序处理。</p>
         </fieldset>
         </template>
+        <div v-if="activeRow.nodes.length" class="daily-failure-policies">
+          <fieldset v-for="(node, index) in activeRow.nodes" :key="`policy-${activeRow.id}-${index}`" :disabled="busy || running">
+            <legend>{{ activeRow.nodes.length > 1 ? `${definition(node.type)?.label || node.type}没完成时` : '这一步没完成时' }}</legend>
+            <p v-if="['boot_emulator', 'login'].includes(node.type)" class="daily-muted">游戏未成功启动并登录时，后面的日课不会执行。</p>
+            <SegmentedControl v-else v-model="node.on_error" :label="`${definition(node.type)?.label || node.type}失败后的安排`" :items="[{value: 'stop', label: '停下后续安排'}, {value: 'continue', label: '继续下一步', caption: '记录失败，不算完成'}]" />
+          </fieldset>
+        </div>
         <p v-if="!activeRow.nodes.length">当前没有可用的活动玩法。</p>
       </section>
     </div>
@@ -276,6 +284,8 @@ async function stopExpeditions() {
 .daily-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .daily-parameters fieldset { border: 0; padding: 0; margin: 18px 0 0; min-width: 0; }
 .daily-parameters legend { margin-bottom: 12px; font-weight: bold; font-size: 13px; }
+.daily-failure-policies { margin-top: 22px; padding-top: 2px; border-top: 1px solid var(--paper-line); }
+.daily-failure-policies :deep(.segmented-control) { width: 100%; }
 .daily-settings-footer { display: flex; flex-wrap: wrap; align-items: end; gap: 18px; padding: 18px 0 0; margin-top: 24px; border-top: 1px solid var(--paper-line); }
 .daily-settings-footer label, .daily-activity { display: grid; gap: 7px; font-size: 13px; }
 .daily-settings-footer small { font-size: 11px; }

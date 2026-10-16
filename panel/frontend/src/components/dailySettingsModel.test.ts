@@ -3,6 +3,22 @@ import { compileDaily, dailyRows, withRecommendedRuns } from './dailySettingsMod
 import type { WorkflowPreset, WorkflowNodeDef } from '../types'
 const definitions = ['boot_emulator','login','signin','free_gift','practice','naihanka','forge','dismantle','synthesize','expedition','yosari','raid','task_rewards','inbox_supplies','sugar'].map(type => ({type,label:type,desc:'',category:'chore',params:[]})) as WorkflowNodeDef[]
 describe('日课分组执行', () => {
+ it('合并项目逐步保留失败策略，编辑后编译与重开一致且不改原配置', () => {
+  const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[
+   {type:'signin',params:{},on_error:'continue'},
+   {type:'free_gift',params:{},on_error:'stop'},
+  ]}
+  const rows = dailyRows(preset,definitions,'')
+  const signin = rows.find(row=>row.id==='signin')!
+  expect(signin.nodes.map(node=>node.on_error)).toEqual(['continue','stop'])
+  signin.nodes[0]!.on_error='stop'
+  signin.nodes[1]!.on_error='continue'
+  const nodes = compileDaily(rows,[])
+  expect(nodes.map(node=>node.on_error)).toEqual(['stop','stop','stop','continue'])
+  const reopened = dailyRows({...preset,nodes,daily_ui:{startTime:'',rows}},definitions,'')
+  expect(reopened.find(row=>row.id==='signin')!.nodes.map(node=>node.on_error)).toEqual(['stop','continue'])
+  expect(preset.nodes.map(node=>node.on_error)).toEqual(['continue','stop'])
+ })
  it('换期替换旧活动草稿，只保留部队和勾选状态，不修改保存源', () => {
   const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[],daily_ui:{startTime:'',rows:[
    {id:'activity',label:'当期活动',enabled:true,nodes:[{type:'raid',params:{team_no:'3',runs:20,map_no:4,auto_refill:true},on_error:'stop'}]},
