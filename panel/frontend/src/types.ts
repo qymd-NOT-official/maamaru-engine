@@ -621,6 +621,7 @@ export interface EventAbacus {
   shortfall: number | null
   yield_per_floor?: number | null
   yield_sessions?: number | null
+  koban_earned?: number | null
   tama_current?: number | null
   tama_observed_at?: number | null
   tama_target?: number | null

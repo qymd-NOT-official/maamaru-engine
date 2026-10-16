@@ -467,6 +467,12 @@ function candidateRange(candidate: EventTimelineCandidate) {
               </div>
 
               <div v-if="group.key !== 'ended' && abacusFor(entry)?.goal_mode === 'stock_target'" class="event-stock-target">
+                <div class="stock-earned">
+                  <small>本期已挖到</small>
+                  <b v-if="abacusFor(entry)?.koban_earned != null">{{ fmt(abacusFor(entry)?.koban_earned) }} 小判</b>
+                  <span v-else>还没有本期收益记录</span>
+                  <small>按已记录的大阪城收益累计，含特殊刀剑加成。</small>
+                </div>
                 <div v-if="goalFor(entry)" class="stock-goal-linked">
                   <span><small>已立目标</small><b>{{ fmt(goalFor(entry)?.target) }} {{ goalFor(entry)?.resource }}</b></span>
                   <details>
@@ -644,6 +650,9 @@ function candidateRange(candidate: EventTimelineCandidate) {
 .event-stock-target .stock-yield { grid-column: 1 / -1; color: var(--ink-dim); font-size: 11px; }
 .event-stock-target .stock-yield { margin: 0; }
 .stock-goal-linked { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 12px; }
+.stock-earned { display: grid; grid-column: 1 / -1; gap: 3px; padding-bottom: 9px; border-bottom: 1px solid var(--border); }
+.stock-earned small { color: var(--ink-dim); font-size: 11px; }
+.stock-earned b { font-size: 20px; color: #426b36; }
 .stock-goal-linked > span { display: grid; gap: 1px; }
 .stock-goal-linked small { color: #426b36; font-size: 10px; font-weight: 700; }
 .stock-goal-linked details { margin: 0; }

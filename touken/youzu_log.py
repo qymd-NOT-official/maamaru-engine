@@ -855,9 +855,16 @@ def build_ledger(events: list[dict]) -> dict:
     resource_requests: dict[str, list[dict]] = {}
     inbox_entries: dict[str, dict] = {}
     assets = []
+    event_rewards = []
+    osaka_confirmed = False
+    event_sortie = False
 
     for ev in events:
         if ev["direction"] == "C->S":
+            if ev["endpoint"] in ("/sally/eventsally", "/sally/start", "/sally/parallelpastsally", "/home"):
+                event_rewards = []
+                osaka_confirmed = False
+                event_sortie = ev["endpoint"] == "/sally/eventsally"
             if ev["endpoint"] and ev["endpoint"] not in ("/keepalive",):
                 pending_requests.append(ev)
                 for requests in resource_requests.values():
@@ -871,6 +878,12 @@ def build_ledger(events: list[dict]) -> dict:
                 requests[:] = [r for r in requests if r["endpoint"] != ev["endpoint"]]
             continue
         payload = ev["payload"]
+        osaka_boss = (ev["endpoint"] == "/battle/battle"
+                      and (payload.get("koban") or {}).get("is_boss_defeat") is True)
+        if osaka_boss:
+            osaka_confirmed = True
+            for reward in event_rewards:
+                reward["activity"] = "osaka"
         if ev["endpoint"] == "/receive/list" and isinstance(payload.get("receive"), dict):
             for entry in payload["receive"].values():
                 if isinstance(entry, dict) and entry.get("serial_id") is not None:
@@ -939,6 +952,10 @@ def build_ledger(events: list[dict]) -> dict:
                 "after": {name: new if new is not None and old is not None and new - old == amount else None},
                 "via": [detail or _ENDPOINT_LABEL.get(ev["endpoint"], (ev["endpoint"] or "?").lstrip("/"))],
                 "via_endpoints": [], "evidence": receipt_evidence})
+            if osaka_boss or (event_sortie and ev["endpoint"] == "/sally/eventforward"):
+                event_rewards.append(changes[-1])
+                if osaka_confirmed:
+                    changes[-1]["activity"] = "osaka"
             if new is None and old is not None:
                 last_known[name] = old + amount
 
@@ -1073,12 +1090,16 @@ def _repair_receipt_sources(store, ledger: dict, last_ts: float) -> int:
             if len(matches) != 1:
                 continue
             event_id, old = matches[0]
-            if old.get("source") != "youzu_log.unknown":
+            source = "youzu_log." + endpoint.lstrip("/")
+            enrich = change.get("activity") and old.get("activity") != change["activity"]
+            if old.get("source") != "youzu_log.unknown" and not (old.get("source") == source and enrich):
                 continue
             old.update(source="youzu_log." + endpoint.lstrip("/"),
                        note="、".join(change["via"]) + f" {name} {delta:+d}",
                        attribution=change.get("attribution", "inferred"),
                        evidence=change.get("evidence", "client_reward_list"))
+            if change.get("activity"):
+                old["activity"] = change["activity"]
             updates[event_id] = json.dumps(old, ensure_ascii=False)
     if updates:
         # Back up before correcting user-local history; no records are deleted.
@@ -1149,6 +1170,8 @@ def write_ledger(store, ledger: dict,
                 "attribution": ch.get("attribution", "inferred"),
                 "evidence": ch.get("evidence", "client_balance_difference"),
             }
+            if ch.get("activity"):
+                payload["activity"] = ch["activity"]
             conn.execute(
                 "INSERT INTO events(ts, run_id, script, event_type, payload) "
                 "VALUES (?, NULL, ?, 'resource.change', ?)",

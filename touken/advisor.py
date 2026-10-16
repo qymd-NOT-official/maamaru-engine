@@ -1061,6 +1061,7 @@ def get_planning(store, goals_path: Path, *,
         if abacus.get("goal_mode") == "stock_target":
             abacus["yield_per_floor"] = (floor_yield or {}).get("per_floor")
             abacus["yield_sessions"] = (floor_yield or {}).get("sessions")
+            abacus["koban_earned"] = osaka_period_income(store, card, now=now_dt)
         cost = abacus.get("koban_cost")
         abacus["available_now"] = koban_now
         if cost is None or koban_now is None:
@@ -1315,6 +1316,35 @@ def _card_window(card: dict):
     except ValueError:
         pass
     return None, None, False
+
+
+def osaka_period_income(store, card: dict, *, now: datetime) -> int | None:
+    start, end, _ = _card_window(card)
+    if start is None or end is None or not callable(getattr(store, "_conn", None)):
+        return None
+    lower, upper = start.timestamp(), min(end.timestamp(), now.timestamp())
+    rows = store._conn().execute(
+        "SELECT e.ts, e.event_type, e.payload, r.started_at FROM events e "
+        "LEFT JOIN runs r ON r.run_id = e.run_id "
+        "WHERE e.ts >= ? AND e.ts < ? AND e.event_type IN ('resource.change', 'osaka.koban_session')",
+        (lower, upper)).fetchall()
+    receipts = []
+    sessions = []
+    for row in rows:
+        payload = json.loads(row["payload"])
+        if row["event_type"] == "resource.change":
+            if (payload.get("activity") == "osaka" and payload.get("resource") == "小判"
+                    and payload.get("attribution") == "confirmed" and (payload.get("delta") or 0) > 0):
+                receipts.append((row["ts"], payload["delta"]))
+        elif payload.get("source") == "game_rewards":
+            amount = payload.get("delta")
+            if amount is not None and amount >= 0 and row["started_at"] is not None and row["started_at"] >= lower:
+                sessions.append((row["started_at"], row["ts"], amount))
+    total = sum(amount for _, amount in receipts)
+    for started, ended, amount in sessions:
+        covered = sum(value for ts, value in receipts if started <= ts <= ended)
+        total += max(0, amount - covered)
+    return int(total) if receipts or sessions else None
 
 
 def latest_currency_total(store, card: dict, *, mechanics: str) -> dict | None:
