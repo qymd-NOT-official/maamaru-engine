@@ -1869,16 +1869,27 @@ class TelemetryStore:
             for name in left.keys() | right.keys():
                 if isinstance(left.get(name), (int, float)) and isinstance(right.get(name), (int, float)):
                     deltas[name] = right[name] - left[name]
-        koban_science = None
-        if not (before and after):
-            sci = [e["payload"] for e in events
+        sci = [e["payload"] for e in events
                    if e["event_type"] == "osaka.koban_session"
                    and (e["payload"].get("source") == "game_rewards"
                         and isinstance(e["payload"].get("delta"), (int, float))
                         or isinstance(e["payload"].get("before"), (int, float))
                         and isinstance(e["payload"].get("after"), (int, float)))]
-            if sci:
-                koban_science = sci[-1]
+        koban_science = sci[-1] if sci else None
+        if run["script"] == "osaka" and run["ended_at"] and (koban_science or {}).get("source") != "game_rewards":
+            receipts = []
+            for row in self._conn().execute(
+                    "SELECT payload FROM events WHERE ts >= ? AND ts <= ? "
+                    "AND event_type = 'resource.change' AND (run_id = ? OR (run_id IS NULL AND script = 'youzu_log'))",
+                    (run["started_at"], run["ended_at"], run_id)):
+                payload = _loads(row["payload"], {})
+                if (payload.get("activity") == "osaka" and payload.get("resource") == "小判"
+                        and payload.get("attribution") == "confirmed" and (payload.get("delta") or 0) > 0):
+                    receipts.append(payload["delta"])
+            if receipts:
+                koban_science = {"source": "game_rewards", "delta": sum(receipts), "receipts": len(receipts)}
+        if not (before and after):
+            if koban_science:
                 deltas["小判"] = (int(koban_science["delta"])
                                   if koban_science.get("source") == "game_rewards"
                                   else int(koban_science["after"]) - int(koban_science["before"]))

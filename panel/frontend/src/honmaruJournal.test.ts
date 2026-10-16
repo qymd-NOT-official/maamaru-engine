@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { buildJournalPosts } from './honmaruJournal'
+import { buildJournalPosts, runPostText } from './honmaruJournal'
+
+describe('Osaka return journal', () => {
+  const session = { source: 'game_rewards', delta: 5250, floors: 5 }
+  it('reports this run income and floors, not current balance or period income', () => {
+    const text = runPostText({ status: 'completed', koban_session: session, loops: 99, resource_delta: { 小判: 900000 } })
+    expect(text).toContain('捞到了 5,250 小判')
+    expect(text).toContain('挖了 5 层')
+    expect(text).not.toContain('900,000')
+  })
+  it.each(['failed', 'stopped'])('keeps %s runs honest while reporting confirmed rewards', status => {
+    const text = runPostText({ status, koban_session: session })
+    expect(text).toContain('已确认捞到 5,250 小判')
+    expect(text).not.toContain('回来啦')
+  })
+  it('does not invent rewards from old balance differences or missing results', () => {
+    for (const koban_session of [undefined, { before: 100, after: 1000 }, { source: 'game_rewards', delta: null }, { source: 'game_rewards', delta: -1 }]) {
+      expect(runPostText({ status: 'completed', koban_session })).not.toContain('捞到')
+    }
+    expect(runPostText({ status: 'running', koban_session: session })).not.toContain('捞到')
+  })
+  it('preserves a confirmed zero instead of treating it as missing', () => {
+    expect(runPostText({ status: 'completed', koban_session: { ...session, delta: 0 } })).toContain('0 小判')
+  })
+})
 
 const ts = Date.parse('2026-10-01T19:00:00+08:00') / 1000
 describe('honmaru journal facts', () => {

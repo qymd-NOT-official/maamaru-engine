@@ -3,6 +3,23 @@ import expeditionData from '../../../touken/data/expedition_maps.json'
 
 const expeditionMaps: Record<string, { name: string }> = expeditionData.maps
 
+export function runPostText(run: any): string {
+  const loops = Number(run.loops) || 0
+  const session = run.koban_session
+  const earned = session?.source === 'game_rewards' && Number.isSafeInteger(session.delta) && session.delta >= 0
+    ? session.delta as number : null
+  const harvest = earned == null ? '' : `已确认捞到 ${earned.toLocaleString('zh-CN')} 小判。`
+  if (run.status === 'failed') return `这趟没能顺利收工。${harvest}${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
+  if (run.status === 'stopped') return `这趟按你的意思停下了。${harvest}${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
+  if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
+  if (earned != null) {
+    const floors = Number(session.floors) || 0
+    return `大阪城这趟回来啦，捞到了 ${earned.toLocaleString('zh-CN')} 小判！${floors > 0 ? `一共挖了 ${floors} 层，收获已经记好。` : '收获已经记好。'}`
+  }
+  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在账房的记录里。`
+  return '这趟执务已经收工，完成了哪些事，可以翻开账房记录看看。'
+}
+
 export interface JournalPost {
   key: string; ts: number; title: string; text: string; label: string
   scene: string; icon: string; facts: string[]

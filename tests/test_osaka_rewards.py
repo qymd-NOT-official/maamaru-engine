@@ -162,3 +162,25 @@ def test_panel_removes_experiment_and_ignores_old_saved_switch(monkeypatch):
         yield from ()
     list(server._build_osaka(SimpleNamespace(osaka_stream=run), "unused", {"compare_resources": False}))
     assert "koban_science" not in calls[0]
+
+
+def test_return_summary_uses_synced_osaka_receipts_only_in_this_run(tmp_path):
+    store = TelemetryStore(tmp_path / "telemetry.db")
+    store.start_run("return", "osaka", started_at=100)
+    receipt = {"resource": "小判", "delta": 1050, "activity": "osaka", "attribution": "confirmed"}
+    samples = [(99, receipt), (110, receipt), (115, {**receipt, "activity": "expedition"}), (131, receipt)]
+    store._conn().executemany(
+        "INSERT INTO events(ts,run_id,script,event_type,payload) VALUES (?,NULL,'youzu_log','resource.change',?)",
+        [(stamp, json.dumps(payload)) for stamp, payload in samples])
+    store._conn().commit()
+    store.finish_run("return", "completed", ended_at=130)
+    summary = store.run_summary("return")
+    assert summary["koban_session"]["delta"] == 1050
+    assert summary["koban_session"]["source"] == "game_rewards"
+    store._conn().executemany(
+        "INSERT INTO events(ts,run_id,script,event_type,payload) VALUES (?,'return','osaka','inventory.captured',?)",
+        [(stamp, json.dumps({"phase": phase, "resources": {"小判": value}}))
+         for stamp, phase, value in [(101, "before", 10000), (129, "after", 900000)]])
+    store._conn().commit()
+    assert store.run_summary("return")["koban_session"]["delta"] == 1050
+    store.close()

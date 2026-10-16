@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
-import { buildJournalPosts } from '../honmaruJournal'
+import { buildJournalPosts, runPostText } from '../honmaruJournal'
 import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
 import PaperCard from './PaperCard.vue'
@@ -156,14 +156,6 @@ const runPostKinds: Record<string, { label: string; icon: string; scene: string 
 }
 function runPostKind(run: any) {
   return runPostKinds[String(run.script)] || { label: '本丸执务', icon: 'office.svg', scene: 'honmaru_garden_stage.png' }
-}
-function runPostText(run: any) {
-  const loops = Number(run.loops) || 0
-  if (run.status === 'failed') return `这趟没能顺利收工。${loops > 0 ? `已确认的 ${loops} 圈照常记下；` : ''}停在哪里，留在详细记录里了。`
-  if (run.status === 'stopped') return `这趟按你的意思停下了。${loops > 0 ? `已确认走完 ${loops} 圈，` : ''}后面的安排不会算作完成。`
-  if (run.status !== 'completed') return '这趟的结果还没确认，先照原样留在记录里。'
-  if (loops > 0) return `这趟确认走完 ${loops} 圈。走过的路与能核对的收获，都留在账房的记录里。`
-  return '这趟执务已经收工，完成了哪些事，可以翻开账房记录看看。'
 }
 function runPostFacts(run: any) {
   const facts: string[] = []
