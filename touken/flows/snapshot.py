@@ -246,7 +246,7 @@ class SnapshotMixin:
 
     PEEK_INTERVAL_S = 60  # 节流：一分钟最多拍一次
 
-    def quick_peek(self, tag: str = "", force: bool = False) -> bool:
+    def quick_peek(self, tag: str = "", force: bool = False, *, data_only: bool = False) -> bool:
         """
         顺路顶栏快照：游戏几乎每个画面顶部都挂着四大资源+甲州金，
         循环巡逻时顺手 OCR 一下，零导航、不打印日志，拍完合并进
@@ -255,13 +255,14 @@ class SnapshotMixin:
         60 秒节流（force=True 时绕开，用于任务收尾的刻意观察点）；
         顶栏数字读出少于 4 个就当这帧不算数。
         永不抛异常——顺手活绝不能耽误正事。
+        data_only 用于任务收尾：只合并已有游戏资源数据，不调用画面识别。
         """
         try:
             now = time.monotonic()
             if not force and now - getattr(self, "_last_peek", 0.0) < self.PEEK_INTERVAL_S:
                 return False
             known = fresh_resources(resource_facts(available_events(self.maa)))
-            tokens = [] if set(_RES_NAMES).issubset(known) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+            tokens = [] if data_only or set(_RES_NAMES).issubset(known) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
             nums = sorted(
                 ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
                 key=lambda p: p[1])

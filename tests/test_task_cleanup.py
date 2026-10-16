@@ -24,12 +24,13 @@ class FakeAgent:
         if self.nav_ok:
             self.current_location = target
 
-    def _popup_sweep(self, max_rounds=30):
+    def _popup_sweep(self, max_rounds=30, *, verify_navigation=True):
         self.sweep_calls.append(max_rounds)
+        self.verify_navigation = verify_navigation
         return True
 
-    def quick_peek(self, tag="", force=False):
-        self.peek_calls.append({"tag": tag, "force": force})
+    def quick_peek(self, tag="", force=False, *, data_only=False):
+        self.peek_calls.append({"tag": tag, "force": force, "data_only": data_only})
         return self.peek_ok
 
     def daily_stream(self, **kwargs):
@@ -45,17 +46,19 @@ def _simple_runner(msg):
 
 class TaskCleanupTests(unittest.TestCase):
     def test_cleanup_navigates_home_and_forces_peek(self):
-        """收尾成功：回本丸 + quick_peek 被强制调用。"""
+        """收尾成功：回本丸一次，只合并已有数据。"""
         agent = FakeAgent()
         wrapped = _wrap_inventory("TEST", _simple_runner("done"))
         with patch("panel.server._make_agent", return_value=agent):
             msgs = list(wrapped("config.json", {}))
 
         self.assertIn("done", msgs)
-        self.assertIn("[TEST] 收尾：已回本丸，强制拍一次顶栏", msgs)
+        self.assertIn("[TEST] 收尾：已回本丸，同步已有资源数据", msgs)
         self.assertEqual(len(agent.peek_calls), 1)
         self.assertEqual(agent.peek_calls[0]["tag"], "TEST·收尾")
         self.assertTrue(agent.peek_calls[0]["force"])
+        self.assertTrue(agent.peek_calls[0]["data_only"])
+        self.assertFalse(agent.verify_navigation)
         self.assertEqual(agent.current_location, "本丸")
 
     def test_cleanup_warns_when_not_home(self):
@@ -87,7 +90,7 @@ class TaskCleanupTests(unittest.TestCase):
         self.assertEqual(agent.peek_calls, [])
 
     def test_daily_cleanup_navigates_home_and_forces_peek(self):
-        """一键日课独立入口：跑完后同样回本丸 + 强制 peek。"""
+        """一键日课独立入口也不再拍屏或重复导航。"""
         agent = FakeAgent()
         with patch("panel.server._make_agent", return_value=agent), \
                 patch("panel.server._load_panel_settings", return_value={}), \
@@ -96,10 +99,12 @@ class TaskCleanupTests(unittest.TestCase):
             msgs = list(_build_daily_standalone("config.json", {}))
 
         self.assertIn("[日课] 跑完了", msgs)
-        self.assertIn("[日课] 收尾：已回本丸，强制拍一次顶栏", msgs)
+        self.assertIn("[日课] 收尾：已回本丸，同步已有资源数据", msgs)
         self.assertEqual(len(agent.peek_calls), 1)
         self.assertEqual(agent.peek_calls[0]["tag"], "日课·收尾")
         self.assertTrue(agent.peek_calls[0]["force"])
+        self.assertTrue(agent.peek_calls[0]["data_only"])
+        self.assertFalse(agent.verify_navigation)
         self.assertEqual(agent.current_location, "本丸")
 
     def test_daily_cleanup_warns_when_not_home(self):
@@ -141,8 +146,7 @@ class TaskCleanupTests(unittest.TestCase):
                 self.assertEqual(agent.peek_calls, [])
 
     def test_cleanup_sweeps_return_screens_before_peek(self):
-        """收尾回本丸后先点穿归来结算屏再拍照（9-04 冤案二号：远征归来
-        结算屏亮着没人收，看着像卡死，顶栏 peek 也拍歪）。"""
+        """收尾回本丸后仍处理归来结算，再合并已有资源数据。"""
         for label, build in (
                 ("单任务", lambda: _wrap_inventory("TEST", _simple_runner("done"))),
                 ("日课", lambda: _build_daily_standalone)):

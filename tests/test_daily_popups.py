@@ -130,6 +130,21 @@ class EnsureGameStartedTests(unittest.TestCase):
 
 
 class PopupSweepNewBranchTests(unittest.TestCase):
+    def test_closing_clears_returns_without_second_home_navigation(self):
+        flow = _SweepFlow("training_letter_notice")
+        flow._probe_nav_ready = unittest.mock.Mock(side_effect=AssertionError("收尾不再开目录回本丸"))
+        with patch("touken.flows.daily.time.sleep"):
+            self.assertTrue(flow._popup_sweep(max_rounds=8, verify_navigation=False))
+        flow._probe_nav_ready.assert_not_called()
+        self.assertEqual(flow.maa.clicks, [(993, 690)] * 4)
+
+    def test_login_still_checks_navigation_by_default(self):
+        flow = _SweepFlow("home")
+        flow._probe_nav_ready = unittest.mock.Mock(return_value=True)
+        with patch("touken.flows.daily.time.sleep"):
+            self.assertTrue(flow._popup_sweep(max_rounds=4))
+        flow._probe_nav_ready.assert_called_once()
+
     def test_signin_calendar_is_claimed_once_then_home(self):
         flow = _SweepFlow("signin")
         with patch("touken.flows.daily.time.sleep"):

@@ -178,6 +178,27 @@ def test_complete_snapshot_needs_no_navigation_screen_or_menu(monkeypatch,tmp_pa
     assert host._read_koban()==77
 
 
+@pytest.mark.parametrize("has_data", [True, False])
+def test_closing_resource_sync_never_falls_back_to_ocr(monkeypatch, tmp_path, has_data):
+    from touken.flows import snapshot as module
+    host = SnapshotMixin()
+    host.maa = Mock()
+    host.maa.ocr_all.side_effect = AssertionError("收尾不再读顶栏")
+    host.maa.screenshot.side_effect = AssertionError("收尾资源同步不拍屏")
+    monkeypatch.setattr(module, "_STATUS_DIR", tmp_path)
+    partial = event("/sally", {"status": 0, "currency": {"money": 77}})
+    monkeypatch.setattr(module, "available_events", lambda _: [partial] if has_data else [])
+    monkeypatch.setattr(gs.time, "time", lambda: 1001)
+    assert host.quick_peek(force=True, data_only=True) is has_data
+    host.maa.ocr_all.assert_not_called()
+    host.maa.screenshot.assert_not_called()
+    if has_data:
+        saved = json.loads((tmp_path / "inventory.json").read_text(encoding="utf-8"))
+        assert saved["resources"] == {"小判": 77}
+    else:
+        assert not (tmp_path / "inventory.json").exists()
+
+
 def test_partial_snapshot_keeps_json_and_unreadable_furnaces_unknown(monkeypatch,tmp_path):
     from touken.flows import snapshot as module
     host=SnapshotMixin()

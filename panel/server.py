@@ -297,25 +297,19 @@ def _sword_names(raw) -> list[str]:
 # 整体归因）。builder 本体签名统一：(agent, config_path, params) -> generator。
 
 def _sweep_return_screens(agent, tag):
-    """回本丸后点穿归来结算屏（远征/内番/修行），别让它们挡着收尾拍照。
-
-    9-04 冤案二号：远征队中途归来，结算屏要等回本丸才弹；收尾只导航不点屏，
-    屏就亮在那儿没人收——看着像卡死，顶栏 peek 也拍歪。扫地复用日课登录
-    同款的 _popup_sweep（结算屏/弹窗是同一类东西），限定轮数防磨蹭，
-    扫不动也不拖垮收尾。
-    """
+    """回本丸后点穿归来结算屏；任务已结束，不再验证下一步导航。"""
     sweep = getattr(agent, "_popup_sweep", None)
     if sweep is None:
         return
     try:
         yield f"[{tag}] 收尾：扫一遍归来结算屏"
-        sweep(max_rounds=6)
+        sweep(max_rounds=6, verify_navigation=False)
     except Exception as exc:
         yield f"[{tag}] ⚠️ 收尾扫地失败（不影响任务结果）：{exc}"
 
 
 def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
-    """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 必做的回本丸 + 强制 peek。
+    """给玩法脚本套统一收尾：库存盘点（默认关闭）+ 回本丸 + 合并已有资源数据。
 
     为什么盘点默认关了：完整快照融进了锻刀收工（零额外导航），顶栏五资源靠
     各循环 quick_peek 顺路更新（60s 节流），挖地小判由 osaka_stream
@@ -326,8 +320,8 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
       会穿过 try/finally，finally 里照样补拍；紧急停止/看门狗是 kill，子进程
       没机会，由面板 has_after_snapshot=False 提示缺收工快照）。
     - 盘点失败绝不拖垮任务：before/after 各自 try，坏了只打日志继续。
-    - 收尾回本丸 + 强制顶栏 peek：与 inventory 开关无关，每个任务跑完都执行。
-      这是资源总账的固定“跑完了”观察点；若没能回到本丸，则作为故障信号上报。
+    - 收尾回本丸后合并已有游戏资源数据，不专门拍屏；与 inventory 开关无关。
+      若没能回到本丸，则作为故障信号上报。
       收尾失败同样不拖垮任务结果。
     """
     def _fn(config_path, params):
@@ -362,18 +356,15 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
                     yield from agent.status_snapshot_stream(phase="after")
                 except Exception as exc:
                     yield f"[{tag}] ⚠️ 收工盘点失败（不影响任务结果）：{exc}"
-            # --- 新收尾：每个任务跑完都导航回本丸，并强制拍一次顶栏 peek ---
-            # 这是固定观察点：给资源总账一个“跑完了”的锚点；如果没回到本丸，
-            # 多半是卡在某个界面了，作为故障信号上报。
             try:
                 yield f"[{tag}] 收尾：导航回本丸"
                 for nav_msg in agent.navigate_to_stream("本丸"):
                     yield nav_msg
                 if getattr(agent, "current_location", None) == "本丸":
                     yield from _sweep_return_screens(agent, tag)
-                    yield f"[{tag}] 收尾：已回本丸，强制拍一次顶栏"
+                    yield f"[{tag}] 收尾：已回本丸，同步已有资源数据"
                     if hasattr(agent, "quick_peek"):
-                        agent.quick_peek(tag=f"{tag}·收尾", force=True)
+                        agent.quick_peek(tag=f"{tag}·收尾", force=True, data_only=True)
                 else:
                     yield (f"[{tag}] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
                            "去看看")
@@ -545,16 +536,15 @@ def _build_daily_standalone(config_path, params):
         if after != "none":
             yield f"[日课] 已安排「{after}」下班，跳过收尾回本丸"
         else:
-            # --- 统一收尾：回本丸 + 强制顶栏 peek ---
             try:
                 yield "[日课] 收尾：导航回本丸"
                 for nav_msg in agent.navigate_to_stream("本丸"):
                     yield nav_msg
                 if getattr(agent, "current_location", None) == "本丸":
                     yield from _sweep_return_screens(agent, "日课")
-                    yield "[日课] 收尾：已回本丸，强制拍一次顶栏"
+                    yield "[日课] 收尾：已回本丸，同步已有资源数据"
                     if hasattr(agent, "quick_peek"):
-                        agent.quick_peek(tag="日课·收尾", force=True)
+                        agent.quick_peek(tag="日课·收尾", force=True, data_only=True)
                 else:
                     yield ("[日课] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
                            "去看看")

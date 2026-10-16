@@ -679,11 +679,12 @@ class DailyMixin:
 
     # ========== 登录后弹窗扫地 ==========
 
-    def _popup_sweep(self, max_rounds: int = 30) -> bool:
+    def _popup_sweep(self, max_rounds: int = 30, *, verify_navigation: bool = True) -> bool:
         """
         边等本丸边扫地：登录后本丸不安静——特别登录礼物/公告弹窗要关 X，
         远征归来/内番结束/修行结束的结算动画和对话要点点点往前推。
         连续 2 轮看到目录按钮且没弹窗可关、没动画在演，才算真正落地。
+        verify_navigation=False 仅用于任务收尾，不再开目录验证后续导航。
 
         Returns:
             是否到达本丸
@@ -802,7 +803,7 @@ class DailyMixin:
                     # 看着到本丸了还不算数——15:00 实测翻车教训：结算动画余波里
                     # 目录按钮看得见但点了没反应，连环导航失败。必须真开一次目录
                     # 验证界面稳了，顺手回本体本丸，才算落地。
-                    if self._probe_nav_ready():
+                    if not verify_navigation or self._probe_nav_ready():
                         return True
                     clean = 0
             else:

@@ -768,7 +768,7 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
         report.append(("下班", detail or ("✓" if ok else "✗")))
         game_closed = ok
 
-    # 收尾（整个 run 只此一次）：回本丸 + 强制顶栏 peek。
+    # 收尾（整个 run 只此一次）：回本丸 + 合并已有资源数据。
     # 中间节点不套 run 级盘点/收尾，避免每块都磨叽一遍（日课同款约定）。
     if game_closed:
         yield "【工作流】已执行下班积木，游戏已关，跳过收尾回本丸"
@@ -778,18 +778,16 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             for nav_msg in agent.navigate_to_stream("本丸"):
                 yield nav_msg
             if getattr(agent, "current_location", None) == "本丸":
-                # 回本丸后点穿归来结算屏（远征/内番/修行），别让它们挡着
-                # 收尾拍照——9-04 冤案二号：屏亮着没人收，看着像卡死。
                 sweep = getattr(agent, "_popup_sweep", None)
                 if sweep is not None:
                     try:
                         yield "【工作流】收尾：扫一遍归来结算屏"
-                        sweep(max_rounds=6)
+                        sweep(max_rounds=6, verify_navigation=False)
                     except Exception as exc:
                         yield f"【工作流】⚠️ 收尾扫地失败（不影响成绩单）: {exc}"
-                yield "【工作流】收尾：已回本丸，强制拍一次顶栏"
+                yield "【工作流】收尾：已回本丸，同步已有资源数据"
                 if hasattr(agent, "quick_peek"):
-                    agent.quick_peek(tag="工作流·收尾", force=True)
+                    agent.quick_peek(tag="工作流·收尾", force=True, data_only=True)
             else:
                 yield "【工作流】⚠️ 收尾没能回到本丸，可能卡在某个界面了，去看看"
         except Exception as exc:

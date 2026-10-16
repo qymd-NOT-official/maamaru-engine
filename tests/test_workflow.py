@@ -66,8 +66,8 @@ class _FakeAgent:
         self.calls.append(("login", (), {}))
         return True
 
-    def _popup_sweep(self, max_rounds=30):
-        self.calls.append(("_popup_sweep", (), {"max_rounds": max_rounds}))
+    def _popup_sweep(self, max_rounds=30, *, verify_navigation=True):
+        self.calls.append(("_popup_sweep", (), {"max_rounds": max_rounds, "verify_navigation": verify_navigation}))
         return True
 
     def _daily_update_gate(self):
@@ -514,15 +514,15 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertTrue(any(c[0] == "quick_peek" for c in agent.calls))
 
     def test_closing_sweeps_return_screens_before_peek(self):
-        """收尾回本丸后先点穿归来结算屏再拍照（9-04 冤案二号：
-        远征归来结算屏亮着没人收，看着像卡死，peek 也拍歪）。"""
+        """收尾处理归来结算，不重复导航，随后只同步已有数据。"""
         agent = _FakeAgent()
         messages, agent, _ = self._run([_node("signin")], agent)
         self.assertTrue(any("扫一遍归来结算屏" in m for m in messages))
         sweep = [c for c in agent.calls if c[0] == "_popup_sweep"]
         peek = [c for c in agent.calls if c[0] == "quick_peek"]
         self.assertTrue(sweep and peek)
-        # 扫地必须在拍照之前
+        self.assertFalse(sweep[-1][2]["verify_navigation"])
+        self.assertTrue(peek[-1][2]["data_only"])
         order = [c[0] for c in agent.calls]
         self.assertLess(max(i for i, n in enumerate(order) if n == "_popup_sweep"),
                         min(i for i, n in enumerate(order) if n == "quick_peek"))
