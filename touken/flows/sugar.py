@@ -284,10 +284,11 @@ class SugarMixin:
             boundary = begin_operation(self.maa)
             self.maa.click(Point(785, 630))
 
-            outcome = confirm_operation(self.maa, boundary, "union")
+            outcome = confirm_operation(self.maa, boundary, "union", timeout=8.0)
             if outcome is not True:
                 reason = ("未确认习合结果，停止操作，不再重复消耗素材"
                           if outcome is None else "游戏拒绝本次习合，停止操作")
+                yield f"[炼糖·习合] {reason}"
                 raise FlowAborted(f"炼糖：{reason}")
             stalled = 0
             successes += 1

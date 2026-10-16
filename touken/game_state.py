@@ -253,16 +253,21 @@ def begin_operation(maa):
 
 
 def operation_result(events, boundary, operation, serial=None):
-    """True=confirmed, False=rejected, None=unknown; a click alone is never success."""
+    """Confirm new paired requests against the pre-click snapshot, independent of clocks.
+
+    Without a complete request snapshot, retain the conservative time boundary.
+    True=confirmed, False=rejected, None=unknown; a click alone is never success.
+    """
     endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many",
                 "forge": "/forge/startmultiple", "forge_ten": "/forge/fastmultiple",
                 "compose": "/composition/compose", "task_rewards": "/mission/rewards",
                 "free_gift": "/shop/buy", "duty": "/duty/start"}.get(operation)
     pending = []
     outcome = None
+    snapshot_boundary = operation != "repair" and boundary.get("request_snapshot") is True
     for event in events:
         at = youzu_log._event_epoch(event)
-        if at is None or at < boundary["after"]:
+        if not snapshot_boundary and (at is None or at < boundary["after"]):
             continue
         if operation == "repair":
             body = successful_body(event)
@@ -363,13 +368,21 @@ def operation_result(events, boundary, operation, serial=None):
     return outcome
 
 
-def confirm_operation(maa, boundary, operation, serial=None):
+def confirm_operation(maa, boundary, operation, serial=None, *, timeout=0.0):
     if not getattr(maa, "adb_address", None):
         return None
-    try:
-        return operation_result(read_events(maa.adb_path, maa.adb_address), boundary, operation, serial)
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        return None
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        try:
+            outcome = operation_result(read_events(maa.adb_path, maa.adb_address), boundary, operation, serial)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            outcome = None
+        if outcome is not None:
+            return outcome
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(0.5, remaining))
 
 
 def forge_capacity(events, *, now=None):

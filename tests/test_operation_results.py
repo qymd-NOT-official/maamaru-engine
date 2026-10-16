@@ -42,6 +42,105 @@ def test_overlapping_requests_are_not_guessed():
     assert game_state.operation_result([request, request, response], boundary(), "union") is None
 
 
+@pytest.mark.parametrize("kind,endpoint,params", [
+    ("union", "/composition/union", {"base_serial_id": "111", "material_serial_id": "222"}),
+    ("dismantle", "/sword/dismantle_many", {"serial_ids": "222"}),
+])
+@pytest.mark.parametrize("request_at,response_at", [(999, 1002), (998, 999), (1001, 1002)])
+def test_pre_click_request_snapshot_tolerates_clock_skew(kind, endpoint, params, request_at, response_at):
+    request = event(endpoint, "C->S", params, at=request_at)
+    response = event(endpoint, "S->C", {"status": 0}, at=response_at)
+    token = {**boundary(), "request_snapshot": True}
+    assert game_state.operation_result([request, response], token, kind) is True
+    token["requests"].add(game_state._request_key(request))
+    assert game_state.operation_result([request, response], token, kind) is None
+    assert game_state.operation_result([response], token, kind) is None
+
+
+def test_clock_skew_without_pre_click_snapshot_stays_unknown():
+    request = event("/composition/union", "C->S", {"base_serial_id": "111", "material_serial_id": "222"}, at=999)
+    response = event("/composition/union", "S->C", {"status": 0}, at=1002)
+    assert game_state.operation_result([request, response], boundary(), "union") is None
+
+
+def test_union_real_device_time_and_server_time_are_not_compared_to_host_clock():
+    request = {"ts": "2026-10-16 11:55:12", "direction": "C->S", "endpoint": "/composition/union",
+               "payload": {"base_serial_id": "111", "material_serial_id": "222,333"}}
+    response = {"ts": "2026-10-16 11:55:12", "direction": "S->C", "endpoint": "/composition/union",
+                "status": 200, "payload": {"status": 0, "now_time": 1792122915, "sword": {"serial_id": "111"}}}
+    token = {**boundary(), "after": 1792122913, "request_snapshot": True}
+    assert game_state.operation_result([request, response], token, "union") is True
+    token["request_snapshot"] = False
+    assert game_state.operation_result([request, response], token, "union") is None
+
+
+def test_snapshot_does_not_bypass_ambiguity_rejection_or_instance_check():
+    request = event("/composition/union", "C->S", {"base_serial_id": "111", "material_serial_id": "222"}, at=999)
+    response = event("/composition/union", "S->C", {"status": 0}, at=999)
+    token = {**boundary(), "request_snapshot": True}
+    assert game_state.operation_result([request, request, response], token, "union") is None
+    response["payload"]["status"] = 1
+    assert game_state.operation_result([request, response], token, "union") is False
+    response["payload"].update(status=0, sword={"serial_id": "333"})
+    assert game_state.operation_result([request, response], token, "union") is None
+
+
+def test_confirm_operation_waits_for_late_response_without_clicking(monkeypatch):
+    request = event("/composition/union", "C->S", {"base_serial_id": "111", "material_serial_id": "222"})
+    response = event("/composition/union", "S->C", {"status": 0})
+    reader = Mock(side_effect=[[request], [request, response]])
+    monkeypatch.setattr(game_state, "read_events", reader)
+    monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
+    maa = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
+    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is True
+    assert reader.call_count == 2
+    maa.click.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_confirm_operation_stops_waiting_after_definite_result(monkeypatch, status):
+    request = event("/composition/union", "C->S", {"base_serial_id": "111", "material_serial_id": "222"})
+    response = event("/composition/union", "S->C", {"status": status})
+    reader = Mock(return_value=[request, response])
+    monkeypatch.setattr(game_state, "read_events", reader)
+    maa = SimpleNamespace(adb_path="adb", adb_address="addr")
+    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is (status == 0)
+    assert reader.call_count == 1
+
+
+def test_confirm_operation_timeout_stays_unknown(monkeypatch):
+    reader = Mock(return_value=[])
+    monkeypatch.setattr(game_state, "read_events", reader)
+    monkeypatch.setattr(game_state.time, "monotonic", Mock(side_effect=[0, 1, 9]))
+    monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
+    maa = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
+    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is None
+    assert reader.call_count == 2
+    maa.click.assert_not_called()
+
+
+def test_sugar_continues_multiple_feeds_with_real_confirmation_and_skewed_clock(monkeypatch):
+    from test_sugar_flow import Flow
+    flow = Flow()
+    flow.maa.adb_path = "adb"
+    flow.maa.adb_address = "addr"
+    monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
+    monkeypatch.setattr(game_state.time, "time", lambda: 1000)
+    def read_events(*args):
+        events = []
+        for index in range(flow.maa.feeds):
+            request = {"ts": "1970-01-01 08:16:39", "direction": "C->S", "endpoint": "/composition/union",
+                       "payload": {"base_serial_id": "111", "material_serial_id": str(222 + index)}}
+            response = event("/composition/union", "S->C", {"status": 0}, at=1002)
+            events.extend([request, response])
+        return events
+    monkeypatch.setattr(game_state, "read_events", read_events)
+    messages = list(flow._shugo_loop_stream(False))
+    assert flow.maa.feeds == 3
+    assert sum("完成第" in message for message in messages) == 3
+    assert "炼了 3 轮" in messages[-1]
+
+
 def test_returned_union_instance_must_match_request():
     request = event("/composition/union", "C->S", {"base_serial_id": "111", "material_serial_id": "222"})
     response = event("/composition/union", "S->C", {"status": 0, "sword": {"serial_id": "333"}})
