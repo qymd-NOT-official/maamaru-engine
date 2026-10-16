@@ -118,22 +118,35 @@ class SugarMixin:
             return "dry"
 
         # 筛选（收刀还是收杂物看 filter_mode）→ 确定
+        from ..game_state import begin_operation, confirm_operation
+        boundary = begin_operation(self.maa)
         self._apply_inbox_filter(filter_mode)
+        listed = confirm_operation(self.maa, boundary, "inbox_list", timeout=2.0)
+        selected = boundary.get("result_filter", "")
+        matching_filter = selected == "2" if filter_mode == "swords" else bool(selected) and "2" not in selected.split(",")
+        entries = boundary.get("result_body", {}).get("receive") if listed is True and matching_filter else None
+        if entries is not None and not entries:
+            yield "[炼糖·收件箱] 当前筛选下没有待领邮件，收工"
+            self.maa.click(Point(1248, 32))
+            time.sleep(1.0)
+            return "empty"
 
-        # 一键领取（灰的配不上模板，空箱不点）
         self.maa.screenshot(force=True)
         go = self.maa.template_match(
             "收件箱一键领取.png",
             roi_4to4(1080, 540, 1275, 700), threshold=0.7)
         if not go:
-            yield "[炼糖·收件箱] 没有能领的（空箱或全灰），跳过"
+            if entries is None:
+                raise FlowAborted("收件箱：未确认邮件为空，也没找到可领取按钮，停止操作")
+            yield "[炼糖·收件箱] 还有待领邮件，但当前无法领取"
             self.maa.click(Point(1248, 32))  # 收箱子
             time.sleep(1.0)
-            return "empty"
+            return "blocked"
+        claim_boundary = begin_operation(self.maa)
         self.maa.click(go)
         time.sleep(2.5)
 
-        result = "claimed"
+        result = None
 
         # 奖励确认窗 → 关 X
         self.maa.screenshot(force=True)
@@ -141,6 +154,7 @@ class SugarMixin:
             self.maa.click(Point(1144, 48))
             time.sleep(1.5)
             yield "[炼糖·收件箱] 领了一批，奖励确认已关"
+            result = "claimed"
 
         # 可能蹦购买详情（劝氪金）→ 关 X
         self.maa.screenshot(force=True)
@@ -149,6 +163,14 @@ class SugarMixin:
             time.sleep(1.5)
             yield "[炼糖·收件箱] 所持满了蹦氪金窗，已关（领不动的先躺箱里）"
             result = "blocked"
+
+        if result is None:
+            claimed = confirm_operation(self.maa, claim_boundary, "inbox_claim", timeout=2.0)
+            if claimed is True:
+                yield "[炼糖·收件箱] 游戏已确认领取邮件"
+                result = "claimed"
+            else:
+                raise FlowAborted("收件箱：点击领取后未确认领到邮件，停止操作，不再反复往返")
 
         # 收箱子
         self.maa.click(Point(1248, 32))

@@ -261,7 +261,8 @@ def operation_result(events, boundary, operation, serial=None):
     endpoint = {"union": "/composition/union", "dismantle": "/sword/dismantle_many",
                 "forge": "/forge/startmultiple", "forge_ten": "/forge/fastmultiple",
                 "compose": "/composition/compose", "task_rewards": "/mission/rewards",
-                "free_gift": "/shop/buy", "duty": "/duty/start"}.get(operation)
+                "free_gift": "/shop/buy", "duty": "/duty/start",
+                "inbox_list": "/receive/list", "inbox_claim": "/receive/get"}.get(operation)
     pending = []
     outcome = None
     snapshot_boundary = operation != "repair" and boundary.get("request_snapshot") is True
@@ -302,6 +303,20 @@ def operation_result(events, boundary, operation, serial=None):
             continue
         request = pending.pop()
         params = request.get("payload") or {}
+        if operation in ("inbox_list", "inbox_claim"):
+            body = successful_body(event)
+            if body is not None:
+                boundary["result_body"] = body
+                boundary["result_filter"] = str(params.get("item_type", ""))
+                if operation == "inbox_list":
+                    outcome = isinstance(body.get("receive"), (dict, list))
+                else:
+                    ids = body.get("serial_ids")
+                    outcome = bool(ids) if isinstance(ids, (list, str)) else None
+            elif (event.get("status", 0) >= 400 or isinstance(event.get("payload"), dict)
+                  and "status" in event["payload"] and str(event["payload"]["status"]) != "0"):
+                outcome = False
+            continue
         if operation in ("task_rewards", "free_gift", "duty"):
             body = successful_body(event)
             if operation == "task_rewards" and not params.get("category"):
