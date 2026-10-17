@@ -92,7 +92,9 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
         host.repair_stream = repair
         host._click_depart = Mock(return_value=False)
-        _run(host, auto_march=False, injury_action="continue")
+        with patch("touken.injury_recovery.current_team_injury",
+                   side_effect=[(True, "中伤"), (True, None)]):
+            _run(host, auto_march=False, injury_action="continue")
         self.assertEqual(calls, [{"dry_run": False, "use_speedup": None, "speedup_teams": [3]}])
         host._click_depart.assert_called_once()
         self.assertEqual(host._combined_injury_status.call_count, 2)
@@ -136,10 +138,11 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
         host.repair_stream = repair
         host._click_depart = Mock()
-        logs = _run(host, auto_march=False)
-        self.assertEqual(len(repairs), 2)
+        with patch("touken.injury_recovery.current_team_injury", return_value=(True, "中伤")):
+            logs = _run(host, auto_march=False)
+        self.assertEqual(len(repairs), 1)
         host._click_depart.assert_not_called()
-        self.assertTrue(any("手入后仍检测到伤势" in msg for msg in logs))
+        self.assertTrue(any("不再往返重试" in msg for msg in logs))
 
     def test_retreat_forces_manual_march(self):
         # 面板只是隐藏开关不是清空：retreat=true 和 auto_march=true 可能同时

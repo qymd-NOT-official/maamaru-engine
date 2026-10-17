@@ -25,6 +25,7 @@ import time
 from .. import sword_db
 from ..maa_adapter import roi_4to4
 from .battle import find_deploy_button
+from ..injury_recovery import RecoveryProgress, recover_injury_stream
 from ..map_read import CV2_AVAILABLE, boss_distance_from_image
 
 
@@ -194,7 +195,6 @@ class SortieMixin:
             return
 
         loop_no = 1
-        repair_attempts = 0
         map_page_ready = False
         record_saved = False
         self._map_miss_count = 0
@@ -368,32 +368,12 @@ class SortieMixin:
             if not ok and not injury:
                 return
             if injury:
-                must_repair = injury == "重伤"
-                action = str(injury_action or "continue")
-                if action in ("true", "1"):
-                    action = "continue"
-                elif action in ("false", "0"):
-                    action = "stop"
-                if not must_repair and action == "stop":
-                    yield f"[出阵] 检测到部队{team_no}{injury}；自动手入已关闭，本次收工"
-                    return
-                # 重伤必须尝试手入；即便用户选择“不手入”，也改为普通手入后收工。
-                repair_and_stop = action == "repair_stop" or (must_repair and action == "stop")
-                suffix = "，不用加速符，手入后收工" if repair_and_stop else "，转去手入后重试本圈"
-                yield f"[出阵] 检测到部队{team_no}{injury}{suffix}"
-                for repair_msg in self.repair_stream(
-                        dry_run=False,
-                        use_speedup=False if repair_and_stop else None,
-                        # 继续原定出阵时，本次出阵队必须即时修好；
-                        # 手入列表里的其他队仍会送修，但不会使用加速符。
-                        speedup_teams=None if repair_and_stop else [team_no]):
-                    yield repair_msg
-                if repair_and_stop:
-                    yield "[出阵] 已安排手入（黑名单已跳过、未使用加速符），本次收工"
-                    return
-                repair_attempts += 1
-                if repair_attempts >= 2:
-                    yield "[出阵] 手入后仍检测到伤势（可能是黑名单或未加速成员），停止"
+                recovery = yield from recover_injury_stream(
+                    self, team_no=team_no, injury=injury,
+                    threshold=repair_threshold, action=injury_action,
+                    progress=RecoveryProgress(max_loops, loop_no - 1),
+                    tag="[出阵]", repair_heavy_on_stop=True)
+                if not recovery.resume:
                     return
                 continue
 
@@ -634,7 +614,6 @@ class SortieMixin:
                     yield f"[出阵] ✓ 第 {loop_no} 圈凯旋！已回本丸"
                     self.current_location = "本丸"
                 end_loop("sortie.completed", "completed")
-                repair_attempts = 0
                 if cfg_key == "yosari":
                     inv = self._read_yosari_fragments(cfg)
                     if inv == "stuck":
@@ -668,7 +647,6 @@ class SortieMixin:
                 yield f"[出阵] ✓ 第 {loop_no} 圈王点前撤退完成，已回本丸"
                 self.current_location = "本丸"
                 end_loop("sortie.retreated_before_boss", "retreated_before_boss")
-                repair_attempts = 0
                 loop_no += 1
             else:
                 end_loop("sortie.interrupted", "unknown",

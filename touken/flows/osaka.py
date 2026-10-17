@@ -7,6 +7,7 @@ import time
 from ..maa_adapter import roi_4to4
 from ..game_state import available_events, successful_body, _request_key
 from .. import youzu_log
+from ..injury_recovery import RecoveryProgress, recover_injury_stream
 
 
 def koban_reward_summary(events, known_requests):
@@ -164,12 +165,43 @@ class OsakaMixin:
             yield "[挖地] 部队选择界面没打开"
             return
 
+        def recover_and_resume(injury, completed):
+            nonlocal _repair_count, _speedups_used
+            recovery = yield from recover_injury_stream(
+                self, team_no=team_no, injury=injury,
+                threshold=repair_threshold, action=injury_action,
+                progress=RecoveryProgress(_target_floors, completed), tag="[挖地]")
+            if recovery.attempted:
+                _repair_count += 1
+                _speedups_used += recovery.speedups
+                if hasattr(self, "record_event"):
+                    self.record_event("repair.session_completed", source="osaka",
+                        repaired=recovery.repaired, speedups=recovery.speedups,
+                        session_count=_repair_count)
+                yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {recovery.repaired} 把，"
+                       f"使用加速符 {recovery.speedups} 个；累计使用 {_speedups_used} 个")
+            if not recovery.resume:
+                return
+            yield f"[挖地] 当前总进度 {completed}/{_target_floors}，继续剩余 {recovery.remaining} 层"
+            yield from self.osaka_stream(
+                max_floors=recovery.remaining, team_no=team_no,
+                select_floor=select_floor, target_floor=target_floor,
+                formation_mode=formation_mode, formation=formation,
+                repair_threshold=repair_threshold, injury_action=injury_action,
+                auto_equip=auto_equip, _target_floors=_target_floors,
+                _completed_floors=completed, _repair_count=_repair_count,
+                _speedups_used=_speedups_used, _team_record_saved=_team_record_saved,
+                _auto_equip_active=_auto_equip_active)
+
+        departure_state = {}
         ok, _team_record_saved = yield from self._safe_depart_stream(
             cfg, team_no, "[挖地]",
             repair_threshold=repair_threshold,
             auto_equip=_auto_equip_active,
-            team_record_saved=_team_record_saved)
+            team_record_saved=_team_record_saved, departure_state=departure_state)
         if not ok:
+            if departure_state.get("blocked_injury"):
+                yield from recover_and_resume(departure_state["blocked_injury"], _completed_floors)
             return
 
         # 大阪城没有手形，也没有自动行军；即刻出阵后只有普通二次确认。
@@ -332,52 +364,7 @@ class OsakaMixin:
                         yield "[挖地] 🚩 远征排班请求接管：不开新层，安全收工"
                         return
 
-                    action = str(injury_action or "continue")
-                    if action == "stop":
-                        yield "[挖地] 按设置只返回本丸，不进行手入，收工"
-                        return
-                    repair_and_stop = action == "repair_stop"
-                    yield ("[挖地] 开始手入，完成后收工" if repair_and_stop
-                           else "[挖地] 开始手入并加速当前部队，之后继续剩余层数")
-                    for repair_msg in self.repair_stream(
-                            dry_run=False,
-                            use_speedup=False if repair_and_stop else None,
-                            speedup_teams=None if repair_and_stop else [team_no]):
-                        yield repair_msg
-                    stats = getattr(self, "last_repair_stats", {})
-                    repaired = int(stats.get("repaired", 0))
-                    speedups = int(stats.get("speedups", 0))
-                    _repair_count += 1
-                    _speedups_used += speedups
-                    if hasattr(self, "record_event"):
-                        self.record_event("repair.session_completed", source="osaka",
-                                          repaired=repaired, speedups=speedups,
-                                          session_count=_repair_count)
-                    yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
-                           f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
-                    if repair_and_stop:
-                        yield "[挖地] 手入已安排，收工"
-                        return
-                    remaining = _target_floors - total_completed
-                    yield (f"[挖地] 手入结束，当前总进度 {total_completed}/{_target_floors}，"
-                           f"继续剩余 {remaining} 层")
-                    yield from self.osaka_stream(
-                        max_floors=remaining,
-                        team_no=team_no,
-                        select_floor=select_floor,
-                        target_floor=target_floor,
-                        formation_mode=formation_mode,
-                            formation=formation,
-                        repair_threshold=repair_threshold,
-                        injury_action=injury_action,
-                        auto_equip=auto_equip,
-                        _target_floors=_target_floors,
-                        _completed_floors=total_completed,
-                        _repair_count=_repair_count,
-                        _speedups_used=_speedups_used,
-                        _team_record_saved=_team_record_saved,
-                        _auto_equip_active=_auto_equip_active,
-                    )
+                    yield from recover_and_resume(injury, total_completed)
                     return
                 march = self._wait_for_osaka_march(cfg)
                 if not march:
@@ -429,53 +416,7 @@ class OsakaMixin:
                         return
                     self.current_location = "本丸"
                     yield "[挖地] ✓ 已安全返回本丸"
-                    action = str(injury_action or "continue")
-                    if action == "stop":
-                        yield "[挖地] 按设置不进行手入，收工"
-                        return
-                    repair_and_stop = action == "repair_stop"
-                    yield ("[挖地] 开始手入，完成后收工" if repair_and_stop
-                           else "[挖地] 开始手入并加速当前部队，之后继续剩余层数")
-                    for repair_msg in self.repair_stream(
-                            dry_run=False,
-                            use_speedup=False if repair_and_stop else None,
-                            speedup_teams=None if repair_and_stop else [team_no]):
-                        yield repair_msg
-                    stats = getattr(self, "last_repair_stats", {})
-                    repaired = int(stats.get("repaired", 0))
-                    speedups = int(stats.get("speedups", 0))
-                    _repair_count += 1
-                    _speedups_used += speedups
-                    if hasattr(self, "record_event"):
-                        self.record_event("repair.session_completed", source="osaka",
-                                          repaired=repaired, speedups=speedups,
-                                          session_count=_repair_count)
-                    yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {repaired} 把，"
-                           f"使用加速符 {speedups} 个；累计使用 {_speedups_used} 个")
-                    if repair_and_stop:
-                        yield "[挖地] 手入已安排，收工"
-                        return
-                    total_completed = _completed_floors + floors
-                    remaining = _target_floors - total_completed
-                    yield (f"[挖地] 手入结束，当前总进度 {total_completed}/{_target_floors}，"
-                           f"继续剩余 {remaining} 层")
-                    yield from self.osaka_stream(
-                        max_floors=remaining,
-                        team_no=team_no,
-                        select_floor=select_floor,
-                        target_floor=target_floor,
-                        formation_mode=formation_mode,
-                            formation=formation,
-                        repair_threshold=repair_threshold,
-                        injury_action=injury_action,
-                        auto_equip=auto_equip,
-                        _target_floors=_target_floors,
-                        _completed_floors=total_completed,
-                        _repair_count=_repair_count,
-                        _speedups_used=_speedups_used,
-                        _team_record_saved=_team_record_saved,
-                        _auto_equip_active=_auto_equip_active,
-                    )
+                    yield from recover_and_resume(field_injury, _completed_floors + floors)
                     return
                 yield "[挖地] 行军，继续向下挖"
                 self.maa.click(march)
