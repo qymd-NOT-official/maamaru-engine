@@ -671,7 +671,7 @@ class YosariRouteTests(unittest.TestCase):
                 return messages, done.value
 
     def test_yosari_reuses_the_map_sortie_pipeline(self):
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             def _map_sortie_stream(self, **kwargs):
                 self.route = kwargs
                 yield "route"
@@ -685,7 +685,7 @@ class YosariRouteTests(unittest.TestCase):
         self.assertEqual(flow.route["team_no"], 2)
 
     def test_round_ends_only_when_title_and_team_button_are_both_visible(self):
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             pass
 
         cfg = {
@@ -703,7 +703,7 @@ class YosariRouteTests(unittest.TestCase):
         self.assertFalse(flow._yosari_round_done(cfg))
 
     def test_manual_march_uses_the_button_template_not_partial_ocr(self):
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             pass
 
         button = Point(1146, 617)
@@ -723,7 +723,7 @@ class YosariRouteTests(unittest.TestCase):
             def ocr_all(self, roi):
                 return next(self.balance_reads, [])
 
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             def __init__(self):
                 self.maa = Maa()
                 self.points = []
@@ -750,7 +750,7 @@ class YosariRouteTests(unittest.TestCase):
         self.assertEqual(resource_event["attribution"], "confirmed")
 
     def test_yosari_refill_records_fact_without_guessing_unreadable_koban(self):
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             def __init__(self):
                 self.maa = FakeMaa(ocr_results=[True, True, True, True])
                 self.points = []
@@ -772,7 +772,7 @@ class YosariRouteTests(unittest.TestCase):
         self.assertIn("[异去] 归城提灯补充完成；小判金额未识别，已回到部队选择", messages)
 
     def test_yosari_refill_off_closes_before_spending_koban(self):
-        class Route(SortieMixin):
+        class Route(SortieMixin, BattleMixin):
             def __init__(self):
                 self.maa = FakeMaa(ocr_results=[True, True])
                 self.points = []
@@ -1064,6 +1064,67 @@ class _RecoverDepartHost(_SafeDepartHost):
 
 class SafeDepartChainTests(unittest.TestCase):
     """选队→伤势→刀装→重伤拦截的编排语义：各玩法只准调用，不准手搓。"""
+
+    def test_preparation_failure_never_clicks_depart(self):
+        host = _SafeDepartHost()
+        host._click_depart = Mock()
+
+        def prepare():
+            yield "准备未确认"
+            return False
+
+        _, result = _drain_chain(host, prepare_team_stream=prepare)
+        self.assertFalse(result[0])
+        host._click_depart.assert_not_called()
+
+    def test_blocked_injury_is_distinct_from_other_failures_and_cleared(self):
+        state = {"blocked_injury": "重伤"}
+        host = _SafeDepartHost(injury="中伤")
+        _, result = _drain_chain(host, departure_state=state)
+        self.assertFalse(result[0])
+        self.assertEqual(state, {"blocked_injury": "中伤"})
+        host._injury = None
+        host._click_depart = Mock(return_value=False)
+        _, result = _drain_chain(host, departure_state=state)
+        self.assertFalse(result[0])
+        self.assertEqual(state, {})
+
+    def test_equipment_restore_refreshes_injury_and_rechecks_preparation(self):
+        host = _SafeDepartHost()
+        host._click_depart = Mock(return_value=True)
+        host._restore_equipment_from_warning = Mock(side_effect=[True, None])
+        reads = []
+
+        def injury(cfg, team, cache):
+            reads.append(dict(cache))
+            cache["events"] = "old members"
+            return None, None
+
+        def prepare():
+            yield "重新确认行军"
+            return True
+
+        host._combined_injury_status = injury
+        with patch("touken.flows.battle.time.sleep"):
+            _, result = _drain_chain(host, auto_equip=True,
+                                    after_equipment_stream=prepare)
+        self.assertTrue(result[0])
+        self.assertEqual(reads, [{}, {}])
+        self.assertEqual(host._click_depart.call_count, 2)
+
+    def test_equipment_preparation_failure_never_repeats_depart(self):
+        host = _SafeDepartHost()
+        host._click_depart = Mock(return_value=True)
+        host._restore_equipment_from_warning = Mock(return_value=True)
+
+        def prepare():
+            yield "行军设置无法确认"
+            return False
+
+        _, result = _drain_chain(host, auto_equip=True,
+                                after_equipment_stream=prepare)
+        self.assertFalse(result[0])
+        host._click_depart.assert_called_once()
 
     def test_second_confirmation_uses_its_configured_threshold(self):
         maa = FakeMaa(templates={"海联确认": Point(640, 179),

@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from touken.flows.sortie import SortieMixin
+from touken.flows.battle import BattleMixin
 from touken.maa_adapter import Point
 from touken.telemetry import TelemetryStore
 
@@ -58,7 +59,7 @@ class _FrameMaa:
         return True
 
 
-class _LoopHost(SortieMixin):
+class _LoopHost(SortieMixin, BattleMixin):
     """能把 _map_sortie_stream 开进行军监控主循环的最小宿主。"""
 
     def __init__(self, frames, *, drop_id=None, injuries=(),
@@ -198,6 +199,55 @@ PRE = [{}, {}, {}]
 
 
 class LoopFactTests(unittest.TestCase):
+    def test_yosari_refill_reenters_safety_chain_and_never_refills_twice(self):
+        from unittest.mock import Mock
+        host = _LoopHost([{}] * 12)
+        host.config["yosari"] = host.config["sortie"]
+        host.config["map_select"]["异去"] = {
+            "chapters": {"1": [10, 10]}, "maps": {"4": [20, 20]}}
+        host._pick_team = Mock()
+        host._click_depart = Mock(return_value=True)
+        confirmations = []
+
+        def confirm(cfg, auto_refill=False, refill_attempted=False):
+            confirmations.append((auto_refill, refill_attempted))
+            yield from ()
+            return False if refill_attempted else "refilled"
+
+        host._confirm_yosari_departure = confirm
+        with patch("touken.flows.sortie.time.sleep"), patch(
+                "touken.flows.sortie.find_deploy_button", return_value=Point(1, 1)):
+            list(host.yosari_stream(map_no=4, auto_march=False,
+                                   auto_equip=False, auto_refill=True))
+        self.assertEqual(host._pick_team.call_count, 2)
+        self.assertEqual(host._click_depart.call_count, 2)
+        self.assertEqual(confirmations, [(True, False), (True, True)])
+        self.assertEqual(host.by_type("sortie.loop_started"), [])
+
+    def test_yosari_refill_does_not_bypass_new_injury(self):
+        from unittest.mock import Mock
+        host = _LoopHost([{}] * 12)
+        host.config["yosari"] = host.config["sortie"]
+        host.config["map_select"]["异去"] = {
+            "chapters": {"1": [10, 10]}, "maps": {"4": [20, 20]}}
+        host._combined_injury_status = Mock(side_effect=[(None, None), ("重伤", None)])
+        host._click_depart = Mock(return_value=True)
+        confirmations = []
+
+        def confirm(cfg, **kwargs):
+            confirmations.append(kwargs)
+            yield from ()
+            return "refilled"
+
+        host._confirm_yosari_departure = confirm
+        with patch("touken.flows.sortie.time.sleep"), patch(
+                "touken.flows.sortie.find_deploy_button", return_value=Point(1, 1)):
+            list(host.yosari_stream(map_no=4, auto_march=False,
+                                   auto_equip=False, auto_refill=True))
+        host._click_depart.assert_called_once()
+        self.assertEqual(len(confirmations), 1)
+        self.assertEqual(host.by_type("sortie.loop_started"), [])
+
     def test_two_loops_first_loop_has_duration_and_battles(self):
         frames = (PRE
                   + [{"formation"}, {"formation"}, {},

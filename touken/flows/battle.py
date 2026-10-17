@@ -619,7 +619,9 @@ class BattleMixin:
                             rotate_captain: bool = False,
                             rotate_captain_margin: int = 10,
                             prepare_team_stream=None,
-                            refill_state: dict | None = None):
+                            refill_state: dict | None = None,
+                            departure_state: dict | None = None,
+                            after_equipment_stream=None):
         """通用安全出阵链：部队选择页已打开之后调用，串起——
 
         选择部队 → 出阵前伤势检查 → （可选）保存记录一 → 即刻出阵 →
@@ -636,10 +638,15 @@ class BattleMixin:
         每圈最多补一张（refill_done），补完又弹说明没补上，停手防重复消费。
         prepare_team_stream 在选队和伤势检查之后、即刻出阵之前执行玩法准备；
         refill_state 在确实补票后写入 used，供玩法遵守本次运行的购买上限。
+        departure_state 的 blocked_injury 只在出发前验伤拦截时写入，供
+        连续出阵按原设置转去手入；其他失败绝不能被当成需要手入后重试。
+        准备回调明确返回 False 就停止；恢复刀装后可重新验收行军设置。
 
-        Yields 日志；返回 (ok, team_record_saved)。ok=False 表示已安全
-        停下（没出发），调用方直接收工，不要再点任何确认。
+        Yields 日志；返回 (ok, team_record_saved)。ok=False 时不得再点
+        出阵确认；仅明确得到 blocked_injury 的调用方可按设置转去手入。
         """
+        if departure_state is not None:
+            departure_state.clear()
         # 调用方已经通过 _wait_for_team_select 确认进入部队选择页，并在
         # 启动时检查过部队坐标。_pick_team 只负责按坐标点两次，本身无法
         # 观察游戏是否真的选中；不要把它的返回值冒充真机选队验证。
@@ -664,6 +671,8 @@ class BattleMixin:
             yield f"{tag} 日志验伤：{log_note}"
         if injury and self._injury_reaches_threshold(
                 injury, repair_threshold):
+            if departure_state is not None:
+                departure_state["blocked_injury"] = injury
             yield f"{tag} 出阵前检测到{injury}，已达到停止条件，本次不出阵"
             return False, team_record_saved
         if auto_equip and not team_record_saved:
@@ -677,7 +686,8 @@ class BattleMixin:
                 return False, team_record_saved
 
         if prepare_team_stream is not None:
-            yield from prepare_team_stream()
+            if (yield from prepare_team_stream()) is False:
+                return False, team_record_saved
 
         equip_retries = 0
         refill_done = False
@@ -798,12 +808,17 @@ class BattleMixin:
                     yield f"{tag} 恢复刀装后仍出现空缺警告，停止重试"
                     return False, team_record_saved
                 self.maa.screenshot(force=True)
+                # 使用记录可能改变队员；不得复用恢复前的验伤数据。
+                log_cache.clear()
                 restored_injury, _ = self._combined_injury_status(
                     cfg, team_no, log_cache)
                 if restored_injury and self._injury_reaches_threshold(
                         restored_injury, repair_threshold):
                     yield f"{tag} 恢复刀装后检测到{restored_injury}，不再出阵"
                     return False, team_record_saved
+                if after_equipment_stream is not None:
+                    if (yield from after_equipment_stream()) is False:
+                        return False, team_record_saved
                 continue
             equip_cancelled = self._cancel_equip_warning(cfg)
             if equip_cancelled is None:
@@ -816,16 +831,27 @@ class BattleMixin:
             return False, team_record_saved
         return True, team_record_saved
 
-    def _confirm_departure(self, cfg: dict) -> bool:
+    def _confirm_departure(self, cfg: dict, *, text_prompt: dict | None = None) -> bool:
         """通用出阵二次确认：认弹窗标题后点确认按钮。
 
         已用专属标题确认弹窗后，模板失配时才允许点实测坐标兜底
         （比如大阪城确认窗的绿色“确定”与通用灰按钮不是同一皮肤）；
         没配 target 的玩法只用模板，绝不盲点。
+        text_prompt 用于限定区域正文确认页，同样必须先认文字再点目标。
         """
         prompt = cfg.get("confirm_ui", {})
         for _ in range(10):
             self.maa.screenshot(force=True)
+            if text_prompt is not None:
+                # 文字确认页使用已限定区域的正文作为门闩；认到才可点目标。
+                target = text_prompt.get("confirm_target")
+                if target and self.maa.ocr(
+                        text_prompt["expected"], roi_4to4(*text_prompt["roi"])):
+                    self._click_point(target)
+                    time.sleep(1.5)
+                    return True
+                time.sleep(0.5)
+                continue
             if not prompt or self._match_departure_prompt(cfg):
                 confirm = cfg.get("confirm_button", {})
                 button = self._match_template_config(confirm)

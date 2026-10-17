@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from touken.flows.sortie import SortieMixin
+from touken.flows.battle import BattleMixin
 from touken.maa_adapter import Point
 
 
@@ -18,7 +19,7 @@ class _Maa:
         return None
 
 
-class _Host(SortieMixin):
+class _Host(SortieMixin, BattleMixin):
     """最小出阵宿主：走到「即刻出阵」就停，侦察 _enable_auto_march 有没有被叫"""
 
     def __init__(self):
@@ -79,6 +80,67 @@ def _run(host, **kwargs):
 
 
 class RetreatAutoMarchGuardTests(unittest.TestCase):
+    def test_injury_repairs_then_retries_same_departure(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._combined_injury_status = Mock(side_effect=[("中伤", None), (None, None)])
+        calls = []
+
+        def repair(**kwargs):
+            calls.append(kwargs)
+            yield "手入完成"
+
+        host.repair_stream = repair
+        host._click_depart = Mock(return_value=False)
+        _run(host, auto_march=False, injury_action="continue")
+        self.assertEqual(calls, [{"dry_run": False, "use_speedup": None, "speedup_teams": [3]}])
+        host._click_depart.assert_called_once()
+        self.assertEqual(host._combined_injury_status.call_count, 2)
+
+    def test_heavy_injury_stop_still_repairs_without_speedup_and_never_departs(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._combined_injury_status = Mock(return_value=("重伤", None))
+        calls = []
+
+        def repair(**kwargs):
+            calls.append(kwargs)
+            yield "手入已安排"
+
+        host.repair_stream = repair
+        host._click_depart = Mock()
+        _run(host, auto_march=False, injury_action="stop")
+        self.assertEqual(calls, [{"dry_run": False, "use_speedup": False, "speedup_teams": None}])
+        host._click_depart.assert_not_called()
+
+    def test_equipment_restoration_rechecks_march_settings_before_retry(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._click_depart = Mock(side_effect=[True, False])
+        host._restore_equipment_from_warning = Mock(return_value=True)
+        host._configure_auto_march_settings = Mock(return_value=True)
+        _run(host, auto_march=True, repair_threshold="medium")
+        self.assertEqual(host._configure_auto_march_settings.call_count, 2)
+        self.assertEqual(host.march_calls, 2)
+        self.assertEqual(host._click_depart.call_count, 2)
+
+    def test_persistent_injury_does_not_start_or_loop_forever(self):
+        from unittest.mock import Mock
+        host = _Host()
+        host._combined_injury_status = Mock(return_value=("中伤", None))
+        repairs = []
+
+        def repair(**kwargs):
+            repairs.append(kwargs)
+            yield "手入完成"
+
+        host.repair_stream = repair
+        host._click_depart = Mock()
+        logs = _run(host, auto_march=False)
+        self.assertEqual(len(repairs), 2)
+        host._click_depart.assert_not_called()
+        self.assertTrue(any("手入后仍检测到伤势" in msg for msg in logs))
+
     def test_retreat_forces_manual_march(self):
         # 面板只是隐藏开关不是清空：retreat=true 和 auto_march=true 可能同时
         # 到达引擎。撤退必须脚本盯小地图，委托一旦挂上撤退就静默失效。

@@ -331,33 +331,42 @@ class SortieMixin:
                     yield "[出阵] 部队选择界面没打开，本圈放弃"
                     continue
 
-            self._pick_team(team_no)
+            # 公共安全链负责选队、验伤、记录与刀装；这里仅提供合战场的
+            # 行军准备。恢复刀装可能重置委托，必须重新确认再出发。
+            delegated_march = False
 
-            # ========== 4.5 每圈原地换队长（保花：部队选择页与编队页布局相同，
-            # 用户实测能直接拖人换位，不用绕路编队页；差距不到阈值会自动跳过） ==========
-            if rotate_captain:
-                try:
-                    for rot_msg in self._rotate_captain_here(
-                            rotate_captain_margin, team_no=team_no):
-                        yield rot_msg
-                except Exception as exc:
-                    yield f"[出阵] 自动换队长翻车（不影响出阵）: {exc}"
+            def prepare_march():
+                nonlocal delegated_march
+                delegated_march = False
+                if auto_march:
+                    if not self._configure_auto_march_settings(policy):
+                        yield "[出阵] ⚠️ 自动行军详细设定没能确认，停止出阵"
+                        return False
+                    delegated_march = self._enable_auto_march()
+                    time.sleep(0.5)
+                    if not delegated_march:
+                        yield "[出阵] ⚠️ 游戏自动行军没有挂成功，降级为脚本手动行军"
+                if not delegated_march and not self._disable_auto_march():
+                    yield "[出阵] ⚠️ 没能确认游戏自动行军已关闭，停止出阵"
+                    return False
+                return True
 
-            # ========== 5. 【保命】重伤检查（先于一切出阵准备） ==========
-            self.maa.screenshot(force=True)
-            log_cache: dict = {}
-            injury, log_note = self._combined_injury_status(cfg, team_no,
-                                                            log_cache)
-            if log_note:
-                yield f"[出阵] 日志验伤：{log_note}"
-            if injury:
-                threshold = str(repair_threshold or "light")
-                severity_rank = {"轻伤": 1, "中伤": 2, "重伤": 3}
-                threshold_rank = {"light": 1, "medium": 2, "heavy": 3}.get(threshold, 1)
-                must_repair = injury == "重伤"
-                if not must_repair and severity_rank.get(injury, 3) < threshold_rank:
-                    yield f"[出阵] 部队{team_no}{injury}，尚未达到手入阈值，继续本圈"
-                    injury = None
+            departure_state = {}
+
+            def depart():
+                return self._safe_depart_stream(
+                    cfg, team_no, "[出阵]", repair_threshold=repair_threshold,
+                    auto_equip=auto_equip_active, team_record_saved=record_saved,
+                    rotate_captain=rotate_captain,
+                    rotate_captain_margin=rotate_captain_margin,
+                    prepare_team_stream=prepare_march,
+                    after_equipment_stream=prepare_march,
+                    departure_state=departure_state)
+
+            ok, record_saved = yield from depart()
+            injury = departure_state.get("blocked_injury")
+            if not ok and not injury:
+                return
             if injury:
                 must_repair = injury == "重伤"
                 action = str(injury_action or "continue")
@@ -388,88 +397,16 @@ class SortieMixin:
                     return
                 continue
 
-            # 只在整轮任务第一次出阵前保存。战斗后刀装可能已碎，绝不能在
-            # 下一圈覆盖记录一，否则保存下来的就是缺刀装状态。
-            if auto_equip_active and not record_saved:
-                yield "[出阵] 自动补充刀装已开启，先把当前部队保存到记录一"
-                if self._save_team_record(cfg, record_no=1):
-                    record_saved = True
-                    yield "[出阵] ✓ 当前部队已保存到记录一"
-                else:
-                    yield "[出阵] ⚠️ 没能安全保存记录一，已停止；请查看是否有确认弹窗未处理"
-                    return
-
-            # ========== 6. 同步游戏自动行军开关 ==========
-            delegated_march = False
-            if auto_march:
-                if not self._configure_auto_march_settings(policy):
-                    yield "[出阵] ⚠️ 自动行军详细设定没能确认，停止出阵"
-                    return
-                delegated_march = self._enable_auto_march()
-                time.sleep(0.5)
-                if not delegated_march:
-                    yield "[出阵] ⚠️ 游戏自动行军没有挂成功，降级为脚本手动行军"
-            if not delegated_march and not self._disable_auto_march():
-                yield "[出阵] ⚠️ 没能确认游戏自动行军已关闭，停止出阵"
-                return
-
-            # ========== 7. 即刻出阵 → 刀装恢复分支 ==========
-            equip_retries = 0
-            while True:
-                if not self._click_depart(cfg):
-                    yield "[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停"
-                    return
-
-                self.maa.screenshot(force=True)
-                if auto_equip_active:
-                    equip_result = self._restore_equipment_from_warning(cfg, record_no=1)
-                    if equip_result is None:
-                        break
-                    if not equip_result:
-                        yield "[出阵] ⚠️ 刀装未满警告；从记录一恢复失败，已停止出阵"
-                        return
-                    equip_retries += 1
-                    yield "[出阵] 🛡️ 刀装有空缺，已使用记录一自动补齐"
-                    if equip_retries >= 2:
-                        yield "[出阵] 恢复刀装后仍出现空缺警告，停止重试"
-                        return
-                    # 使用记录后重新做保命检查；异常时绝不再次点出阵。
-                    self.maa.screenshot(force=True)
-                    restored_injury, _ = self._combined_injury_status(
-                        cfg, team_no, log_cache)
-                    if restored_injury and self._injury_reaches_threshold(
-                            restored_injury, repair_threshold):
-                        yield f"[出阵] 恢复刀装后检测到{restored_injury}，不再出阵"
-                        return
-                    if auto_march:
-                        delegated_march = self._enable_auto_march()
-                    if not delegated_march and not self._disable_auto_march():
-                        yield "[出阵] ⚠️ 恢复刀装后没能确认自动行军已关闭，停止出阵"
-                        return
-                    continue
-
-                # 未开启自动补充时保持原安全行为：点整备刀装退出，不碰继续出阵。
-                equip_cancelled = self._cancel_equip_warning(cfg)
-                if equip_cancelled is None:
-                    break
-                if equip_cancelled:
-                    yield "[出阵] ⚠️ 刀装未满警告；已进入整备，本次跳过"
-                else:
-                    yield "[出阵] ⚠️ 刀装未满警告；没能安全进入整备，本次出阵停止"
-                return
-
-            # 队员重伤确认弹窗 → 教材规矩：永远点"否"
-            if self._deny_heavy_injury_warning(cfg):
-                yield "[出阵] 🛑 队员重伤确认弹窗，已点【否】。有重伤绝不出阵，停"
-                return
-
+            # 普通合战场点击即进入行军，没有二次确认窗；异去的归城提灯
+            # 确认仍保留独立规则，其确认点击复用公共 _confirm_departure。
             if cfg_key == "yosari":
                 confirmed = yield from self._confirm_yosari_departure(
                     cfg, auto_refill=auto_refill)
                 if confirmed == "refilled":
                     yield "[异去] 已补充归城提灯，重新点击即刻出阵"
-                    if not self._click_depart(cfg):
-                        yield "[异去] 补充后找不到即刻出阵按钮，收工"
+                    # 补充后回到部队页，重新走完整安全链；不直接点出阵。
+                    ok, record_saved = yield from depart()
+                    if not ok:
                         return
                     confirmed = yield from self._confirm_yosari_departure(
                         cfg, auto_refill=auto_refill, refill_attempted=True)
@@ -981,17 +918,9 @@ class SortieMixin:
     def _confirm_yosari_departure(self, cfg: dict, auto_refill: bool = False,
                                   refill_attempted: bool = False):
         """处理新版归城提灯确认；缺灯时按四段确认链补充后返回部队选择。"""
-        prompt = cfg.get("departure_confirm", {})
-        roi = roi_4to4(*prompt.get("roi", [310, 155, 970, 330]))
-        expected = prompt.get("expected", "归城提灯进行出阵")
-        for _ in range(8):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected, roi):
-                self._click_point(prompt.get("confirm_target", [640, 603]))
-                time.sleep(1.5)
-                break
-            time.sleep(0.5)
-        else:
+        prompt = {"expected": "归城提灯进行出阵", "roi": [310, 155, 970, 330],
+                  "confirm_target": [640, 603], **cfg.get("departure_confirm", {})}
+        if not self._confirm_departure(cfg, text_prompt=prompt):
             yield "[异去] 没看到归城提灯出阵确认框；停止"
             return False
 
