@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 from .game_state import available_events, injury_report
+from .flow_control import FlowAborted
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,16 @@ class RecoveryOutcome:
     attempted: bool = False
     repaired: int = 0
     speedups: int = 0
+
+    def raise_if_failed(self, tag, unit="圈"):
+        """An unsuccessful recovery must reach the worker as an aborted run."""
+        reasons = {
+            "still_injured": "手入后部队仍有伤势，未满足出阵条件",
+            "unknown": "手入后部队状态未确认",
+            "invalid_policy": "伤势处理设置无效",
+        }
+        if self.reason in reasons:
+            raise FlowAborted(f"{tag} {reasons[self.reason]}；剩余 {self.remaining} {unit}未完成，已安全停止")
 
 
 def current_team_injury(agent, team_no):

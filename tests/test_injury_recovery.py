@@ -5,7 +5,8 @@ from unittest.mock import patch
 import pytest
 
 from touken.flows.battle import BattleMixin
-from touken.injury_recovery import RecoveryProgress, recover_injury_stream
+from touken.injury_recovery import RecoveryOutcome, RecoveryProgress, recover_injury_stream
+from touken.flow_control import FlowAborted
 
 
 def drain(stream):
@@ -101,6 +102,19 @@ def test_invalid_progress_cannot_turn_into_extra_runs():
         RecoveryProgress(10, 11)
 
 
+@pytest.mark.parametrize("reason", ["still_injured", "unknown", "invalid_policy"])
+@pytest.mark.parametrize("tag,unit", [("[出阵]", "圈"), ("[挖地]", "层")])
+def test_failed_recovery_reports_remaining_work_as_aborted(reason, tag, unit):
+    outcome = RecoveryOutcome(False, RecoveryProgress(3, 2).remaining, reason)
+    with pytest.raises(FlowAborted, match=f"剩余 1 {unit}未完成，已安全停止"):
+        outcome.raise_if_failed(tag, unit)
+
+
+@pytest.mark.parametrize("reason", ["policy_stop", "repair_stop", "complete", "ready"])
+def test_deliberate_policy_stop_keeps_original_result(reason):
+    RecoveryOutcome(False, 1, reason).raise_if_failed("[出阵]")
+
+
 def test_policy_stop_and_unconfirmed_recovery_have_distinct_report_results():
     from touken.flows.report_judge import _is_fail
     stopped, _ = run(host(), [(True, "中伤")], action="stop")
@@ -118,7 +132,8 @@ def test_early_repair_exit_does_not_reuse_previous_session_statistics():
 
 
 @pytest.mark.parametrize("point,completed", [("before", 0), ("floor", 1), ("march", 0)])
-def test_osaka_all_injury_stops_share_recovery_and_preserve_progress(point, completed):
+@pytest.mark.parametrize("still_injured", [False, True])
+def test_osaka_all_injury_stops_share_recovery_and_preserve_progress(point, completed, still_injured):
     from test_osaka_flow import OsakaFlow
     flow = OsakaFlow([point == "floor"])
     flow._injury_reaches_threshold = BattleMixin._injury_reaches_threshold
@@ -147,12 +162,19 @@ def test_osaka_all_injury_stops_share_recovery_and_preserve_progress(point, comp
     flow.repair_stream, flow.osaka_stream = repair, resume
     with patch("touken.flows.osaka.time.sleep"), patch(
             "touken.injury_recovery.current_team_injury",
-            side_effect=[(True, "中伤"), (True, None)]):
-        list(flow._osaka_stream_impl(max_floors=3))
+            side_effect=[(True, "中伤"), (True, "重伤" if still_injured else None)]):
+        if still_injured:
+            with pytest.raises(FlowAborted, match=f"剩余 {3 - completed} 层未完成"):
+                list(flow._osaka_stream_impl(max_floors=3))
+        else:
+            list(flow._osaka_stream_impl(max_floors=3))
+    assert len([e for e in flow.events if e["event_type"] == "osaka.floor_completed"]) == completed
+    if still_injured:
+        assert len(repairs) == 1 and resumed == []
+        return
     assert len(repairs) == len(resumed) == 1
     assert resumed[0]["max_floors"] == 3 - completed
     assert resumed[0]["_completed_floors"] == completed
     assert resumed[0]["_target_floors"] == 3
     assert resumed[0]["_repair_count"] == 1
     assert resumed[0]["_speedups_used"] == 1
-    assert len([e for e in flow.events if e["event_type"] == "osaka.floor_completed"]) == completed

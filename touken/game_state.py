@@ -193,7 +193,7 @@ def sword_facts(events):
 def sword_injury(state, serial, *, now=None, max_age=FACT_MAX_AGE):
     """Use observed battle injury codes only for the same instance and HP.
 
-    Codes 0 (healthy) and 2 (medium injury) have current runtime samples.
+    Codes 0 (healthy), 2 (medium injury), and 3 (heavy injury) have runtime samples.
     Other codes use HP until calibrated; conflicting heavy HP never passes.
     """
     serial = str(serial)
@@ -210,6 +210,8 @@ def sword_injury(state, serial, *, now=None, max_age=FACT_MAX_AGE):
     code = str(evidence["status"])
     if code == "0" and hp == maximum and maximum > 0:
         return None, "battle_status"
+    if code == "3":
+        return "重伤", "battle_status"
     if code == "2" and 0 < hp < maximum and fallback != "重伤":
         return "中伤", "battle_status"
     return fallback, "hp"

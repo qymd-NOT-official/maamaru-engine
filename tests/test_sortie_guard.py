@@ -4,6 +4,7 @@ from unittest.mock import patch
 from touken.flows.sortie import SortieMixin
 from touken.flows.battle import BattleMixin
 from touken.maa_adapter import Point
+from touken.flow_control import FlowAborted
 
 
 class _Maa:
@@ -111,7 +112,9 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
         host.repair_stream = repair
         host._click_depart = Mock()
-        _run(host, auto_march=False, injury_action="stop")
+        with patch("touken.injury_recovery.current_team_injury", return_value=(True, "重伤")):
+            with self.assertRaisesRegex(FlowAborted, "剩余 1 圈未完成"):
+                _run(host, auto_march=False, injury_action="stop")
         self.assertEqual(calls, [{"dry_run": False, "use_speedup": False, "speedup_teams": None}])
         host._click_depart.assert_not_called()
 
@@ -138,8 +141,12 @@ class RetreatAutoMarchGuardTests(unittest.TestCase):
 
         host.repair_stream = repair
         host._click_depart = Mock()
+        logs = []
         with patch("touken.injury_recovery.current_team_injury", return_value=(True, "中伤")):
-            logs = _run(host, auto_march=False)
+            with patch("touken.flows.sortie.time.sleep"):
+                with self.assertRaisesRegex(FlowAborted, "手入后部队仍有伤势"):
+                    for message in host.sortie_stream(chapter=1, map_no=1, team_no=3, auto_march=False):
+                        logs.append(message)
         self.assertEqual(len(repairs), 1)
         host._click_depart.assert_not_called()
         self.assertTrue(any("不再往返重试" in msg for msg in logs))

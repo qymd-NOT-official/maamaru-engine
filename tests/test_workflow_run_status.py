@@ -10,6 +10,37 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _data.name}):
 
 
 class WorkflowRunStatusTests(unittest.TestCase):
+    def test_failed_recovery_reaches_panel_as_incomplete_run(self):
+        import io
+        from panel import worker, script_runner
+        from touken.injury_recovery import RecoveryOutcome, RecoveryProgress
+
+        def failed_sortie(config_path, params):
+            yield "第 2/3 圈完成"
+            RecoveryOutcome(False, RecoveryProgress(3, 2).remaining,
+                            "still_injured").raise_if_failed("[出阵]")
+
+        output = io.StringIO()
+        with patch.object(worker, "_rescue_stdout"), \
+             patch("sys.argv", ["worker", "test_recovery", "fake.json"]), \
+             patch.dict(script_runner._SCRIPTS, {"test_recovery": {"label": "测试", "fn": failed_sortie}}), \
+             patch("sys.stdout", output):
+            with self.assertRaises(SystemExit) as stopped:
+                worker.main()
+        self.assertEqual(stopped.exception.code, script_runner.EXIT_FLOW_ABORTED)
+        self.assertIn("剩余 1 圈未完成", output.getvalue())
+
+        self.proc.stdout = io.StringIO(output.getvalue())
+        self.proc.wait.return_value = stopped.exception.code
+        store = Mock()
+        with patch.object(script_runner, "get_store", return_value=store), \
+             patch.object(self.runner, "_emit"), \
+             patch("panel.workflow_waits.finish") as finish, \
+             patch("sys.stdout", io.StringIO()):
+            self.runner._pump(self.proc, "test-recovery", "sortie")
+        finish.assert_called_once_with("test-recovery", "failed")
+        self.assertIn("已安全停止且未计作完成", store.append.call_args.args[2])
+
     def setUp(self):
         self.runner = ScriptRunner()
         self.proc = Mock()

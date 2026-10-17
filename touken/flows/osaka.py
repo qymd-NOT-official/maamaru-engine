@@ -181,6 +181,7 @@ class OsakaMixin:
                 yield (f"[挖地] 🩹 第 {_repair_count} 次手入：修复 {recovery.repaired} 把，"
                        f"使用加速符 {recovery.speedups} 个；累计使用 {_speedups_used} 个")
             if not recovery.resume:
+                recovery.raise_if_failed("[挖地]", "层")
                 return
             yield f"[挖地] 当前总进度 {completed}/{_target_floors}，继续剩余 {recovery.remaining} 层"
             yield from self.osaka_stream(

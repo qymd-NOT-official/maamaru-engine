@@ -374,6 +374,7 @@ class SortieMixin:
                     progress=RecoveryProgress(max_loops, loop_no - 1),
                     tag="[出阵]", repair_heavy_on_stop=True)
                 if not recovery.resume:
+                    recovery.raise_if_failed("[出阵]")
                     return
                 continue
 

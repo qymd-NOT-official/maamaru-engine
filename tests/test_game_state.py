@@ -68,7 +68,8 @@ def test_other_instances_enemy_results_and_missing_serial_cannot_supply_status()
 @pytest.mark.parametrize("status,hp,expected,source", [
     (0, 45, None, "battle_status"), (0, 10, "重伤", "hp"),
     (2, 10, "重伤", "hp"), (99, 34, "轻伤", "hp"),
-    (None, 34, "轻伤", "hp"), (3, 10, "重伤", "hp"),
+    (None, 34, "轻伤", "hp"), (3, 10, "重伤", "battle_status"),
+    (3, 34, "重伤", "battle_status"),
 ])
 def test_unverified_or_conflicting_codes_do_not_bypass_hp_protection(status, hp, expected, source):
     report = game_state.injury_report(team_events() + [battle_result(hp=hp, maximum=45, status=status)], 1, now=1002)
@@ -82,6 +83,15 @@ def test_new_battle_or_expired_evidence_cannot_reuse_old_status():
     assert game_state.sword_injury(state, "111", now=1700) == ("轻伤", "hp")
     events.append(event({}, "/battle/battle", 1002))
     assert game_state.injury_report(events, 1, now=1003) is None
+
+
+def test_confirmed_heavy_status_expires_after_player_repairs():
+    events = team_events() + [battle_result(hp=23, maximum=77, status=3)]
+    report = game_state.injury_report(events, 1, now=1002)
+    assert report["max_injury"] == "重伤"
+    assert report["members"][0]["injury_source"] == "battle_status"
+    events.append(event({"sword": {"111": {"hp": 77}}}, "/repair/complete", 1003))
+    assert game_state.injury_report(events, 1, now=1004)["max_injury"] is None
 
 
 def test_return_then_fresh_identical_hp_keeps_battle_status():
