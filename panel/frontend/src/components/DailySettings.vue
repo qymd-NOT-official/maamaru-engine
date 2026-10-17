@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { osakaRecommendation, type OsakaPaceRun } from './osakaRecommendation'
 import { api } from '../api'
 import ParamField from './ParamField.vue'
 import SegmentedControl from './SegmentedControl.vue'
@@ -20,6 +21,20 @@ const loading = ref(true)
 const message = ref('')
 const after = ref<WorkflowPreset['after']>('none')
 const startTime = ref('')
+const osakaRuns = ref<OsakaPaceRun[]>([])
+const osakaPaceError = ref(false)
+const clock = ref(new Date())
+const clockTimer = window.setInterval(() => { clock.value = new Date() }, 30000)
+onUnmounted(() => window.clearInterval(clockTimer))
+const osakaAdvice = computed(() => {
+  const node = rows.value.find(row => row.id === 'activity')?.nodes[0]
+  return osakaRecommendation(osakaRuns.value, node?.params.select_floor ? Number(node.params.target_floor ?? 81) : null, startTime.value, clock.value)
+})
+function applyOsakaAdvice() {
+  clock.value = new Date()
+  const node = rows.value.find(row => row.id === 'activity')?.nodes[0]
+  if (node?.type === 'osaka' && osakaAdvice.value.runs > 0) node.params.runs = osakaAdvice.value.runs
+}
 const plannedExpeditions = ref(true)
 const running = ref(false)
 const useRecommendedRuns = ref(false)
@@ -145,6 +160,10 @@ async function save(start = false) {
   finally { busy.value = false }
 }
 onMounted(load)
+onMounted(async () => {
+  try { osakaRuns.value = (await api.dataRuns(100, undefined, Date.now() / 1000 - 14 * 86400, undefined, undefined, '', 'osaka')).items }
+  catch { osakaPaceError.value = true }
+})
 async function stopToday() {
   busy.value = true
   try {
@@ -203,6 +222,11 @@ async function stopExpeditions() {
         <div v-if="activeRow.id === 'activity' && activeRow.nodes[0]?.type === 'raid'" class="daily-recommendation">
           <label><input type="checkbox" :checked="useRecommendedRuns" :disabled="busy || running || (!useRecommendedRuns && !recommendation?.available)" @change="setRecommendedRuns(($event.target as HTMLInputElement).checked)" /> 使用建议圈数</label>
           <p class="daily-muted">{{ recommendation?.available ? `本次建议 ${recommendation.runs} 圈` : recommendation?.reason }}<template v-if="useRecommendedRuns"> · 手形不足时使用小判补充</template></p>
+        </div>
+        <div v-if="activeRow.id === 'activity' && activeRow.nodes[0]?.type === 'osaka'" class="daily-recommendation">
+          <button type="button" :disabled="busy || running || !osakaAdvice.runs" @click="applyOsakaAdvice">推荐圈数（凌晨 3 点前）：{{ osakaAdvice.runs || '暂无' }}<template v-if="osakaAdvice.runs"> 圈 · 填入</template></button>
+          <p class="daily-muted">{{ osakaPaceError ? '圈速记录暂时没读到，请重新打开后再试。' : osakaAdvice.reason }}</p>
+          <p class="daily-muted">预计三点前收工，给任务奖励和杂物箱留到四点；这是本次估算，保存后不会自动改圈数，也不是到点强停。</p>
         </div>
         <p v-if="!activeHasParameters && activeRow.nodes.length" class="daily-muted">{{ simpleDescription }}</p>
         <template v-if="activeHasParameters">
