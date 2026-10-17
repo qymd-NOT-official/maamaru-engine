@@ -1065,6 +1065,21 @@ class _RecoverDepartHost(_SafeDepartHost):
 class SafeDepartChainTests(unittest.TestCase):
     """选队→伤势→刀装→重伤拦截的编排语义：各玩法只准调用，不准手搓。"""
 
+    def test_unconfirmed_rotation_never_saves_record_or_departs(self):
+        host = _SafeDepartHost()
+        host._click_depart = Mock()
+        host._save_team_record = Mock()
+
+        def rotate(*args, **kwargs):
+            yield "队长编号未确认"
+            return False
+
+        host._rotate_captain_here = rotate
+        _, result = _drain_chain(host, rotate_captain=True, auto_equip=True)
+        self.assertFalse(result[0])
+        host._save_team_record.assert_not_called()
+        host._click_depart.assert_not_called()
+
     def test_preparation_failure_never_clicks_depart(self):
         host = _SafeDepartHost()
         host._click_depart = Mock()

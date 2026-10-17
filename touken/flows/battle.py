@@ -657,12 +657,15 @@ class BattleMixin:
         self._pick_team(team_no)
         if rotate_captain:
             try:
-                yield from self._rotate_captain_here(rotate_captain_margin,
-                                                     team_no=team_no)
+                rotated = yield from self._rotate_captain_here(rotate_captain_margin,
+                                                               team_no=team_no)
+                if rotated is False:
+                    return False, team_record_saved
             except Exception as exc:
-                # 换队长只调站位，不可绕过后续伤势/刀装安全检查；OCR
-                # 临时失手也不应把整次活动伪装成失败。
-                yield f"{tag} 自动换队长翻车（不影响出阵）: {exc}"
+                # 无法知道异常发生在拖动前还是拖动后，不能带着未验收的
+                # 队伍继续保存记录或出阵。
+                yield f"{tag} 自动换队长未确认，停止出阵: {exc}"
+                return False, team_record_saved
         self.maa.screenshot(force=True)
         log_cache: dict = {}
         injury, log_note = self._combined_injury_status(cfg, team_no,

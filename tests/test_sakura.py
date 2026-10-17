@@ -181,8 +181,12 @@ class SortieRotateHookTests(unittest.TestCase):
 
     def _host(self):
         from touken.flows.sortie import SortieMixin
+        from touken.flows.battle import BattleMixin
 
-        host = SortieMixin()
+        class Host(SortieMixin, BattleMixin):
+            pass
+
+        host = Host()
         host._disable_auto_march = lambda: True
         host.maa = self.Maa()
         host.config = {
@@ -228,7 +232,7 @@ class SortieRotateHookTests(unittest.TestCase):
 
         self.assertEqual(host.rotations, [(20, 3)])
         self.assertIn("rot", messages)
-        self.assertIn("[出阵] 找不到即刻出阵按钮（队长重伤会变灰？），停", messages)
+        self.assertIn("[出阵] 找不到即刻出阵按钮", messages)
 
     def test_rotate_off_by_default(self):
         host = self._host()
@@ -337,11 +341,38 @@ def _pool_event(pool=(), parties=None, now=1000):
 class RotateCaptainFactsTests(unittest.TestCase):
     """换队长的数据优先路径：决策吃全队疲劳（游戏数据），OCR 只管行坐标。"""
 
-    def _run(self, maa, members, team=2, now=1000, age=5, margin=10):
+    def test_changed_captain_number_succeeds_despite_47_read_as_49(self):
+        members = {1: (101, 64, 3, 50, 1), 2: (102, 55, 5, 40, 1),
+                   3: (103, 47, 118, 45, 1), 4: (104, 54, 5, 35, 1),
+                   5: (105, 94, 11, 20, 1), 6: (106, 96, 7, 30, 1)}
+        maa = Maa({s: row[1] for s, row in members.items()},
+                  after_rows={1: 49, 2: 55, 3: 64, 4: 54, 5: 94, 6: 96})
+        messages = self._run(maa, members)
+        self.assertEqual(len(maa.swipes), 1)
+        self.assertTrue(any("编号核对一致" in message for message in messages))
+        self.assertFalse(any("再拖一次" in message for message in messages))
+
+    def test_unconfirmed_number_never_repeats_drag_even_with_matching_ocr(self):
+        members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
+                   3: (103, 90, 7, 30, 1), 4: (104, 30, 5, 35, 1),
+                   5: (105, 70, 11, 20, 1), 6: (106, 85, 118, 45, 1)}
+        maa = Maa(dict(FULL), after_rows={**FULL, 1: 30})
+        messages = self._run(maa, members, confirm=False)
+        self.assertEqual(len(maa.swipes), 1)
+        self.assertTrue(any("停止后续出阵" in message for message in messages))
+        self.assertFalse(any("上任队长" in message for message in messages))
+
+    def _run(self, maa, members, team=2, now=1000, age=5, margin=10, confirm=True):
         from touken import game_state as gs
         flow = _flow(maa)
-        with patch.object(gs, "available_events",
-                          return_value=[_facts_event(team, members, now=now)]), \
+        def events(adapter):
+            current = dict(members)
+            if maa.swipes and confirm:
+                low = min(current, key=lambda slot: current[slot][1])
+                current[1], current[low] = current[low], current[1]
+            return [_facts_event(team, current, now=now)]
+
+        with patch.object(gs, "available_events", side_effect=events), \
                 patch.object(gs.time, "time", return_value=now + age), \
                 patch("touken.flows.sakura.time.sleep"):
             return list(flow._rotate_captain_here(margin=margin, team_no=team))
@@ -361,9 +392,8 @@ class RotateCaptainFactsTests(unittest.TestCase):
         # 汇报名来自名册数据：OCR 名字（3KK）既不可信也不该出现
         self.assertFalse(any("3KK" in m for m in messages))
 
-    def test_stale_facts_fall_back_to_ocr_decision(self):
-        # 数据过期（>600s）：回退整列 OCR 读数。JSON 会说拖 6 号位（20），
-        # OCR 说队长最低——按 OCR 收工，证明确实走了兜底而不是数据。
+    def test_stale_facts_skip_instead_of_guessing_from_ocr(self):
+        # 数据过期时跳过可选轮换，不用 OCR 读数猜哪个实例最累。
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 40, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 20, 118, 45, 1)}
@@ -371,17 +401,17 @@ class RotateCaptainFactsTests(unittest.TestCase):
         messages = self._run(maa, members, age=601)
 
         self.assertEqual(maa.swipes, [])
-        self.assertTrue(any("位置没毛病" in m for m in messages))
+        self.assertTrue(any("数据不完整或已过期" in m for m in messages))
 
     def test_partial_facts_never_gate_decision(self):
-        # 6 号位疲劳缺失：整个数据视图作废（半残不放行），回退 OCR 决策
+        # 6 号位疲劳缺失：不拿部分数据或 OCR 猜测全队最低。
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1)}
         maa = Maa({**FULL, 1: 20})
         messages = self._run(maa, members)
 
         self.assertEqual(maa.swipes, [])
-        self.assertTrue(any("位置没毛病" in m for m in messages))
+        self.assertTrue(any("数据不完整或已过期" in m for m in messages))
 
     def test_facts_without_row_coordinates_never_drag(self):
         # 数据在册但画面一行都定位不到：没有坐标乱拖就是拖错人，宁可不换

@@ -227,7 +227,7 @@ class SakuraMixin:
         return True
 
     def _rotate_team_fatigue(self, team_no):
-        """全队疲劳（游戏数据口径，同 _check_fatigue）：{slot: {"fatigue", "name"}}。
+        """全队当前实例与疲劳：{slot: {"serial_id", "fatigue", "name"}}。
 
         任一位缺失/过期整个返回 None——半残数据绝不喂给换队长决策
         （2026-09-21 就是 5/6 号位读空让红脸队员对轮换隐形）。
@@ -245,14 +245,15 @@ class SakuraMixin:
         roster = state["parties"].get(str(team_no), {})
         for slot, info in values.items():
             serial = str(roster.get(str(slot), ""))
+            info["serial_id"] = serial
             info["name"] = youzu_log._sword_name(
                 state["swords"].get(serial, {}).get("sword_id"), sword_db)
         return values
 
     def _rotate_captain_here(self, margin: int = 10, team_no: int | None = None):
         """
-        在当前页原地换队长：全队疲劳以游戏数据为准（fresh 才用，缺了回退
-        整列 OCR 读数决策），最低的拖到队长位，拖完复查。
+        在当前页原地换队长：指定部队时只按新鲜游戏数据决策与验收，
+        OCR 仅提供画面行位置。数据缺失则跳过轮换，拖后未验收则停止出阵。
 
         调用前必须已停在目标部队的成员列表页（部队标签已切好）。
         编队页和出阵前的部队选择页都能拖人换位，但两页行距不同
@@ -262,13 +263,16 @@ class SakuraMixin:
         再吃 OCR 读数（88 认成 86 不影响判断），OCR 只管拖点定位。
 
         Args:
-            team_no: 画面里停着的部队号。给了且数据新鲜，全队疲劳直接吃
-                游戏数据；没给或数据过期，回退整列 OCR 读数（老行为）。
+            team_no: 画面里停着的部队号。玩法必须传入，以实例编号验收。
+                未传时仅保留旧的视觉路径兼容内部调用。
 
         Yields:
             str: 执行状态消息
         """
         facts = self._rotate_team_fatigue(team_no) if team_no is not None else None
+        if team_no is not None and facts is None:
+            yield "[换队长] 当前部队疲劳数据不完整或已过期，本轮不换；不按画面读数猜队员"
+            return
         rows = self._read_rows_fatigue()
         if facts is None:
             if not rows:
@@ -320,6 +324,19 @@ class SakuraMixin:
         # adb input swipe 匀速插值：拖远了速度跟着变快，容易被游戏当成
         # 列表滚动吞掉，时长按距离放大
         duration = max(_DRAG_MS, int((cy_low - cy_top) * 2.5))
+        if facts is not None:
+            # 换位不会改变疲劳；验收的是当前队长的实例编号，而不是 OCR
+            # 复读数字。没有确认时只等待，不凭相同疲劳或旧行号重复拖动。
+            expected_serial = facts[low_slot]["serial_id"]
+            self.maa.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top, duration)
+            for _ in range(3):
+                time.sleep(1.0)
+                updated = self._rotate_team_fatigue(team_no)
+                if updated is not None and updated[1]["serial_id"] == expected_serial:
+                    yield f"[换队长] ✓ 游戏数据已确认 {name} 上任队长（编号核对一致）"
+                    return
+            yield "[换队长] ⚠️ 拖动后队长编号未确认，停止后续出阵；不重复拖动，请查看当前队伍"
+            return False
         after_values = {}
         for attempt in (1, 2):
             self.maa.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top,
@@ -348,10 +365,12 @@ class SakuraMixin:
                     return
             if attempt == 1:
                 # 手势若被当成滚动，行位置可能已经飘了：按现位置再拖一次
-                if after:
-                    cy_low = next((fy for fy, v in after.values() if v == low),
-                                  after[1][0]) - _FATIGUE_TO_ROW_CY
-                    cy_top = after[1][0] - _FATIGUE_TO_ROW_CY
+                source = next((fy for fy, v in after.values() if v == low), None)
+                if source is None or 1 not in after or source == after[1][0]:
+                    yield "[换队长] 拖后来源行未确认，停止操作；不把队长位当成拖动起点"
+                    return False
+                cy_low = source - _FATIGUE_TO_ROW_CY
+                cy_top = after[1][0] - _FATIGUE_TO_ROW_CY
                 yield "[换队长] 复查对不上，按当前位置再拖一次..."
         got = after_values.get(1, "读不到")
         yield (f"[换队长] ⚠️ 拖完队长位疲劳是 {got}，不是预期的 {low}"
