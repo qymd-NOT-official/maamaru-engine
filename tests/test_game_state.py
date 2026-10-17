@@ -33,6 +33,21 @@ def test_complete_hp_is_authoritative(hp, expected):
     assert game_state.injury_report(team_events(hp), 1, now=1001)["max_injury"] == expected
 
 
+def test_actual_uguisumaru_hp_does_not_block_heavy_only_departure():
+    from touken.flows.battle import BattleMixin
+    events = team_events(25)
+    events[0]["payload"]["sword"]["111"]["hp_max"] = 77
+    report = game_state.injury_report(events, 1, now=1001)
+    assert report["members"][0]["hp"] == 25
+    assert report["max_injury"] == "中伤"
+    assert not BattleMixin._injury_reaches_threshold(report["max_injury"], "heavy")
+    assert BattleMixin._injury_reaches_threshold(report["max_injury"], "medium")
+    events[0]["payload"]["sword"]["111"]["hp"] = 23
+    report = game_state.injury_report(events, 1, now=1001)
+    assert report["max_injury"] == "重伤"
+    assert BattleMixin._injury_reaches_threshold(report["max_injury"], "heavy")
+
+
 @pytest.mark.parametrize("body,endpoint", [
     ({"1": {"slot": {"1": {"serial_id": "222"}}}}, "/party/setsword"),
     ({}, "/sally/start"),

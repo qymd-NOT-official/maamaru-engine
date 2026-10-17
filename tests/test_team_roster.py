@@ -834,7 +834,7 @@ class RosterFactsPureTests(unittest.TestCase):
 
     def test_pre_combat_hp_is_rejected(self):
         now = time.time()
-        events = (_party_events(now - 60, hp="26", hp_max="79")
+        events = (_party_events(now - 60, hp="23", hp_max="79")
                   + [_json_event({}, "/battle/pve", at=now - 30)])
         facts = _roster_facts_from_events(events, 1, now=now)
         self.assertNotIn("survival", facts[1])
@@ -873,7 +873,8 @@ class GameFactsFirstTests(unittest.TestCase):
         # 伤势由 hp 换算直接给（含满血 none），伤势章通道整段不用跑
         now = time.time()
         cases = (("45", "45", "none"), ("53", "79", "light"),
-                 ("27", "79", "medium"), ("26", "79", "heavy"))
+                 ("27", "79", "medium"), ("26", "79", "medium"),
+                 ("25", "77", "medium"), ("23", "77", "heavy"))
         for hp, hp_max, expected in cases:
             with self.subTest(hp=hp, hp_max=hp_max):
                 rows = {160: {"name": "x"}}
@@ -969,13 +970,13 @@ class GameFactsFirstTests(unittest.TestCase):
         events = (_party_events(now - 60, hp="26", hp_max="79")
                   + [_json_event({}, "/battle/pve", at=now - 30)])
         rows = {160: {"name": "压切长谷部", "level": "99 级",
-                      "fatigue": "40/100", "survival": "26/79",
+                      "fatigue": "40/100", "survival": "23/79",
                       "badge_char": "打"}}
         pages = {1: (rows, None, set(), {160: {"中伤": 0.89}})}
         host = _FactsHost(_make_maa(pages), events)
         slot = host._read_team_page()[0]
         self.assertEqual(slot["injury"], "medium")
-        self.assertEqual((slot["survival"], slot["survival_max"]), (26, 79))
+        self.assertEqual((slot["survival"], slot["survival_max"]), (23, 79))
         self.assertEqual(slot["fatigue"], 40)
         self.assertEqual(slot["level"], 99)
 
