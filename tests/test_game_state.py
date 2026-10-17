@@ -17,6 +17,107 @@ def team_events(hp=45):
                   "/party/list")]
 
 
+def battle_result(hp=25, maximum=77, status=2, at=1001, serial="111"):
+    return event({"result": {"player": {"party": {"slot": {
+        "5": {"serial_id": serial, "sword_id": 118, "hp": hp,
+              "hp_max": maximum, "status": status}}}}}}, "/battle/battle", at)
+
+
+def test_battle_status_is_used_by_instance_and_refreshes_post_battle_hp():
+    report = game_state.injury_report(team_events() + [battle_result()], 1, now=1002)
+    member = report["members"][0]
+    assert member["hp"] == 25 and member["hp_max"] == 77
+    assert member["injury"] == "中伤"
+    assert member["injury_source"] == "battle_status"
+
+
+def test_battle_code_is_not_overwritten_by_roster_status():
+    events = team_events() + [battle_result(hp=34, maximum=45)]
+    fresh = event({"sword": {"111": {"hp": 34, "hp_max": 45, "status": "0"}}}, "/home", 1002)
+    report = game_state.injury_report(events + [fresh], 1, now=1003)
+    assert report["max_injury"] == "中伤"  # HP alone would say light.
+    assert report["members"][0]["injury_source"] == "battle_status"
+
+
+def test_roster_status_alone_never_becomes_an_injury_code():
+    events = team_events(34)
+    events[0]["payload"]["sword"]["111"]["status"] = 2
+    assert game_state.injury_report(events, 1, now=1001)["max_injury"] == "轻伤"
+
+
+def test_hp_change_invalidates_old_code_even_if_hp_later_returns():
+    events = team_events() + [battle_result(hp=34, maximum=45),
+        event({"sword": {"111": {"hp": 45}}}, "/repair/complete", 1002),
+        event({"sword": {"111": {"hp": 34}}}, "/home", 1003)]
+    report = game_state.injury_report(events, 1, now=1004)
+    assert report["max_injury"] == "轻伤"
+    assert report["members"][0]["injury_source"] == "hp"
+
+
+def test_other_instances_enemy_results_and_missing_serial_cannot_supply_status():
+    events = team_events(34) + [battle_result(serial="222")]
+    assert game_state.injury_report(events, 1, now=1002) is None
+    bad = battle_result()
+    del bad["payload"]["result"]["player"]["party"]["slot"]["5"]["serial_id"]
+    assert game_state.injury_report(team_events() + [bad], 1, now=1002) is None
+    enemy = battle_result()
+    enemy["payload"]["result"]["enemy"] = enemy["payload"]["result"].pop("player")
+    assert game_state.injury_report(team_events() + [enemy], 1, now=1002) is None
+
+
+@pytest.mark.parametrize("status,hp,expected,source", [
+    (0, 45, None, "battle_status"), (0, 10, "重伤", "hp"),
+    (2, 10, "重伤", "hp"), (99, 34, "轻伤", "hp"),
+    (None, 34, "轻伤", "hp"), (3, 10, "重伤", "hp"),
+])
+def test_unverified_or_conflicting_codes_do_not_bypass_hp_protection(status, hp, expected, source):
+    report = game_state.injury_report(team_events() + [battle_result(hp=hp, maximum=45, status=status)], 1, now=1002)
+    assert report["max_injury"] == expected
+    assert report["members"][0]["injury_source"] == source
+
+
+def test_new_battle_or_expired_evidence_cannot_reuse_old_status():
+    events = team_events() + [battle_result(hp=34, maximum=45)]
+    state = game_state.sword_facts(events)
+    assert game_state.sword_injury(state, "111", now=1700) == ("轻伤", "hp")
+    events.append(event({}, "/battle/battle", 1002))
+    assert game_state.injury_report(events, 1, now=1003) is None
+
+
+def test_return_then_fresh_identical_hp_keeps_battle_status():
+    events = team_events() + [battle_result(hp=34, maximum=45),
+                             event({}, "/sally/return", 1002)]
+    assert game_state.injury_report(events, 1, now=1003) is None
+    fresh = team_events(34)[0]
+    fresh["endpoint"] = "/sally"
+    fresh["payload"]["now_time"] = 1003
+    report = game_state.injury_report(events + [fresh], 1, now=1004)
+    assert report["max_injury"] == "中伤"
+    assert report["members"][0]["injury_source"] == "battle_status"
+
+
+def test_older_hp_update_does_not_erase_newer_battle_evidence():
+    events = team_events() + [battle_result(hp=34, maximum=45, at=1002),
+        event({"sword": {"111": {"hp": 45}}}, "/home", 1001)]
+    assert game_state.injury_report(events, 1, now=1003)["members"][0]["injury_source"] == "battle_status"
+
+
+def test_repair_and_roster_use_the_same_battle_status_as_departure():
+    from touken import sword_db
+    from touken.flows.repair import RepairMixin
+    from touken.flows.team_roster import _roster_facts_from_events
+    now = __import__("time").time()
+    first = team_events()[0]
+    first["payload"]["now_time"] = now - 2
+    events = [first, battle_result(hp=34, maximum=45, at=now - 1)]
+    state = game_state.sword_facts(events)
+    name = sword_db.find_game_sword(118)[1]["name_zh"]
+    repair = RepairMixin._repair_row_fact({"name": name, "prefix": "一之一"}, state)
+    assert repair["injury"] == "中伤"
+    roster = _roster_facts_from_events(events, 1, now=now)
+    assert roster[1]["injury"] == "medium"
+
+
 def test_sparse_fields_keep_individual_observation_times():
     facts = game_state.resource_facts([
         event({"resource": {"charcoal": 100}, "currency": {"money": 50}}, at=1000),

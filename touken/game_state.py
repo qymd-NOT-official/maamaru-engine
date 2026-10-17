@@ -94,7 +94,9 @@ def sword_facts(events):
     """Reduce full snapshots and sparse updates by instance and field, in event order."""
     swords, parties = {}, {}
     hp_times, slot_times, field_times, field_indices = {}, {}, {}, {}
+    battle_injuries = {}
     combat_index, combat_at = -1, 0
+    battle_index = -1
     for index, event in enumerate(events):
         body = successful_body(event)
         at = youzu_log._event_epoch(event)
@@ -117,6 +119,11 @@ def sword_facts(events):
                 serial = str(row.get("serial_id") or key)
                 if not serial.isdigit() or int(serial) <= 0:
                     continue
+                evidence = battle_injuries.get(serial)
+                if evidence and at >= evidence["at"] and any(
+                        field in row and youzu_log._int(row[field], -1) != evidence[field]
+                        for field in ("hp", "hp_max")):
+                    battle_injuries.pop(serial, None)
                 current = swords.setdefault(serial, {})
                 times = field_times.setdefault(serial, {})
                 for field, value in row.items():
@@ -149,13 +156,67 @@ def sword_facts(events):
         if endpoint.startswith(("/battle", "/sally/")):
             combat_index = index
             combat_at = max(combat_at, at)
+        if endpoint.startswith("/battle"):
+            battle_index = index
+        # Only our own completed battle results carry injury status. The same
+        # field on roster rows has a different meaning and must never be used.
+        result = body.get("result") if endpoint.startswith("/battle/") else None
+        player = result.get("player") if isinstance(result, dict) else None
+        party = player.get("party") if isinstance(player, dict) else None
+        slots = party.get("slot") if isinstance(party, dict) else None
+        for row in (slots.values() if isinstance(slots, dict) else ()):
+            if not isinstance(row, dict):
+                continue
+            serial = str(row.get("serial_id") or "")
+            hp = youzu_log._int(row.get("hp"), -1)
+            maximum = youzu_log._int(row.get("hp_max"), 0)
+            if not serial.isdigit() or int(serial) <= 0 or not 0 <= hp <= maximum or maximum <= 0:
+                continue
+            current = swords.setdefault(serial, {})
+            times = field_times.setdefault(serial, {})
+            if at < times.get("hp", 0):
+                continue
+            for field in ("hp", "hp_max", "sword_id", "fatigue"):
+                if field in row and at >= times.get(field, 0):
+                    current[field], times[field] = row[field], at
+                    field_indices.setdefault(serial, {})[field] = index
+            hp_times[serial] = (at, index)
+            battle_injuries[serial] = {"status": row.get("status"), "hp": hp,
+                                      "hp_max": maximum, "at": at, "index": index}
     return {"swords": swords, "parties": parties, "hp_times": hp_times,
+            "battle_injuries": battle_injuries,
+            "battle_index": battle_index,
             "slot_times": slot_times, "field_times": field_times, "field_indices": field_indices,
             "combat_index": combat_index, "combat_at": combat_at}
 
 
+def sword_injury(state, serial, *, now=None, max_age=FACT_MAX_AGE):
+    """Use observed battle injury codes only for the same instance and HP.
+
+    Codes 0 (healthy) and 2 (medium injury) have current runtime samples.
+    Other codes use HP until calibrated; conflicting heavy HP never passes.
+    """
+    serial = str(serial)
+    sword = state["swords"].get(serial, {})
+    hp = youzu_log._int(sword.get("hp"), -1)
+    maximum = youzu_log._int(sword.get("hp_max"), 0)
+    fallback = youzu_log.injury_tier(hp, maximum)
+    evidence = (state.get("battle_injuries") or {}).get(serial)
+    now = time.time() if now is None else now
+    if (not evidence or not 0 <= now - evidence["at"] <= max_age
+            or evidence["index"] < state.get("battle_index", state["combat_index"])
+            or (hp, maximum) != (evidence["hp"], evidence["hp_max"])):
+        return fallback, "hp"
+    code = str(evidence["status"])
+    if code == "0" and hp == maximum and maximum > 0:
+        return None, "battle_status"
+    if code == "2" and 0 < hp < maximum and fallback != "重伤":
+        return "中伤", "battle_status"
+    return fallback, "hp"
+
+
 def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
-    """Merged member HP is authoritative; missing post-battle HP remains unknown."""
+    """Current members use battle injury codes with HP fallback; stale HP is unknown."""
     from . import sword_db
     state = sword_facts(events)
     now = time.time() if now is None else now
@@ -178,9 +239,10 @@ def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
         if not 0 <= hp <= maximum or maximum <= 0:
             return None
         name = youzu_log._sword_name(sword.get("sword_id"), sword_db)
+        injury, injury_source = sword_injury(state, serial, now=now, max_age=max_age)
         members.append({"serial_id": int(serial), "name": name, "label": name,
                         "hp": hp, "hp_max": maximum,
-                        "injury": youzu_log.injury_tier(hp, maximum)})
+                        "injury": injury, "injury_source": injury_source})
         hp_ages.append(hp_at)
         party_ages.append(party_at)
     if not members:

@@ -263,8 +263,8 @@ class RepairMixin:
         """A screen row locates an instance; JSON supplies HP and team membership."""
         if not state:
             return None
-        from ..game_state import FACT_MAX_AGE
-        from ..youzu_log import _int, injury_tier
+        from ..game_state import FACT_MAX_AGE, sword_injury
+        from ..youzu_log import _int
         hit = sword_db.find_by_name(row["name"])
         if not hit:
             return None
@@ -282,7 +282,7 @@ class RepairMixin:
                            for slot, member in slots.items() if str(member) == serial
                            and 0 <= now - state["slot_times"][team][slot] <= FACT_MAX_AGE]
             candidates.append({"serial_id": int(serial), "catalog_id": found[0],
-                               "hp": hp, "hp_max": maximum, "injury": injury_tier(hp, maximum),
+                               "hp": hp, "hp_max": maximum, "injury": sword_injury(state, serial, now=now)[0],
                                "team_no": memberships[0][0] if len(memberships) == 1 else None,
                                "memberships": memberships})
         if not candidates:

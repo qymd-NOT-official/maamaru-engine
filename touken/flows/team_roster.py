@@ -436,7 +436,7 @@ def _roster_facts_from_events(events, team_no, *, now=None):
       - 当前页是哪支部队由调用方用行首位置标签视觉锚定后传入 team_no。
     """
     from .. import youzu_log
-    from ..game_state import FACT_MAX_AGE, sword_facts
+    from ..game_state import FACT_MAX_AGE, sword_facts, sword_injury
     now = time.time() if now is None else now
     state = sword_facts(events)
     party = state["parties"].get(str(team_no)) or {}
@@ -478,7 +478,7 @@ def _roster_facts_from_events(events, team_no, *, now=None):
             maximum = youzu_log._int(sword.get("hp_max"), 0)
             if maximum > 0 and 0 <= hp <= maximum:
                 fact["survival"], fact["survival_max"] = hp, maximum
-                tier = youzu_log.injury_tier(hp, maximum)
+                tier = sword_injury(state, serial, now=now)[0]
                 fact["injury"] = "none" if tier is None else _INJURY_ENUM[tier]
         fatigue_at = times.get("fatigue")
         fatigue_index = (state["field_indices"].get(serial) or {}
