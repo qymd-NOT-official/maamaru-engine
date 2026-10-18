@@ -24,6 +24,8 @@ KNOWN = {
     'boot/volume-arrow': (0.496, 0.681),
     'boot/honmaru-button': (0.492, 0.731),
     'formation/label': (0.060, 0.134),
+    'notice/close': (0.833, 0.164),          # 公告栏右上 ✕（采自 944 高窗口帧）
+    'notice/hide-forever': (0.847, 0.658),   # 公告栏右侧「今後表示しない」绿条
 }
 
 pytestmark = pytest.mark.skipif(
@@ -219,6 +221,51 @@ def test_near_black_counts_as_loading_then_timeout():
 def greeting_frame():
     """登录问候：近侍全身像无 UI——没有可匹配元素，用纯色不暗帧充当。"""
     return Image.new('RGB', (1508, 1088), (60, 60, 70))
+
+
+def notice_frame():
+    """公告栏：右上 ✕ + 右侧绿条都中才算。"""
+    return fake_screen('notice/close', 'notice/hide-forever')
+
+
+NOTICE_CLOSE_CLICK = KNOWN['notice/close']
+
+
+def test_notice_board_closed_during_navigation():
+    """公告栏挡在导航路上：认出后点 ✕ 关掉，照常出阵。"""
+    browser = FakeBrowser([notice_frame()] + happy_frames())
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1)
+    assert click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
+    assert any('公告栏' in line for line in logs)
+    assert any('出阵完成' in line for line in logs)
+
+
+def test_notice_board_during_boot_gets_closed(monkeypatch):
+    """启动序列撞上公告栏：点 ✕ 关掉，不影响回本丸。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    frames = [
+        fake_screen('boot/volume-arrow'),
+        fake_screen('boot/honmaru-button'),
+        greeting_frame(), greeting_frame(),    # 登录问候（unknown 稳定后点中央）
+        notice_frame(),                        # 公告栏
+        fake_screen('home/badge'),
+    ]
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    assert click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
+    assert any('重新进入本丸' in line for line in logs)
+
+
+def test_notice_during_march_still_stops():
+    """行军途中弹出公告栏：不在白名单里，安全停车，绝不盲点。"""
+    frames = happy_frames()[:12] + [notice_frame()]
+    browser = FakeBrowser(frames)
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='不认识'):
+        sally.run(team_no=1, rounds=1)
+    assert not click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
 
 
 def test_black_loading_too_long_reloads_and_boots(monkeypatch):

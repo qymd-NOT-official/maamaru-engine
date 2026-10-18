@@ -42,6 +42,7 @@ SCREENS = (
     ('loading', ('loading/sakura',)),
     ('automarch_dialog', ('dialog/automarch-request',)),
     ('dialog', ('dialog/yes', 'dialog/no')),      # 两个按钮都中才算弹窗
+    ('notice', ('notice/close', 'notice/hide-forever')),  # 公告栏：✕ + 绿条都中才算
     ('boot_arrow', ('boot/volume-arrow',)),       # 启动「音量注意」
     ('boot_honmaru', ('boot/honmaru-button',)),   # 标题页「本丸」按钮
     ('formation', ('formation/label',)),          # 编成页（停留现场，点 ↩ 回本丸）
@@ -187,13 +188,17 @@ class Sally:
                 elif screen == 'boot_honmaru':
                     self._click_hit('boot/honmaru-button', '标题页本丸按钮', image=image)
                     entered = True
+                elif screen == 'notice':
+                    self.log('公告栏开着，点掉继续')
+                    self._click_hit('notice/close', '公告栏关闭', image=image)
                 elif (entered and not greeted and screen == 'unknown'
                         and unknown_since is not None
                         and time.monotonic() - unknown_since > GREET_STABLE):
                     # 点过本丸按钮后的合理落点只有登录问候（近侍无 UI 全身像）。
                     # 它没有可匹配的固定元素，认图无解——此处上下文收敛，
                     # 等画面稳定 4 秒后点一次中央跳过问候。只点这一次；若猜错
-                    # （如是公告页），后续画面不动会触发卡死熔断，安全停车。
+                    # 画面，公告栏会被认出点掉，其余陌生画面不动会触发卡死
+                    # 熔断，安全停车。
                     self.log('跳过登录问候…')
                     self.b.click(0.5, 0.5)
                     greeted = True
@@ -275,7 +280,10 @@ class Sally:
             else:
                 loading_since = None
                 unknown_since = None
-            if screen == 'home':
+            if screen == 'notice':
+                self.log('公告栏开着，点掉继续')
+                self._click_hit('notice/close', '公告栏关闭', image=image)
+            elif screen == 'home':
                 self._click_hit('home/catalog', '目录按钮', image=image)
             elif screen == 'directory':
                 self._click_hit('directory/sally', '目录出阵入口', image=image)
