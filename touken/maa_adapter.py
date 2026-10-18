@@ -175,6 +175,12 @@ class MAAAdapter:
         self._maa_timeouts = 0  # 连续识别超时计数
         self._revive_attempts = 0  # 本场运行已抢救次数
 
+        # 模板匹配引擎：maa（默认，现状）/ cv2（自研替换件）/ ab（双跑对比，
+        # 以 MAA 结果为准，日志并排记录两边结果供阈值校准）。
+        # 拆 MAA 过渡期专用，迁完删掉。
+        engine = os.environ.get('MAAMARU_TEMPLATE_ENGINE', 'maa').strip().lower()
+        self._template_engine = engine if engine in ('maa', 'cv2', 'ab') else 'maa'
+
         self._initialized = False
 
     # ---------- MAA 任务限时等待（同线程轮询，不开新线程） ----------
@@ -710,10 +716,51 @@ class MAAAdapter:
         except Exception:
             pass
 
+    def _template_match_cv2(self, template: str, roi: Optional[Region],
+                            threshold: float):
+        """模板匹配（自研 cv2 引擎）；返回 (x, y, score) 或 None。"""
+        from . import vision_cv2
+        image = self.screenshot()
+        if image is None:
+            return None
+        path = Path(self.resource_dir) / 'image' / template
+        try:
+            return vision_cv2.match(
+                image, path, roi.to_tuple() if roi else None, threshold)
+        except FileNotFoundError:
+            print(f"[cv2模板] 模板不存在: {template}")
+            return None
+        except Exception as exc:
+            print(f"[cv2模板] 匹配异常: {exc}")
+            return None
+
     def template_match(self, template: str, roi: Optional[Region] = None,
                        threshold: float = 0.7) -> Optional[Point]:
+        """模板匹配入口：按 _template_engine 路由（maa/cv2/ab 双跑）。"""
+        engine = self._template_engine
+        if engine == 'cv2':
+            hit = self._template_match_cv2(template, roi, threshold)
+            if hit is None:
+                print(f"[cv2] 模板未命中: {template}, threshold={threshold}")
+                return None
+            print(f"[cv2] 模板命中: {template} at ({hit[0]}, {hit[1]}), "
+                  f"score={hit[2]:.3f}")
+            return Point(hit[0], hit[1])
+        if engine == 'ab':
+            maa_point = self._template_match_maa(template, roi, threshold)
+            hit = self._template_match_cv2(template, roi, threshold)
+            maa_desc = (f'命中({maa_point.x},{maa_point.y})'
+                        if maa_point else '未命中')
+            cv2_desc = (f'命中({hit[0]},{hit[1]}) score={hit[2]:.3f}'
+                        if hit else '未命中')
+            print(f"[AB模板] {template}: maa={maa_desc} cv2={cv2_desc}")
+            return maa_point
+        return self._template_match_maa(template, roi, threshold)
+
+    def _template_match_maa(self, template: str, roi: Optional[Region] = None,
+                            threshold: float = 0.7) -> Optional[Point]:
         """
-        模板匹配
+        模板匹配（MAA 引擎）
 
         Args:
             template: 模板图片名（相对 resource/base/image 目录）
@@ -769,6 +816,30 @@ class MAAAdapter:
         以较低阈值获取候选的真实分；未识别出结果或超时返回 0.0，
         调用方自行做阈值与区分度判定。
         """
+        engine = self._template_engine
+        if engine == 'cv2':
+            from . import vision_cv2
+            image = self.screenshot()
+            if image is None:
+                return 0.0
+            path = Path(self.resource_dir) / 'image' / template
+            try:
+                return vision_cv2.match_score(
+                    image, path, roi.to_tuple() if roi else None, threshold)
+            except Exception as exc:
+                print(f"[cv2模板] 分数异常: {exc}")
+                return 0.0
+        if engine == 'ab':
+            maa_score = self._template_match_score_maa(template, roi, threshold)
+            hit = self._template_match_cv2(template, roi, threshold)
+            print(f"[AB模板分] {template}: maa={maa_score:.3f} "
+                  f"cv2={hit[2] if hit else 0.0:.3f}")
+            return maa_score
+        return self._template_match_score_maa(template, roi, threshold)
+
+    def _template_match_score_maa(self, template: str, roi: Optional[Region] = None,
+                                  threshold: float = 0.5) -> float:
+        """模板匹配只取分数（MAA 引擎）。"""
         image = self.screenshot()
         if image is None:
             return 0.0
