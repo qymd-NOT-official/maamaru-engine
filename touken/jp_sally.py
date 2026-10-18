@@ -42,6 +42,7 @@ SCREENS = (
     ('loading', ('loading/sakura',)),
     ('automarch_dialog', ('dialog/automarch-request',)),
     ('dialog', ('dialog/yes', 'dialog/no')),      # 两个按钮都中才算弹窗
+    ('confirm', ('dialog/decline', 'dialog/accept')),  # 内番续班等 はい/いいえ 确认窗
     ('notice', ('notice/close', 'notice/hide-forever')),  # 公告栏：✕ + 绿条都中才算
     ('boot_arrow', ('boot/volume-arrow',)),       # 启动「音量注意」
     ('boot_honmaru', ('boot/honmaru-button',)),   # 标题页「本丸」按钮
@@ -188,6 +189,9 @@ class Sally:
                 elif screen == 'boot_honmaru':
                     self._click_hit('boot/honmaru-button', '标题页本丸按钮', image=image)
                     entered = True
+                elif screen == 'confirm':
+                    self.log('确认窗默认选否，继续')
+                    self._click_hit('dialog/decline', '确认窗いいえ', image=image)
                 elif screen == 'notice':
                     self.log('公告栏开着，点掉继续')
                     self._click_hit('notice/close', '公告栏关闭', image=image)
@@ -283,6 +287,9 @@ class Sally:
             if screen == 'notice':
                 self.log('公告栏开着，点掉继续')
                 self._click_hit('notice/close', '公告栏关闭', image=image)
+            elif screen == 'confirm':
+                self.log('确认窗默认选否，继续')
+                self._click_hit('dialog/decline', '确认窗いいえ', image=image)
             elif screen == 'home':
                 self._click_hit('home/catalog', '目录按钮', image=image)
             elif screen == 'directory':

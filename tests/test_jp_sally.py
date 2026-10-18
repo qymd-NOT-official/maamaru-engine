@@ -26,6 +26,8 @@ KNOWN = {
     'formation/label': (0.060, 0.134),
     'notice/close': (0.833, 0.164),          # 公告栏右上 ✕（采自 944 高窗口帧）
     'notice/hide-forever': (0.847, 0.658),   # 公告栏右侧「今後表示しない」绿条
+    'dialog/decline': (0.385, 0.819),        # 确认窗 いいえ（采自 944 高窗口帧）
+    'dialog/accept': (0.597, 0.831),         # 确认窗 はい
 }
 
 pytestmark = pytest.mark.skipif(
@@ -266,6 +268,55 @@ def test_notice_during_march_still_stops():
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
         sally.run(team_no=1, rounds=1)
     assert not click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
+
+
+def confirm_frame():
+    """内番续班等确认窗：いいえ + はい 都中才算。"""
+    return fake_screen('dialog/decline', 'dialog/accept')
+
+
+DECLINE_CLICK = KNOWN['dialog/decline']
+ACCEPT_CLICK = KNOWN['dialog/accept']
+
+
+def test_confirm_dialog_declined_during_navigation():
+    """导航路上撞见确认窗：默认点 いいえ 拒绝，照常出阵；绝不碰 はい。"""
+    browser = FakeBrowser([confirm_frame()] + happy_frames())
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1)
+    assert click_near(browser.clicks, *DECLINE_CLICK)
+    assert not click_near(browser.clicks, *ACCEPT_CLICK)
+    assert any('确认窗默认选否' in line for line in logs)
+    assert any('出阵完成' in line for line in logs)
+
+
+def test_confirm_dialog_during_boot_gets_declined(monkeypatch):
+    """启动序列撞上确认窗：点 いいえ 拒掉，不影响回本丸。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    frames = [
+        fake_screen('boot/volume-arrow'),
+        fake_screen('boot/honmaru-button'),
+        greeting_frame(), greeting_frame(),    # 登录问候（unknown 稳定后点中央）
+        confirm_frame(),                       # 确认窗
+        fake_screen('home/badge'),
+    ]
+    browser = FakeBrowser(frames)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    assert click_near(browser.clicks, *DECLINE_CLICK)
+    assert not click_near(browser.clicks, *ACCEPT_CLICK)
+    assert any('重新进入本丸' in line for line in logs)
+
+
+def test_confirm_during_march_still_stops():
+    """行军途中弹出确认窗：不在白名单里，安全停车，两个按钮都不点。"""
+    frames = happy_frames()[:12] + [confirm_frame()]
+    browser = FakeBrowser(frames)
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='不认识'):
+        sally.run(team_no=1, rounds=1)
+    assert not click_near(browser.clicks, *DECLINE_CLICK)
+    assert not click_near(browser.clicks, *ACCEPT_CLICK)
 
 
 def test_black_loading_too_long_reloads_and_boots(monkeypatch):
