@@ -16,6 +16,11 @@ dependencies = [
     "pillow>=10.0",
     "openpyxl>=3.1",
     "websocket-client>=1.8",
+    # 日服画面文字识别。注意：它会拖进完整版 opencv-python，与本项目
+    # 钉死的 headless 版撞 cv2 目录——装依赖后必须卸掉完整版再重装
+    # headless（release 流水线已内置这一步；本机开发装一次即可）。
+    "rapidocr_onnxruntime>=1.4",
+    "onnxruntime>=1.17",
 ]
 
 [project.optional-dependencies]

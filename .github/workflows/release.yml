@@ -114,6 +114,14 @@ jobs:
       - name: 安装构建依赖
         run: python -m pip install ".[test]" pyinstaller
 
+      - name: 还原无界面图形库
+        # rapidocr_onnxruntime 声明依赖完整版 opencv-python，与项目钉死的
+        # headless 版撞 cv2 目录；打包前卸掉完整版再强制重装 headless，
+        # 保证进安装包的是无界面版（体积小、无 GUI 依赖）。
+        run: |
+          python -m pip uninstall -y opencv-python
+          python -m pip install --force-reinstall --no-deps opencv-python-headless
+
       - name: 运行完整测试
         # windows-latest 控制台是 cp1252，裸 print 中文会炸；
         # ubuntu 的 Check 流水线没这问题，这里必须显式 UTF-8
@@ -123,6 +131,14 @@ jobs:
 
       - name: 构建启动器
         run: python -m PyInstaller --clean --noconfirm "まあ丸启动器.spec"
+
+      - name: 检查文字识别组件已打进成品
+        shell: pwsh
+        run: |
+          $root = "dist/まあ丸启动器/_internal"
+          foreach ($p in @("rapidocr_onnxruntime/models", "onnxruntime/capi")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $p))) { throw "成品缺少文字识别组件：$p" }
+          }
 
       - name: 检查成品不含用户数据
         shell: pwsh

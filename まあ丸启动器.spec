@@ -4,6 +4,9 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 maa_datas, maa_binaries, maa_hidden = collect_all('maa')
 webview_datas, webview_binaries, webview_hidden = collect_all('webview')
+# 文字识别引擎：模型文件在包内（约 16MB），onnxruntime 有原生库
+rapidocr_datas, rapidocr_binaries, rapidocr_hidden = collect_all('rapidocr_onnxruntime')
+onnx_datas, onnx_binaries, onnx_hidden = collect_all('onnxruntime')
 
 datas = [
     ('panel/static', 'panel/static'),
@@ -22,9 +25,9 @@ datas = [
     ('touken/data', 'touken/data'),
     ('resource', 'resource'),
     ('profiles', 'profiles'),
-] + maa_datas + webview_datas
+] + maa_datas + webview_datas + rapidocr_datas + onnx_datas
 
-binaries = maa_binaries + webview_binaries
+binaries = maa_binaries + webview_binaries + rapidocr_binaries + onnx_binaries
 
 hiddenimports = [
     'uvicorn.logging',
@@ -33,7 +36,8 @@ hiddenimports = [
     'uvicorn.protocols.websockets.auto',
     'uvicorn.lifespan.on',
     'panel.worker',
-] + collect_submodules('uvicorn') + maa_hidden + webview_hidden
+] + collect_submodules('uvicorn') + maa_hidden + webview_hidden \
+  + rapidocr_hidden + onnx_hidden
 
 a = Analysis(
     ['maamaru_launcher.py'],
