@@ -12,7 +12,13 @@ from __future__ import annotations
 
 import numpy as np
 
+from .runtime_paths import RESOURCE_DIR
+
 _engine = None
+
+# 优先用仓里随包发行的 PP-OCRv6 三件套（与国服同源权重，日文也在
+# 字表里，实测比引擎自带模型更快更准）；文件缺失时回退引擎自带模型。
+_MODEL_DIR = RESOURCE_DIR / 'model' / 'ocr'
 
 
 def _get_engine():
@@ -24,7 +30,14 @@ def _get_engine():
             raise RuntimeError(
                 '文字识别组件没装上（缺 rapidocr_onnxruntime），'
                 '请重新安装まあ丸或联系作者') from exc
-        _engine = RapidOCR()
+        det, rec, keys = (_MODEL_DIR / 'det.onnx', _MODEL_DIR / 'rec.onnx',
+                          _MODEL_DIR / 'keys.txt')
+        if all(p.is_file() for p in (det, rec, keys)):
+            _engine = RapidOCR(det_model_path=str(det),
+                               rec_model_path=str(rec),
+                               rec_keys_path=str(keys))
+        else:
+            _engine = RapidOCR()
     return _engine
 
 
