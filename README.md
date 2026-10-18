@@ -13,7 +13,7 @@
 
 国服可以交给它跑任务，也可以只用来记账；日服可以连接游戏浏览器，边玩边更新本丸记录。
 
-**[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[使用指南](docs/user-manual.md)** · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[逛逛介绍站](https://maamaru-honmaru.sassycoot2.chatgpt.site)** · **[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[使用指南](docs/user-manual.md)** · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 ## 还想玩，只是不想每天再点一遍日课
 

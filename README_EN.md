@@ -13,7 +13,7 @@ I have played Touken Ranbu for nine years, and I still want to keep playing. I j
 
 On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play. The app's interface is in Simplified Chinese.
 
-**[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
+**[Visit the website (Chinese)](https://maamaru-honmaru.sassycoot2.chatgpt.site)** · **[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
 ## Keep playing, without clicking through the same dailies
 
