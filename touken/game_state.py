@@ -176,13 +176,25 @@ def sword_facts(events):
             times = field_times.setdefault(serial, {})
             if at < times.get("hp", 0):
                 continue
-            for field in ("hp", "hp_max", "sword_id", "fatigue"):
+            for field in ("hp", "hp_max", "sword_id", "fatigue",
+                          "equip_serial_id1", "equip_serial_id2", "equip_serial_id3"):
                 if field in row and at >= times.get(field, 0):
                     current[field], times[field] = row[field], at
                     field_indices.setdefault(serial, {})[field] = index
             hp_times[serial] = (at, index)
             battle_injuries[serial] = {"status": row.get("status"), "hp": hp,
                                       "hp_max": maximum, "at": at, "index": index}
+        # A complete current battle roster can renew an existing team binding.
+        # Never infer a team from a partial result or from sword names.
+        if isinstance(slots, dict) and slots:
+            roster = {str(slot): str(row.get("serial_id", "")) for slot, row in slots.items()
+                      if isinstance(row, dict)}
+            matching = [team for team, members in parties.items()
+                        if roster == {slot: str(serial) for slot, serial in members.items()
+                                      if serial not in (None, "", 0, "0")}]
+            if len(matching) == 1:
+                for slot in roster:
+                    slot_times[matching[0]][slot] = max(at, slot_times[matching[0]].get(slot, 0))
     return {"swords": swords, "parties": parties, "hp_times": hp_times,
             "battle_injuries": battle_injuries,
             "battle_index": battle_index,
@@ -253,6 +265,43 @@ def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
     return {"party_no": team_no, "members": members,
             "max_injury": max((m["injury"] for m in members), key=rank.get),
             "observed_epoch": min(hp_ages), "party_observed_epoch": min(party_ages)}
+
+
+def team_maintenance_facts(events, team_no, *, now=None):
+    """Fresh member identities, fatigue and equipped slots for floor-end upkeep."""
+    now = time.time() if now is None else now
+    if injury_report(events, team_no, now=now) is None:
+        return None
+    state = sword_facts(events)
+    fatigue, equipment = {}, {}
+    fatigue_known = equipment_known = True
+    for slot, serial in state["parties"][str(team_no)].items():
+        if serial in (None, "", 0, "0"):
+            continue
+        serial = str(serial)
+        row = state["swords"][serial]
+
+        def current(field):
+            at = state["field_times"][serial].get(field, 0)
+            index = state["field_indices"][serial].get(field, -1)
+            return (field in row and 0 <= now - at <= FACT_MAX_AGE
+                    and at >= state["combat_at"] and index >= state["combat_index"])
+
+        value = row.get("fatigue")
+        if current("fatigue") and not isinstance(value, bool) and str(value).isdigit() and 0 <= int(value) <= 100:
+            fatigue[int(slot)] = int(value)
+        else:
+            fatigue_known = False
+        equipped = []
+        for number in (1, 2, 3):
+            field = f"equip_serial_id{number}"
+            value = row.get(field)
+            if not current(field) or (value is not None and not str(value).isdigit()):
+                equipment_known = False
+            equipped.append(value is not None and youzu_log._int(value, 0) > 0)
+        equipment[serial] = tuple(equipped)
+    return {"fatigue": fatigue if fatigue_known else None,
+            "equipment": equipment if equipment_known else None}
 
 
 def expedition_settlements(events, after, exclude=()):

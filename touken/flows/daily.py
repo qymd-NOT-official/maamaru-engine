@@ -502,7 +502,9 @@ class DailyMixin:
                         formation=sortie_plan.get("formation", "鱼鳞阵"),
                         repair_threshold=sortie_plan.get("repair_threshold", "light"),
                         injury_action=sortie_plan.get("repair_on_injury", "continue"),
-                        auto_equip=sortie_plan.get("auto_equip", True)):
+                        auto_equip=sortie_plan.get("auto_equip", True),
+                        rotate_captain=sortie_plan.get("rotate_captain", False),
+                        rotate_captain_margin=sortie_plan.get("rotate_captain_margin", 10)):
                     yield msg
                     if _is_fail(msg):
                         ok = False

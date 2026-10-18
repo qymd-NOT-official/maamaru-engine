@@ -390,7 +390,7 @@ _DAILY_BATTLE_KEYS = {
                "repair_on_injury", "auto_equip", "rotate_captain",
                "rotate_captain_margin", "retreat_before_boss"),
     "osaka": ("formation_mode", "formation", "repair_threshold",
-              "repair_on_injury", "auto_equip"),
+              "repair_on_injury", "auto_equip", "rotate_captain", "rotate_captain_margin"),
 }
 
 
@@ -482,7 +482,9 @@ def _daily_plan_inputs(params):
                        "formation": params.get("formation") or "鱼鳞阵",
                        "repair_threshold": params.get("repair_threshold") or "light",
                        "repair_on_injury": params.get("repair_on_injury") or "continue",
-                       "auto_equip": _bool(params.get("auto_equip", True))}
+                       "auto_equip": _bool(params.get("auto_equip", True)),
+                       "rotate_captain": _bool(params.get("rotate_captain", False)),
+                       "rotate_captain_margin": _i(params, "rotate_captain_margin", 10)}
     else:
         sortie_plan = {"mode": "none"}
     if mode != "none":
@@ -698,7 +700,9 @@ def _build_osaka(agent, config_path, params):
         formation=params.get("formation") or "鱼鳞阵",
         repair_threshold=params.get("repair_threshold") or "light",
         injury_action=params.get("repair_on_injury") or "continue",
-        auto_equip=_bool(params.get("auto_equip", True)))
+        auto_equip=_bool(params.get("auto_equip", True)),
+        rotate_captain=_bool(params.get("rotate_captain", False)),
+        rotate_captain_margin=_i(params, "rotate_captain_margin", 10))
 
 
 def _build_sakura(agent, config_path, params):
@@ -1075,7 +1079,7 @@ register_script("daily", "一键日课", "",
                          "label": "自动换队长", "default": False,
                          "help": "出阵前读全队疲劳，把疲劳最低的拖到队长位吃加成（保花用）。",
                          "visibleWhen": {"key": "sortie_mode",
-                                         "is_any": ["yosari", "sortie"]}},
+                                         "is_any": ["yosari", "sortie", "osaka"]}},
                         {"key": "rotate_captain_margin", "type": "select",
                          "label": "换队长阈值",
                          "options": [["5", "相差 5 点"], ["10", "相差 10 点"],
@@ -1083,7 +1087,7 @@ register_script("daily", "一键日课", "",
                          "default": "10",
                          "help": "全队最低疲劳比当前队长低到这个差值时才换，避免差距很小时频繁调整。",
                          "visibleWhen": {"all": [
-                             {"key": "sortie_mode", "is_any": ["yosari", "sortie"]},
+                             {"key": "sortie_mode", "is_any": ["yosari", "sortie", "osaka"]},
                              {"key": "rotate_captain", "is": True}]}},
                         {"key": "after", "type": "select", "label": "跑完后（默认啥也不干）",
                          "options": [["none", "啥也不干"],
@@ -1193,7 +1197,8 @@ register_script("osaka", "大阪城挖地", "逐层手动行军；没有自动�
                          "default": "continue"},
                         {"key": "auto_equip", "type": "toggle",
                          "label": "是否自动补充刀装", "default": True,
-                         "help": "任务首次出阵前保存到记录一；出现刀装未满提示时，自动用记录一补齐并重新检查伤势。"}])
+                         "help": "任务首次出阵前保存到记录一；层末发现原有刀装被破坏时回本丸，按记录一补齐后继续剩余层数。"},
+                        *_captain_rotation_fields()])
 register_script("sakura", "刷花", "队长单挑 1-1 刷疲劳到 100，满了自动换人",
                 _wrap_inventory("刷花", _build_sakura),
                 params=[_team_field("1"),

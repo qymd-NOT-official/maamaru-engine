@@ -36,7 +36,32 @@ class PlanInputsCutTests(unittest.TestCase):
         plan = server._daily_plan_inputs(
             {"sortie_mode": "osaka", "repair_on_injury": "repair_stop"})[2]
         self.assertEqual(plan["repair_on_injury"], "repair_stop")
-        self.assertNotIn("rotate_captain", plan)  # 大阪城没有换队长
+        self.assertFalse(plan["rotate_captain"])
+        self.assertEqual(plan["rotate_captain_margin"], 10)
+
+    def test_osaka_rotation_settings_reach_daily_and_standalone_execution(self):
+        from unittest.mock import Mock
+        params = {"sortie_mode": "osaka", "rotate_captain": True,
+                  "rotate_captain_margin": "20"}
+        plan = server._daily_plan_inputs(params)[2]
+        self.assertTrue(plan["rotate_captain"])
+        self.assertEqual(plan["rotate_captain_margin"], 20)
+        agent = Mock()
+        agent.osaka_stream.return_value = iter(())
+        def team(*args):
+            yield from ()
+            return 3
+        with patch.object(server, "_team_with_preset_stream", team):
+            list(server._build_osaka(agent, "fake.json", params))
+        self.assertTrue(agent.osaka_stream.call_args.kwargs["rotate_captain"])
+        self.assertEqual(agent.osaka_stream.call_args.kwargs["rotate_captain_margin"], 20)
+
+    def test_osaka_rotation_fields_are_available_in_daily_and_workflows(self):
+        for fields in (server._SCRIPTS["osaka"]["params"],
+                       server._workflow.NODE_REGISTRY["osaka"]["params"]):
+            self.assertTrue({"rotate_captain", "rotate_captain_margin"}.issubset({field["key"] for field in fields}))
+        daily = next(field for field in server._SCRIPTS["daily"]["params"] if field["key"] == "rotate_captain")
+        self.assertIn("osaka", daily["visibleWhen"]["is_any"])
 
     def test_daily_sortie_carries_preset_to_the_execution_step(self):
         with patch.object(server, "_resolve_team",

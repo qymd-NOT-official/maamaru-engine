@@ -3,12 +3,36 @@
 
 import re
 import time
+from dataclasses import dataclass
 
 from ..maa_adapter import roi_4to4
-from ..game_state import available_events, successful_body, _request_key
+from ..game_state import available_events, successful_body, _request_key, team_maintenance_facts
 from .. import youzu_log
 from ..injury_recovery import RecoveryProgress, recover_injury_stream
 from ..flow_control import FlowAborted
+
+
+@dataclass(frozen=True)
+class _OsakaResume:
+    params: dict
+
+
+def maintenance_reasons(facts, *, rotate_captain, margin, auto_equip, equipment_baseline):
+    """Only verified fatigue gaps and destroyed equipped slots need a trip home."""
+    reasons = []
+    if facts is None:
+        return reasons
+    fatigue = facts["fatigue"]
+    if rotate_captain and fatigue and 1 in fatigue:
+        lowest = min(fatigue, key=fatigue.get)
+        if lowest != 1 and fatigue[1] - fatigue[lowest] >= max(1, int(margin)):
+            reasons.append("换队长")
+    equipment = facts["equipment"]
+    if auto_equip and equipment_baseline and equipment and equipment.keys() == equipment_baseline.keys():
+        if any(needed and not current for serial in equipment
+               for needed, current in zip(equipment_baseline[serial], equipment[serial])):
+            reasons.append("补刀装")
+    return reasons
 
 
 def koban_reward_summary(events, known_requests):
@@ -59,12 +83,16 @@ class OsakaMixin:
                      repair_threshold: str = "light",
                      injury_action: str = "continue",
                      auto_equip: bool = True,
+                     rotate_captain: bool = False,
+                     rotate_captain_margin: int = 10,
                      _target_floors: int = None,
                      _completed_floors: int = 0,
                      _repair_count: int = 0,
                      _speedups_used: int = 0,
                      _team_record_saved: bool = False,
-                     _auto_equip_active: bool = None):
+                     _auto_equip_active: bool = None,
+                     _equipment_baseline: dict = None,
+                     _maintenance_pending: tuple = ()):
         """从本趟游戏奖励记录自动汇总小判；递归续跑只在最外层结算。"""
         outermost = not getattr(self, "_osaka_koban_open", False)
         if outermost:
@@ -74,17 +102,24 @@ class OsakaMixin:
         if outermost:
             self._osaka_floors_total = 0
         try:
-            yield from self._osaka_stream_impl(
+            params = dict(
                 max_floors=max_floors, team_no=team_no,
                 select_floor=select_floor, target_floor=target_floor,
                 formation_mode=formation_mode,
                 formation=formation,
                 repair_threshold=repair_threshold, injury_action=injury_action,
                 auto_equip=auto_equip,
+                rotate_captain=rotate_captain, rotate_captain_margin=rotate_captain_margin,
                 _target_floors=_target_floors, _completed_floors=_completed_floors,
                 _repair_count=_repair_count, _speedups_used=_speedups_used,
                 _team_record_saved=_team_record_saved,
-                _auto_equip_active=_auto_equip_active)
+                _auto_equip_active=_auto_equip_active,
+                _equipment_baseline=_equipment_baseline, _maintenance_pending=_maintenance_pending)
+            while True:
+                result = yield from self._osaka_stream_impl(**params)
+                if not isinstance(result, _OsakaResume):
+                    break
+                params.update(result.params)
         finally:
             if outermost:
                 self._osaka_koban_open = False
@@ -117,12 +152,16 @@ class OsakaMixin:
                      repair_threshold: str = "light",
                      injury_action: str = "continue",
                      auto_equip: bool = True,
+                     rotate_captain: bool = False,
+                     rotate_captain_margin: int = 10,
                      _target_floors: int = None,
                      _completed_floors: int = 0,
                      _repair_count: int = 0,
                      _speedups_used: int = 0,
                      _team_record_saved: bool = False,
-                     _auto_equip_active: bool = None):
+                     _auto_equip_active: bool = None,
+                     _equipment_baseline: dict = None,
+                     _maintenance_pending: tuple = ()):
         if _target_floors is None:
             _target_floors = max_floors
         if _auto_equip_active is None:
@@ -198,9 +237,21 @@ class OsakaMixin:
                 formation_mode=formation_mode, formation=formation,
                 repair_threshold=repair_threshold, injury_action=injury_action,
                 auto_equip=auto_equip, _target_floors=_target_floors,
+                rotate_captain=rotate_captain, rotate_captain_margin=rotate_captain_margin,
                 _completed_floors=completed, _repair_count=_repair_count,
                 _speedups_used=_speedups_used, _team_record_saved=_team_record_saved,
-                _auto_equip_active=_auto_equip_active)
+                _auto_equip_active=_auto_equip_active, _equipment_baseline=_equipment_baseline)
+
+        def rotate_after_equipment():
+            # 使用记录一可能恢复旧队长顺序，必须在刀装恢复后重新验收轮换。
+            if rotate_captain:
+                result = yield from self._rotate_captain_here(rotate_captain_margin, team_no=team_no)
+                if result is False:
+                    return False
+                if not self._save_team_record(cfg, record_no=1):
+                    yield "[挖地] 换队长后没能更新记录一，停止出阵"
+                    return False
+            return True
 
         def stop_before_march(completed):
             if self._deny_heavy_injury_warning(cfg):
@@ -228,11 +279,27 @@ class OsakaMixin:
             cfg, team_no, "[挖地]",
             repair_threshold=repair_threshold,
             auto_equip=_auto_equip_active,
-            team_record_saved=_team_record_saved, departure_state=departure_state)
+            rotate_captain=rotate_captain, rotate_captain_margin=rotate_captain_margin,
+            team_record_saved=_team_record_saved, departure_state=departure_state,
+            after_equipment_stream=rotate_after_equipment)
         if not ok:
             if departure_state.get("blocked_injury"):
                 yield from recover_and_resume(departure_state["blocked_injury"], _completed_floors)
+            elif _maintenance_pending:
+                raise FlowAborted(f"[挖地] 层末整理后未通过安全出阵检查；剩余 {max_floors} 层未完成")
             return
+
+        facts = team_maintenance_facts(available_events(self.maa), team_no) if (rotate_captain or auto_equip) else None
+        if _equipment_baseline is None and facts is not None:
+            _equipment_baseline = facts["equipment"]
+        if _maintenance_pending:
+            unresolved = maintenance_reasons(facts, rotate_captain=rotate_captain,
+                margin=rotate_captain_margin, auto_equip=auto_equip, equipment_baseline=_equipment_baseline)
+            unknown = (facts is None or "换队长" in _maintenance_pending and facts["fatigue"] is None
+                       or "补刀装" in _maintenance_pending and facts["equipment"] is None)
+            if unknown or unresolved:
+                raise FlowAborted(f"[挖地] 层末整理结果未确认，剩余 {max_floors} 层未完成；停止出阵，不重复往返")
+            yield f"[挖地] 层末整理已确认，继续剩余 {max_floors} 层"
 
         # 大阪城没有手形，也没有自动行军；即刻出阵后只有普通二次确认。
         if not self._confirm_departure(cfg):
@@ -280,12 +347,14 @@ class OsakaMixin:
                     repair_threshold=repair_threshold,
                     injury_action=injury_action,
                     auto_equip=auto_equip,
+                    rotate_captain=rotate_captain, rotate_captain_margin=rotate_captain_margin,
                     _target_floors=_target_floors,
                     _completed_floors=total_completed,
                     _repair_count=_repair_count,
                     _speedups_used=_speedups_used,
                     _team_record_saved=_team_record_saved,
                     _auto_equip_active=_auto_equip_active,
+                    _equipment_baseline=_equipment_baseline,
                 )
                 return
 
@@ -309,12 +378,14 @@ class OsakaMixin:
                     repair_threshold=repair_threshold,
                     injury_action=injury_action,
                     auto_equip=auto_equip,
+                    rotate_captain=rotate_captain, rotate_captain_margin=rotate_captain_margin,
                     _target_floors=_target_floors,
                     _completed_floors=total_completed,
                     _repair_count=_repair_count,
                     _speedups_used=_speedups_used,
                     _team_record_saved=_team_record_saved,
                     _auto_equip_active=_auto_equip_active,
+                    _equipment_baseline=_equipment_baseline,
                 )
                 return
             if net_recovered == "resumed":
@@ -398,6 +469,25 @@ class OsakaMixin:
 
                     yield from recover_and_resume(injury, total_completed)
                     return
+                facts = team_maintenance_facts(available_events(self.maa), team_no) if (rotate_captain or auto_equip) else None
+                if facts and facts["equipment"] is not None:
+                    if _equipment_baseline is None or facts["equipment"].keys() != _equipment_baseline.keys():
+                        _equipment_baseline = facts["equipment"]
+                        _team_record_saved = False
+                        yield "[挖地] 当前队伍已更新，刀装参考按游戏现状翻篇"
+                upkeep = maintenance_reasons(facts, rotate_captain=rotate_captain,
+                    margin=rotate_captain_margin, auto_equip=auto_equip, equipment_baseline=_equipment_baseline)
+                if upkeep:
+                    yield f"[挖地] 层末需要{'、'.join(upkeep)}，返回本丸整理后继续"
+                    if not self._return_home_from_march(cfg):
+                        raise FlowAborted("[挖地] 层末整理没能确认返回本丸，已停止点击")
+                    self.current_location = "本丸"
+                    return _OsakaResume(dict(
+                        max_floors=_target_floors - total_completed,
+                        _target_floors=_target_floors, _completed_floors=total_completed,
+                        _repair_count=_repair_count, _speedups_used=_speedups_used,
+                        _team_record_saved=_team_record_saved, _auto_equip_active=_auto_equip_active,
+                        _equipment_baseline=_equipment_baseline, _maintenance_pending=tuple(upkeep)))
                 march = self._wait_for_osaka_march(cfg)
                 if not march:
                     # 多半是画面已抢先进下一场（选阵形/过场），回巡逻位让主循环
