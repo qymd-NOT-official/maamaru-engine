@@ -258,17 +258,17 @@ class BattleComponentTests(unittest.TestCase):
         ])
 
     def test_heavy_march_warning_always_chooses_no_in_scoped_roi(self):
-        deny = Point(500, 520)
-        flow = Flow(FakeMaa(templates={"否.png": deny}))
+        deny = Point(785, 468)
+        flow = Flow(FakeMaa(ocr_tokens=[
+            [("重伤状态下进军可能导致刀剑破坏，确认继续进军吗", Point(600, 320))],
+            [("否", deny)], [],
+        ]))
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(flow._deny_heavy_injury_warning({
                 "injury_deny_button": {"template": "否.png"},
             }))
         self.assertEqual(flow.maa.clicks, [deny])
-        template, roi = flow.maa.template_calls[-1]
-        self.assertEqual(template, "否.png")
-        self.assertEqual((roi.x, roi.y, roi.w, roi.h), (330, 400, 320, 220))
-        self.assertEqual(flow.maa.template_thresholds[-1], ("否.png", 0.75))
+        self.assertEqual(flow.maa.template_calls, [])
 
     def test_full_injury_ocr_keeps_medium_injury_as_medium(self):
         class Maa(FakeMaa):

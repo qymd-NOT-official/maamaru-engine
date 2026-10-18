@@ -589,22 +589,50 @@ class BattleMixin:
         for severity in ("重伤", "中伤", "轻伤"):
             if any(severity in text for text in texts):
                 return severity
+            # 竖排章可能被拆成“重”“伤”；只拼同一窄栏里相邻的两个字。
+            for first, p1 in tokens:
+                if str(first).strip() != severity[0]:
+                    continue
+                if any(str(last).strip() == "伤" and abs(p1.x - p2.x) <= 14
+                       and 0 < p2.y - p1.y <= 45 for last, p2 in tokens):
+                    return severity
         return None
 
+    def _battle_dialog_text(self):
+        """只读中央弹窗正文，避免把背景按钮当作确认内容。"""
+        return "".join(str(text).replace(" ", "") for text, _ in
+                       self.maa.ocr_all(roi_4to4(330, 240, 950, 440)))
+
+    @staticmethod
+    def _is_heavy_injury_dialog(text):
+        return ("重伤" in text and any(word in text for word in ("继续", "进军", "出阵", "取消"))
+                or "刀剑破坏" in text and any(word in text for word in ("后果", "继续", "确认", "取消")))
+
+    def _battle_dialog_button(self, label):
+        # 国服两级重伤确认、返程确认都使用左右按钮；必须读到完整按钮文字。
+        bounds = (650, 400, 950, 580) if label == "否" else (330, 400, 650, 580)
+        roi = roi_4to4(*bounds)
+        return next((point for text, point in self.maa.ocr_all(roi)
+                     if str(text).strip() == label
+                     and roi.x <= point.x < roi.x + roi.w
+                     and roi.y <= point.y < roi.y + roi.h), None)
+
     def _deny_heavy_injury_warning(self, cfg: dict) -> bool:
-        """识别重伤继续警告并永远点“否”；仅在战斗决策点调用。"""
-        deny_cfg = cfg.get("injury_deny_button", {})
-        template = deny_cfg.get("template")
-        if not template:
+        """两级重伤警告均只允许点否；无法确认取消时立即停止。"""
+        from ..flow_control import FlowAborted
+        if not self._is_heavy_injury_dialog(self._battle_dialog_text()):
             return False
-        roi_raw = deny_cfg.get("roi", [330, 400, 650, 620])
-        deny = self.maa.template_match(
-            template, roi_4to4(*roi_raw),
-            threshold=float(deny_cfg.get("threshold", 0.75)))
-        if not deny:
-            return False
-        self.maa.click(deny)
-        time.sleep(0.8)
+        for _ in range(3):
+            deny = self._battle_dialog_button("否")
+            if deny is None:
+                raise FlowAborted("重伤警告的【否】未确认，已停止点击，请手动查看")
+            self.maa.click(deny)
+            time.sleep(0.8)
+            self.maa.screenshot(force=True)
+            if not self._is_heavy_injury_dialog(self._battle_dialog_text()):
+                break
+        else:
+            raise FlowAborted("重伤警告取消后仍未关闭，已停止点击，请手动查看")
         if hasattr(self, "record_event"):
             self.record_event("injury_warning.denied", severity="heavy")
         return True

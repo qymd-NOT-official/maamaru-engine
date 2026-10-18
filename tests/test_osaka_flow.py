@@ -87,6 +87,9 @@ class OsakaFlow(OsakaMixin):
     def _team_injury_status(self, cfg):
         return None
 
+    def _combined_injury_status(self, cfg, team_no, cache):
+        return self._team_injury_status(cfg), None
+
     def _wait_for_osaka_march(self, cfg, attempts=8):
         return self.wait_march_result
 

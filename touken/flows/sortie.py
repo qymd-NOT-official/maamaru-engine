@@ -1096,6 +1096,8 @@ class SortieMixin:
         stop_btn = None
         for _ in range(6):
             self.maa.screenshot(force=True)
+            # 弹窗会透出背景的返程按钮，先消除重伤确认，不能点穿它。
+            self._deny_heavy_injury_warning(cfg)
             self._watch_battle_frame()  # 停止横幅下的结算页也算行军观察帧
             stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
             if stop_btn:
@@ -1106,9 +1108,18 @@ class SortieMixin:
         self.maa.click(stop_btn)
         time.sleep(1.5)
         self.maa.screenshot(force=True)
-        yes = self.maa.template_match(cfg["return_home_confirm"]["template"])
-        if yes:
+        text = self._battle_dialog_text()
+        if self._is_heavy_injury_dialog(text):
+            self._deny_heavy_injury_warning(cfg)
+            return False
+        # 只准确认返程；孤立的“是”也可能是在同意重伤进军。
+        if "返回本丸" in text or "回到本丸" in text:
+            yes = self._battle_dialog_button("是")
+            if yes is None:
+                return False
             self.maa.click(yes)
+        elif not self.maa.template_match(cfg["home_ui"]["template"]):
+            return False
         time.sleep(2.0)
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:

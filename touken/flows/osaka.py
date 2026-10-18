@@ -8,6 +8,7 @@ from ..maa_adapter import roi_4to4
 from ..game_state import available_events, successful_body, _request_key
 from .. import youzu_log
 from ..injury_recovery import RecoveryProgress, recover_injury_stream
+from ..flow_control import FlowAborted
 
 
 def koban_reward_summary(events, known_requests):
@@ -43,6 +44,13 @@ def koban_reward_summary(events, known_requests):
 
 class OsakaMixin:
     """大阪城挖地流程。依赖导航、共用部队选择和阵形组件。"""
+
+    def _osaka_injury_status(self, cfg, team_no):
+        # 每个行军决策重新同步，绝不复用出阵前或上一战的验伤记录。
+        injury, detail = self._combined_injury_status(cfg, team_no, {})
+        if detail is not None:
+            print(f"[挖地] 行军前验伤：{detail}")
+        return injury
 
     def osaka_stream(self, max_floors: int = 1, team_no: int = 3,
                      select_floor: bool = False, target_floor: int = 81,
@@ -194,6 +202,27 @@ class OsakaMixin:
                 _speedups_used=_speedups_used, _team_record_saved=_team_record_saved,
                 _auto_equip_active=_auto_equip_active)
 
+        def stop_before_march(completed):
+            if self._deny_heavy_injury_warning(cfg):
+                yield "[挖地] 🛑 重伤警告已取消，不再前进"
+                if self._return_home_from_march(cfg):
+                    self.current_location = "本丸"
+                    yield "[挖地] ✓ 已安全返回本丸"
+                else:
+                    yield "[挖地] 没能确认返回本丸；已停止点击，请手动查看"
+                raise FlowAborted(f"[挖地] 重伤警告已拦截；剩余 {_target_floors - completed} 层未完成，已安全停止")
+            injury = self._osaka_injury_status(cfg, team_no)
+            if not injury or not self._injury_reaches_threshold(injury, repair_threshold):
+                return False
+            yield f"[挖地] 道中检测到{injury}，不再继续行军"
+            if not self._return_home_from_march(cfg):
+                yield "[挖地] 没能确认返回本丸；已停止点击，请手动查看"
+                return True
+            self.current_location = "本丸"
+            yield "[挖地] ✓ 已安全返回本丸"
+            yield from recover_and_resume(injury, completed)
+            return True
+
         departure_state = {}
         ok, _team_record_saved = yield from self._safe_depart_stream(
             cfg, team_no, "[挖地]",
@@ -229,7 +258,7 @@ class OsakaMixin:
                     yield "[挖地] ✓ 已从重伤警告处安全返回本丸"
                 else:
                     yield "[挖地] 点否后没能确认返回本丸，已停止点击"
-                return
+                raise FlowAborted(f"[挖地] 重伤警告已拦截；剩余 {_target_floors - _completed_floors - floors} 层未完成，已安全停止")
 
             # 强制更新会把游戏从战斗中踢回登录页。恢复后旧战斗状态已经作废，
             # 必须按已结算层数从活动入口重开，不能接着在原坐标上盲点。
@@ -309,6 +338,8 @@ class OsakaMixin:
                     return
                 march = self._find_osaka_march(cfg)
                 if march:
+                    if (yield from stop_before_march(_completed_floors + floors)):
+                        return
                     self.maa.click(march)
                     time.sleep(1.2)
                 else:
@@ -329,7 +360,7 @@ class OsakaMixin:
                         selected_floor=target_floor if select_floor else None,
                     )
                 yield f"[挖地] ✓ 已完成 {total_completed}/{_target_floors} 层"
-                injury = self._team_injury_status(cfg)
+                injury = self._osaka_injury_status(cfg, team_no)
                 goal_reached = total_completed >= _target_floors
                 injury_reached = bool(
                     injury and self._injury_reaches_threshold(
@@ -375,6 +406,8 @@ class OsakaMixin:
                     yield ("[挖地] 层末画面先跑了（多半进了下一场），"
                            "回巡逻位继续观察（不中止本次任务）")
                     continue
+                if (yield from stop_before_march(total_completed)):
+                    return
                 self.maa.click(march)
                 time.sleep(1.2)
                 continue
@@ -408,16 +441,7 @@ class OsakaMixin:
                 idle_checks = 0
                 # 大阪城没有自动行军：每次战斗结果页出现“行军”时都先查伤势。
                 # 达到停止条件就绝不点击行军，避免拖到整层结束才发现伤员。
-                field_injury = self._team_injury_status(cfg)
-                if field_injury and self._injury_reaches_threshold(
-                        field_injury, repair_threshold):
-                    yield f"[挖地] 道中检测到{field_injury}，不再继续行军"
-                    if not self._return_home_from_march(cfg):
-                        yield "[挖地] 没能确认返回本丸；已停止点击，请手动查看"
-                        return
-                    self.current_location = "本丸"
-                    yield "[挖地] ✓ 已安全返回本丸"
-                    yield from recover_and_resume(field_injury, _completed_floors + floors)
+                if (yield from stop_before_march(_completed_floors + floors)):
                     return
                 yield "[挖地] 行军，继续向下挖"
                 self.maa.click(march)
