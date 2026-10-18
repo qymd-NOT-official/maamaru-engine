@@ -124,6 +124,29 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         flow.maa = _TimerMaa([("空闲中", Point(500, 300))])
         self.assertIsNone(flow._read_countdown(205))
         self.assertIsNone(flow._watch_hit(("1:27:30", 5250), set()))
+
+    def test_read_countdown_without_colons(self):
+        """OCR 吃掉冒号时按纯数字串从右切 秒/分/时（2026-10-19 误判点火失败现场）"""
+        flow = SmithMixin()
+
+        class _TimerMaa:
+            def __init__(self, tokens):
+                self.tokens = tokens
+
+            def screenshot(self, force=False):
+                pass
+
+            def ocr_all(self, roi):
+                return self.tokens
+
+        flow.maa = _TimerMaa([("02", Point(0, 0)), ("剩余时间", Point(0, 0)),
+                              ("59", Point(0, 0)), ("53", Point(0, 0))])
+        self.assertEqual(flow._read_countdown(205), ("2:59:53", 10793))
+        # 位数不够（读丢了）或分秒超界（不是倒计时）都不算数
+        flow.maa = _TimerMaa([("完成", Point(0, 0)), ("00", Point(0, 0))])
+        self.assertIsNone(flow._read_countdown(205))
+        flow.maa = _TimerMaa([("997788", Point(0, 0))])
+        self.assertIsNone(flow._read_countdown(205))
         self.assertIsNone(flow._watch_hit(("1:27:30", 5250), {5400}))  # 差 150s 超出容忍
         self.assertEqual(flow._watch_hit(("1:27:30", 5250), {5340}), "1:27:30")
 

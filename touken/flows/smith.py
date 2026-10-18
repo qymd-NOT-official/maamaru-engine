@@ -331,7 +331,7 @@ class SmithMixin:
                     self.maa.click(yes)
                     time.sleep(1.0)
                     continue
-        outcome = confirm_operation(self.maa, boundary, "forge")
+        outcome = confirm_operation(self.maa, boundary, "forge", timeout=5.0)
         if outcome is not None:
             return outcome
         # Returning to the page alone is not proof; the chosen furnace must be running.
@@ -417,16 +417,27 @@ class SmithMixin:
 
     def _read_countdown(self, cy: int):
         """读这炉的剩余时间，返回 ("01:27:30", 秒数) 或 None。
-        点火后倒计时已经开始走字，读到的会比名义时长短一两秒"""
+        点火后倒计时已经开始走字，读到的会比名义时长短一两秒。
+        OCR 经常把冒号吃掉（'02','59','53' 拆成三个 token，2026-10-19
+        因此把点着的炉误判成点火失败），冒号正则落空时按纯数字串
+        从右往左切 秒/分/时。"""
         try:
             self.maa.screenshot(force=True)
             tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             text = "".join(t for t, _ in tokens)
             m = re.search(r"(\d{1,2})\s*[:：]\s*(\d{1,2})\s*[:：]\s*(\d{1,2})", text)
-            if not m:
-                return None
-            secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
-            return (f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}", secs)
+            if m:
+                secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+                return (f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}", secs)
+            digits = re.sub(r"\D", "", text)
+            if 4 <= len(digits) <= 6:
+                secs_part = int(digits[-2:])
+                mins_part = int(digits[-4:-2])
+                hours_part = int(digits[:-4])
+                if secs_part < 60 and mins_part < 60:
+                    return (f"{hours_part}:{digits[-4:-2]}:{digits[-2:]}",
+                            hours_part * 3600 + mins_part * 60 + secs_part)
+            return None
         except Exception:
             return None
 

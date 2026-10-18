@@ -788,6 +788,49 @@ class YosariRouteTests(unittest.TestCase):
         self.assertEqual(flow.points, [[640, 603], [1040, 48]])
         self.assertIn("[异去] 归城提灯不足；自动补充已关闭，不消耗小判，收工", messages)
 
+    def test_yosari_departure_reclicks_depart_when_prompt_missing(self):
+        """确认框没来但即刻出阵还亮着 = 点击被关闭动画吞了，补点一次再确认
+        （2026-10-19 现场：关自动行军面板后点出阵，画面停在部队选择页空等）"""
+        class Route(SortieMixin, BattleMixin):
+            def __init__(self):
+                self.maa = FakeMaa(
+                    ocr_results=[False] * 10 + [True],
+                    templates={"team/即刻出阵.png": Point(1201, 627)})
+                self.points = []
+
+            def _click_point(self, point):
+                self.points.append(point)
+
+        flow = Route()
+        with patch("touken.flows.sortie.time.sleep"):
+            messages, result = self._drain(flow._confirm_yosari_departure(
+                {"departure_confirm": {},
+                 "depart_button": {"template": "team/即刻出阵.png"}}))
+        self.assertTrue(result)
+        self.assertIn("补点一次", "\n".join(messages))
+        self.assertEqual(flow.maa.clicks, [Point(1201, 627)])
+        self.assertEqual(flow.points, [[640, 603]])
+
+    def test_yosari_departure_stops_when_depart_button_gone(self):
+        """按钮不在了（确认框可能正弹着只是文字没认到）→ 不补点，安全停车"""
+        class Route(SortieMixin, BattleMixin):
+            def __init__(self):
+                self.maa = FakeMaa(ocr_results=[False] * 10)
+                self.points = []
+
+            def _click_point(self, point):
+                self.points.append(point)
+
+        flow = Route()
+        with patch("touken.flows.sortie.time.sleep"):
+            messages, result = self._drain(flow._confirm_yosari_departure(
+                {"departure_confirm": {},
+                 "depart_button": {"template": "team/即刻出阵.png"}}))
+        self.assertFalse(result)
+        self.assertIn("[异去] 没看到归城提灯出阵确认框；停止", messages)
+        self.assertEqual(flow.maa.clicks, [])
+        self.assertEqual(flow.points, [])
+
 
 class OsakaRouteTests(unittest.TestCase):
     def test_floor_reader_uses_the_full_activity_title(self):

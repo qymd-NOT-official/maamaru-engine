@@ -900,7 +900,26 @@ class SortieMixin:
         """处理新版归城提灯确认；缺灯时按四段确认链补充后返回部队选择。"""
         prompt = {"expected": "归城提灯进行出阵", "roi": [310, 155, 970, 330],
                   "confirm_target": [640, 603], **cfg.get("departure_confirm", {})}
-        if not self._confirm_departure(cfg, text_prompt=prompt):
+        confirmed = False
+        for attempt in range(2):
+            if self._confirm_departure(cfg, text_prompt=prompt):
+                confirmed = True
+                break
+            if attempt > 0:
+                break
+            # 确认框没来但即刻出阵还亮着 = 刚才那下被自动行军面板的关闭
+            # 动画吞了（2026-10-19 现场：关面板后 2 秒内点出阵，画面停在
+            # 部队选择页空等 17 秒）。按钮真的在才补点：确认框若已弹出
+            # 只是文字没认到，按钮被遮罩盖住匹配不上，不会误点。
+            depart_cfg = cfg.get("depart_button", {})
+            template = depart_cfg.get("template")
+            depart = self.maa.template_match(template) if template else None
+            if not depart:
+                break
+            yield "[异去] 确认框没出现但即刻出阵还亮着，刚才的点击可能被动画吞了，补点一次"
+            self.maa.click(depart)
+            time.sleep(1.5)
+        if not confirmed:
             yield "[异去] 没看到归城提灯出阵确认框；停止"
             return False
 
