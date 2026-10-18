@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
+import { startJpBrowser } from '../jpListener'
 import QQStatus from './QQStatus.vue'
 import PanelHeader from './PanelHeader.vue'
 import SideNavItem from './SideNavItem.vue'
@@ -80,8 +81,7 @@ async function load() {
 async function connect() {
   connecting.value = true
   try {
-    await api.jpListenerStart()
-    message.value = '日服浏览器已打开，进入游戏后自动更新本丸数据。'
+    message.value = await startJpBrowser()
   } catch (error) { message.value = error instanceof Error ? error.message : '连接失败，请重试' }
   finally { connecting.value = false }
 }

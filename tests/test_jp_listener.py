@@ -104,3 +104,35 @@ def test_attach_dedup_and_session_reuse():
     assert len(attaches) == 1
     enables = [c for c in calls if c[0] == "Network.enable"]
     assert len(enables) == 2
+
+
+def test_find_browser_user_level_registry_first(monkeypatch, tmp_path):
+    """当前用户安装的 Chrome 只写用户级注册表：必须能查到，且 Chrome 优先。"""
+    chrome = tmp_path / "chrome.exe"
+    chrome.write_text("x")
+
+    def fake_app_paths(name, user_level):
+        if name == "chrome.exe" and user_level:
+            return str(chrome)
+        return None
+
+    monkeypatch.setattr(jp_listener, "_app_paths", fake_app_paths)
+    assert jp_listener.find_browser() == str(chrome)
+
+
+def test_find_browser_falls_back_to_edge_candidate(monkeypatch):
+    """注册表全军覆没时走安装路径兜底，能找到 Edge 也算数。"""
+    edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    monkeypatch.setattr(jp_listener, "_app_paths",
+                        lambda name, user_level: None)
+    monkeypatch.setattr(Path, "is_file",
+                        lambda p: str(p) == edge)
+    assert jp_listener.find_browser() == edge
+
+
+def test_find_browser_none_when_nothing(monkeypatch):
+    """哪儿都找不到：返回 None，由 launch_browser 转成玩家能看懂的报错。"""
+    monkeypatch.setattr(jp_listener, "_app_paths",
+                        lambda name, user_level: None)
+    monkeypatch.setattr(Path, "is_file", lambda p: False)
+    assert jp_listener.find_browser() is None

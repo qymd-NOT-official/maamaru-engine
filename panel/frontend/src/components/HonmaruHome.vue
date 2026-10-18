@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { startJpBrowser } from '../jpListener'
 import { buildJournalPosts, runPostText } from '../honmaruJournal'
 import type { JournalPost } from '../honmaruJournal'
 import type { DayTimeline, EventTimelineEntry, EventTimelineReport, HonmaruNote, HonmaruProfile, HonmaruSituation, PlanningReport } from '../types'
@@ -123,8 +124,7 @@ async function syncSituation() {
   situationError.value = ''
   try {
     if (isJp.value) {
-      await api.jpListenerStart()
-      notice.value = '日服浏览器已打开，进入本丸后会自动更新近况。'
+      notice.value = await startJpBrowser()
     }
     situation.value = (await api.refreshHonmaruSituation(props.server)).situation
     loadErrors.value = await loadSummaries()
@@ -137,8 +137,7 @@ async function launchGame() {
   launchingGame.value = true
   notice.value = ''
   try {
-    await api.jpListenerStart()
-    notice.value = '日服浏览器已打开，进入游戏后会自动更新本丸数据。'
+    notice.value = await startJpBrowser()
   } catch (error) { notice.value = errorMessage(error) }
   finally { launchingGame.value = false }
 }

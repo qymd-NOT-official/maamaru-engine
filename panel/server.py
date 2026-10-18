@@ -3734,9 +3734,18 @@ def api_start_jp_browser_probe():
 async def api_jp_listener_start():
     """开始听包：日服浏览器没在跑就用专用配置档拉一个起来。
 
-    纯订阅 Network 事件，不注入脚本、不发请求；与手动抓包同质。"""
+    纯订阅 Network 事件，不注入脚本、不发请求；与手动抓包同质。
+    拉起浏览器是异步的：这里等它出结果（连上/报错）再返回，
+    免得界面先报喜、失败原因却悄悄落进状态里。"""
     from touken import jp_listener
-    return jp_listener.start_listener(launch_browser_if_needed=True)
+    status = jp_listener.start_listener(launch_browser_if_needed=True)
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        status = jp_listener.listener_status()
+        if status.get("state") != "starting" or status.get("browser_alive"):
+            break
+        await asyncio.sleep(0.4)
+    return status
 
 
 @app.post("/api/jp-listener/stop")

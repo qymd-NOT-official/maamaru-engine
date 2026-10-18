@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""日服实时听包：连上带调试端口的 Chrome（CDP），只读订阅 Network 事件，
-把游戏接口的响应实时落进日服账房。
+"""日服实时听包：连上带调试端口的浏览器（Chrome/Edge，CDP），只读订阅
+Network 事件，把游戏接口的响应实时落进日服账房。
 
 红线（与手动 netlog 导入同源同质）：
 
 - 纯订阅 Network 事件，不注入脚本、不改请求、不向服务器多发任何东西；
   听来的事务与手动抓包文件里的一模一样。
-- Chrome 必须带 --remote-debugging-port 启动；新版 Chrome 只允许非默认
+- 浏览器必须带 --remote-debugging-port 启动；新版 Chrome/Edge 只允许非默认
   user-data-dir 开调试口，所以用日服专用配置档
   （用户数据目录/jp/browser-profile，首次使用需在里面登一次 DMM）。
 - 战斗结算（battle/battle）是密文，与手动导入一样跳过不读内容。
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import threading
 import time
@@ -32,25 +33,52 @@ GAME_URL = "https://pc-play.games.dmm.com/play/tohken/"
 GAME_HOST = "touken-ranbu.jp"  # 与手动导入的 host_filter 同源，钉住游戏域名
 LISTENER_SCRIPT = "jp_listener"
 
-_CHROME_CANDIDATES = (
+_BROWSER_APP_PATHS = ("chrome.exe", "msedge.exe")
+
+_BROWSER_CANDIDATES = (
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
 )
 
 
-def find_chrome() -> str | None:
-    """找本机 chrome.exe：注册表 App Paths 优先，常见安装路径兜底。"""
+def _app_paths(name: str, user_level: bool) -> str | None:
+    """注册表 App Paths 里查浏览器路径。user_level=True 查当前用户级
+    （当前用户安装的 Chrome 只写这里），False 查系统级。"""
     try:
         import winreg
+        hive = winreg.HKEY_CURRENT_USER if user_level \
+            else winreg.HKEY_LOCAL_MACHINE
         with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
+                hive,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\\"
+                + name) as key:
             value, _ = winreg.QueryValueEx(key, "")
             if value and Path(value).is_file():
                 return str(value)
     except (OSError, ValueError, TypeError):
         pass
-    for candidate in _CHROME_CANDIDATES:
+    return None
+
+
+def find_browser() -> str | None:
+    """找本机 Chromium 系浏览器：Chrome 优先，Edge 兜底。
+
+    注册表 App Paths 用户级、系统级都查，常见安装路径（含 %LOCALAPPDATA%
+    下的当前用户安装）兜底。"""
+    for name in _BROWSER_APP_PATHS:
+        for user_level in (True, False):
+            found = _app_paths(name, user_level)
+            if found:
+                return found
+    candidates = list(_BROWSER_CANDIDATES)
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.insert(
+            2, str(Path(local) / "Google" / "Chrome" / "Application"
+                     / "chrome.exe"))
+    for candidate in candidates:
         if Path(candidate).is_file():
             return candidate
     return None
@@ -61,24 +89,24 @@ def browser_profile_dir() -> Path:
 
 
 def launch_browser(url: str = GAME_URL) -> str:
-    """用日服专用配置档启动 Chrome（带调试口），返回启动的浏览器路径。
+    """用日服专用配置档启动浏览器（Chrome/Edge，带调试口），返回浏览器路径。
 
     专用配置档是独立书签/登录环境，第一次用要在里面登一次 DMM；
     它走系统代理，梯子不用单独配。"""
-    chrome = find_chrome()
-    if not chrome:
-        raise RuntimeError("没找到 Chrome，请先安装")
+    browser = find_browser()
+    if not browser:
+        raise RuntimeError("没找到 Chrome 或 Edge 浏览器，请先装一个再试")
     profile = browser_profile_dir()
     profile.mkdir(parents=True, exist_ok=True)
     subprocess.Popen([
-        chrome,
+        browser,
         f"--remote-debugging-port={CDP_PORT}",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
         url,
     ])
-    return chrome
+    return browser
 
 
 def _http_json(path: str, timeout: float = 2.0) -> dict | list | None:

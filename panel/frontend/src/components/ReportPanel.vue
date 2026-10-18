@@ -2,6 +2,7 @@
 import StockInventory from './report/StockInventory.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
+import { startJpBrowser } from '../jpListener'
 import type { HumanReport, InventoryGap, JpListenerStatus, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningGoalAdvice, PlanningReport, ResourceLedger, ScriptParams } from '../types'
 import PanelHeader from './PanelHeader.vue'
 import SegmentedControl from './SegmentedControl.vue'
@@ -151,7 +152,10 @@ const jpListenerBusy = ref(false)
 let jpListenerTimer = 0
 const jpListenerText = computed(() => {
   const state = jpListener.value?.state
-  if (state === 'error') return '日服连接没有完成，请重新读取游戏家底。'
+  if (state === 'error') {
+    const detail = jpListener.value?.detail
+    return detail ? `日服连接没有完成：${detail}` : '日服连接没有完成，请重新读取游戏家底。'
+  }
   if (state === 'starting' || state === 'waiting_browser') return '正在连接日服浏览器……'
   if (state === 'listening') return '日服已连接，在打开的浏览器里游玩时，家底会自动更新。'
   return ''
@@ -169,10 +173,9 @@ async function refreshJpListener() {
 async function startJpListener() {
   jpListenerBusy.value = true
   try {
-    await api.jpListenerStart()
+    gameInventoryNotice.value = await startJpBrowser()
     await refreshJpListener()
-  } catch { gameInventoryNotice.value = '日服浏览器没有打开，请重试。' }
-  finally { jpListenerBusy.value = false }
+  } finally { jpListenerBusy.value = false }
 }
 
 const rangeLabel = computed(() => days.value === 1 ? '近 24 小时' : days.value === 365 ? '近 1 年' : `近 ${days.value} 天`)
