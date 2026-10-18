@@ -10,6 +10,7 @@ from unittest.mock import patch
 from touken.event_timeline import SCRIPT_EVENT_MAP
 from touken.flows.battle import BattleMixin
 from touken.flows.hanafuda import HanafudaMixin
+from touken.maa_adapter import Point
 from touken.runtime_paths import _fill_missing_config_keys
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "touken_config.example.json"
@@ -344,10 +345,18 @@ class HanafudaWatchTests(unittest.TestCase):
         self.assertEqual(host.clicked, [[870, 394]])
 
     def test_heavy_injury_warning_denied_and_stops(self):
+        """重伤警告走通用弹窗守卫：读到弹窗正文和【否】按钮才点，
+        点完弹窗关闭后停手让人看（e239e3d 起不再认 否.png 模板）。"""
         host = _WatchHost([
-            {"templates": {"否.png"}, "ocr": set(), "texts": []},
+            {"templates": set(), "ocr": set(), "texts": [
+                ("队中有重伤的刀剑，确认继续进军吗？点击否可以取消",
+                 Point(600, 320)),
+                ("否", Point(785, 468)),
+            ]},
+            {"templates": set(), "ocr": set(), "texts": []},        # 点否后弹窗关闭
         ])
-        msgs, ok = _watch(host)
+        with patch("touken.flows.battle.time.sleep", lambda *_a, **_k: None):
+            msgs, ok = _watch(host)
         self.assertFalse(ok)
         self.assertTrue(any("重伤" in m for m in msgs))
 
