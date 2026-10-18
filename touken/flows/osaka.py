@@ -6,33 +6,18 @@ import time
 from dataclasses import dataclass
 
 from ..maa_adapter import roi_4to4
-from ..game_state import available_events, successful_body, _request_key, team_maintenance_facts
+from ..game_state import available_events, successful_body, _request_key
+from ..team_state_reader import read_team_snapshot
+from ..team_state import maintenance_reasons
 from .. import youzu_log
-from ..injury_recovery import RecoveryProgress, recover_injury_stream
-from ..flow_control import FlowAborted
+from ..injury_recovery import recover_injury_stream
+from ..flow_control import BattleProgress, FlowAborted
 
 
 @dataclass(frozen=True)
 class _OsakaResume:
     params: dict
 
-
-def maintenance_reasons(facts, *, rotate_captain, margin, auto_equip, equipment_baseline):
-    """Only verified fatigue gaps and destroyed equipped slots need a trip home."""
-    reasons = []
-    if facts is None:
-        return reasons
-    fatigue = facts["fatigue"]
-    if rotate_captain and fatigue and 1 in fatigue:
-        lowest = min(fatigue, key=fatigue.get)
-        if lowest != 1 and fatigue[1] - fatigue[lowest] >= max(1, int(margin)):
-            reasons.append("换队长")
-    equipment = facts["equipment"]
-    if auto_equip and equipment_baseline and equipment and equipment.keys() == equipment_baseline.keys():
-        if any(needed and not current for serial in equipment
-               for needed, current in zip(equipment_baseline[serial], equipment[serial])):
-            reasons.append("补刀装")
-    return reasons
 
 
 def koban_reward_summary(events, known_requests):
@@ -68,6 +53,10 @@ def koban_reward_summary(events, known_requests):
 
 class OsakaMixin:
     """大阪城挖地流程。依赖导航、共用部队选择和阵形组件。"""
+
+    def _osaka_maintenance_facts(self, team_no):
+        snapshot = read_team_snapshot(self, team_no)
+        return snapshot.maintenance_facts() if snapshot is not None else None
 
     def _osaka_injury_status(self, cfg, team_no):
         # 每个行军决策重新同步，绝不复用出阵前或上一战的验伤记录。
@@ -217,7 +206,7 @@ class OsakaMixin:
             recovery = yield from recover_injury_stream(
                 self, team_no=team_no, injury=injury,
                 threshold=repair_threshold, action=injury_action,
-                progress=RecoveryProgress(_target_floors, completed), tag="[挖地]")
+                progress=BattleProgress(_target_floors, completed), tag="[挖地]")
             if recovery.attempted:
                 _repair_count += 1
                 _speedups_used += recovery.speedups
@@ -289,7 +278,7 @@ class OsakaMixin:
                 raise FlowAborted(f"[挖地] 层末整理后未通过安全出阵检查；剩余 {max_floors} 层未完成")
             return
 
-        facts = team_maintenance_facts(available_events(self.maa), team_no) if (rotate_captain or auto_equip) else None
+        facts = self._osaka_maintenance_facts(team_no) if (rotate_captain or auto_equip) else None
         if _equipment_baseline is None and facts is not None:
             _equipment_baseline = facts["equipment"]
         if _maintenance_pending:
@@ -469,7 +458,7 @@ class OsakaMixin:
 
                     yield from recover_and_resume(injury, total_completed)
                     return
-                facts = team_maintenance_facts(available_events(self.maa), team_no) if (rotate_captain or auto_equip) else None
+                facts = self._osaka_maintenance_facts(team_no) if (rotate_captain or auto_equip) else None
                 if facts and facts["equipment"] is not None:
                     if _equipment_baseline is None or facts["equipment"].keys() != _equipment_baseline.keys():
                         _equipment_baseline = facts["equipment"]

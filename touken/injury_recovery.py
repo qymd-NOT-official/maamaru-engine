@@ -1,22 +1,12 @@
 """Shared injury recovery decisions; callers own navigation and safe departure."""
 from dataclasses import dataclass
 
-from .game_state import available_events, injury_report
-from .flow_control import FlowAborted
+from .team_state_reader import read_team_snapshot
+from .flow_control import BattleProgress, FlowAborted
 
 
-@dataclass(frozen=True)
-class RecoveryProgress:
-    target: int
-    completed: int
-
-    def __post_init__(self):
-        if not 0 <= self.completed <= self.target:
-            raise ValueError("出阵进度无效，不能猜测剩余次数")
-
-    @property
-    def remaining(self):
-        return self.target - self.completed
+# Compatibility name for existing callers.
+RecoveryProgress = BattleProgress
 
 
 @dataclass(frozen=True)
@@ -41,8 +31,9 @@ class RecoveryOutcome:
 
 def current_team_injury(agent, team_no):
     """Unknown is distinct from a freshly confirmed healthy team."""
-    report = injury_report(available_events(agent.maa), team_no)
-    return (False, None) if report is None else (True, report["max_injury"])
+    snapshot = read_team_snapshot(agent, team_no)
+    return ((False, None) if snapshot is None or not snapshot.injury_known
+            else (True, snapshot.max_injury))
 
 
 def recover_injury_stream(agent, *, team_no, injury, threshold, action,

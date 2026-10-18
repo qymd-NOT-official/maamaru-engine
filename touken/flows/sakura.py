@@ -232,23 +232,9 @@ class SakuraMixin:
         任一位缺失/过期整个返回 None——半残数据绝不喂给换队长决策
         （2026-09-21 就是 5/6 号位读空让红脸队员对轮换隐形）。
         """
-        from .. import youzu_log
-        from ..game_state import available_events, fatigue_value, sword_facts
-        events = available_events(self.maa)
-        values = {}
-        for slot in range(1, 7):
-            fatigue = fatigue_value(events, team_no, slot)
-            if fatigue is None:
-                return None
-            values[slot] = {"fatigue": fatigue, "name": None}
-        state = sword_facts(events)
-        roster = state["parties"].get(str(team_no), {})
-        for slot, info in values.items():
-            serial = str(roster.get(str(slot), ""))
-            info["serial_id"] = serial
-            info["name"] = youzu_log._sword_name(
-                state["swords"].get(serial, {}).get("sword_id"), sword_db)
-        return values
+        from ..team_state_reader import read_team_snapshot
+        snapshot = read_team_snapshot(self, team_no)
+        return snapshot.fatigue_readings(full_team=True) if snapshot is not None else None
 
     def _rotate_captain_here(self, margin: int = 10, team_no: int | None = None):
         """
@@ -296,7 +282,8 @@ class SakuraMixin:
         if low_slot == 1:
             yield f"[换队长] 队长自己就是全队最低（{captain}/100），位置没毛病，收工"
             return
-        if captain - low < margin:
+        from ..team_state import captain_rotation_slot
+        if captain_rotation_slot(values, margin) is None:
             yield (f"[换队长] 全队最低才 {low}/100，跟队长（{captain}）"
                    f"差不到 {margin}，不值得折腾，收工")
             return

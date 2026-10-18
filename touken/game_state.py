@@ -229,79 +229,78 @@ def sword_injury(state, serial, *, now=None, max_age=FACT_MAX_AGE):
     return fallback, "hp"
 
 
-def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
-    """Current members use battle injury codes with HP fallback; stale HP is unknown."""
+def team_snapshot(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
+    """Adapt current client facts to the shared team contract, once per read."""
     from . import sword_db
+    from .team_state import TeamMemberSnapshot, TeamSnapshot
     state = sword_facts(events)
     now = time.time() if now is None else now
     slots = state["parties"].get(str(team_no))
     if not slots:
         return None
-    members, hp_ages, party_ages = [], [], []
+    members, party_ages = [], []
     for slot, serial in slots.items():
         if serial in (None, "", 0, "0"):
             continue
+        if not str(slot).isdigit() or int(slot) not in range(1, 7):
+            return None
         serial = str(serial)
-        sword = state["swords"].get(serial, {})
-        hp_at, hp_index = state["hp_times"].get(serial, (None, -1))
         party_at = state["slot_times"][str(team_no)].get(slot)
-        if (hp_at is None or party_at is None or hp_index < state["combat_index"]
-                or hp_at < state["combat_at"]
-                or any(not 0 <= now - at <= max_age for at in (hp_at, party_at))):
+        if party_at is None or not 0 <= now - party_at <= max_age:
             return None
-        hp, maximum = youzu_log._int(sword.get("hp"), -1), youzu_log._int(sword.get("hp_max"), 0)
-        if not 0 <= hp <= maximum or maximum <= 0:
-            return None
-        name = youzu_log._sword_name(sword.get("sword_id"), sword_db)
-        injury, injury_source = sword_injury(state, serial, now=now, max_age=max_age)
-        members.append({"serial_id": int(serial), "name": name, "label": name,
-                        "hp": hp, "hp_max": maximum,
-                        "injury": injury, "injury_source": injury_source})
-        hp_ages.append(hp_at)
-        party_ages.append(party_at)
-    if not members:
-        return None
-    rank = {None: 0, "轻伤": 1, "中伤": 2, "重伤": 3}
-    return {"party_no": team_no, "members": members,
-            "max_injury": max((m["injury"] for m in members), key=rank.get),
-            "observed_epoch": min(hp_ages), "party_observed_epoch": min(party_ages)}
-
-
-def team_maintenance_facts(events, team_no, *, now=None):
-    """Fresh member identities, fatigue and equipped slots for floor-end upkeep."""
-    now = time.time() if now is None else now
-    if injury_report(events, team_no, now=now) is None:
-        return None
-    state = sword_facts(events)
-    fatigue, equipment = {}, {}
-    fatigue_known = equipment_known = True
-    for slot, serial in state["parties"][str(team_no)].items():
-        if serial in (None, "", 0, "0"):
-            continue
-        serial = str(serial)
-        row = state["swords"][serial]
+        row = state["swords"].get(serial, {})
 
         def current(field):
-            at = state["field_times"][serial].get(field, 0)
-            index = state["field_indices"][serial].get(field, -1)
-            return (field in row and 0 <= now - at <= FACT_MAX_AGE
+            at = state["field_times"].get(serial, {}).get(field, 0)
+            index = state["field_indices"].get(serial, {}).get(field, -1)
+            return (field in row and 0 <= now - at <= max_age
                     and at >= state["combat_at"] and index >= state["combat_index"])
 
-        value = row.get("fatigue")
-        if current("fatigue") and not isinstance(value, bool) and str(value).isdigit() and 0 <= int(value) <= 100:
-            fatigue[int(slot)] = int(value)
-        else:
-            fatigue_known = False
+        hp, maximum = youzu_log._int(row.get("hp"), -1), youzu_log._int(row.get("hp_max"), 0)
+        hp_at, hp_index = state["hp_times"].get(serial, (None, -1))
+        hp_known = (hp_at is not None and hp_index >= state["combat_index"]
+                    and hp_at >= state["combat_at"] and 0 <= now - hp_at <= max_age
+                    and 0 <= hp <= maximum and maximum > 0)
+        injury, source = (sword_injury(state, serial, now=now, max_age=max_age)
+                          if hp_known else (None, None))
+        raw = row.get("fatigue")
+        fatigue = youzu_log._int(raw, -1)
+        if (not current("fatigue") or isinstance(raw, bool)
+                or isinstance(raw, float) and not raw.is_integer() or not 0 <= fatigue <= 100):
+            fatigue = None
         equipped = []
         for number in (1, 2, 3):
             field = f"equip_serial_id{number}"
             value = row.get(field)
             if not current(field) or (value is not None and not str(value).isdigit()):
-                equipment_known = False
+                equipped = None
+                break
             equipped.append(value is not None and youzu_log._int(value, 0) > 0)
-        equipment[serial] = tuple(equipped)
-    return {"fatigue": fatigue if fatigue_known else None,
-            "equipment": equipment if equipment_known else None}
+        members.append(TeamMemberSnapshot(
+            slot=int(slot), serial_id=serial,
+            name=youzu_log._sword_name(row.get("sword_id"), sword_db),
+            hp=hp if hp_known else None, hp_max=maximum if hp_known else None,
+            injury=injury, injury_source=source, hp_observed_at=hp_at if hp_known else None,
+            fatigue=fatigue,
+            fatigue_observed_at=state["field_times"][serial]["fatigue"] if fatigue is not None else None,
+            equipment=tuple(equipped) if equipped is not None else None,
+            equipment_observed_at=(min(state["field_times"][serial][f"equip_serial_id{n}"] for n in (1, 2, 3))
+                                   if equipped is not None else None)))
+        party_ages.append(party_at)
+    if not members or len({member.serial_id for member in members}) != len(members):
+        return None
+    return TeamSnapshot(int(team_no), tuple(members), min(party_ages))
+
+
+def injury_report(events, team_no, *, max_age=FACT_MAX_AGE, now=None):
+    """Compatibility view of the shared, current team observation."""
+    snapshot = team_snapshot(events, team_no, max_age=max_age, now=now)
+    return snapshot.injury_report() if snapshot is not None else None
+
+
+def team_maintenance_facts(events, team_no, *, now=None):
+    snapshot = team_snapshot(events, team_no, now=now)
+    return snapshot.maintenance_facts() if snapshot is not None else None
 
 
 def expedition_settlements(events, after, exclude=()):

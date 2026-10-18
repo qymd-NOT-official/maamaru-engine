@@ -95,8 +95,8 @@ def test_floor_maintenance_returns_home_and_finishes_only_remaining_floors(selec
         yield from ()
         return True, True
     flow._safe_depart_stream = depart
-    with patch("touken.flows.osaka.time.sleep"), patch(
-            "touken.flows.osaka.team_maintenance_facts",
+    with patch("touken.flows.osaka.time.sleep"), patch.object(
+            OsakaMixin, "_osaka_maintenance_facts",
             side_effect=[snapshot(), snapshot(low=True, broken=True), snapshot()]):
         logs = list(flow.osaka_stream(max_floors=2, select_floor=select_floor,
                                      target_floor=81, rotate_captain=True))
@@ -116,8 +116,8 @@ def test_unconfirmed_maintenance_stops_before_confirming_departure(after):
     flow = OsakaFlow([True])
     flow._return_home_from_march = Mock(return_value=True)
     flow._confirm_departure = Mock(return_value=True)
-    with patch("touken.flows.osaka.time.sleep"), patch(
-            "touken.flows.osaka.team_maintenance_facts",
+    with patch("touken.flows.osaka.time.sleep"), patch.object(
+            OsakaMixin, "_osaka_maintenance_facts",
             side_effect=[snapshot(), snapshot(low=True, broken=True), after]), \
          pytest.raises(FlowAborted, match="不重复往返"):
         list(flow.osaka_stream(max_floors=3, rotate_captain=True))
@@ -128,8 +128,8 @@ def test_unconfirmed_maintenance_stops_before_confirming_departure(after):
 def test_no_maintenance_after_last_requested_floor():
     flow = OsakaFlow([True])
     flow._return_home_from_march = Mock(return_value=True)
-    with patch("touken.flows.osaka.time.sleep"), patch(
-            "touken.flows.osaka.team_maintenance_facts", return_value=snapshot(low=True)) as read:
+    with patch("touken.flows.osaka.time.sleep"), patch.object(
+            OsakaMixin, "_osaka_maintenance_facts", return_value=snapshot(low=True)) as read:
         list(flow.osaka_stream(max_floors=1, rotate_captain=True))
     assert read.call_count == 1
     flow._return_home_from_march.assert_called_once()

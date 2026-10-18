@@ -11,6 +11,8 @@ from datetime import datetime
 
 from ..maa_adapter import roi_4to4, Point
 from ..runtime_paths import STATE_DIR
+from ..team_state_reader import read_team_snapshot
+from ..team_state import injury_reaches_threshold
 
 
 def find_deploy_button(maa, cfg: dict):
@@ -514,12 +516,10 @@ class BattleMixin:
     @staticmethod
     def _injury_reaches_threshold(injury: str, threshold: str) -> bool:
         """共用伤势阈值：轻伤 < 中伤 < 重伤。"""
-        severity = {"轻伤": 1, "中伤": 2, "重伤": 3}
-        limits = {"light": 1, "medium": 2, "heavy": 3}
-        return severity.get(injury, 3) >= limits.get(str(threshold or "light"), 1)
+        return injury_reaches_threshold(injury, threshold)
 
     def _log_injury_status(self, team_no: int, cache: dict):
-        """国服日志验伤：HttpRequestCollect 里的精确 hp，serial 锚定，
+        """当前部队验伤：共用快照里的精确 hp、实例编号和伤势，
         同名复制人不会互相误判。返回 (伤势, 人话明细)；拉不到、数据过旧、
         成员缺数据一律返回 (None, None)——「不知道」就回退视觉链，
         绝不拿半残数据放行。
@@ -533,15 +533,9 @@ class BattleMixin:
         if not cfg.get("use_youzu_log", True):
             return None, None
         try:
-            if "events" not in cache:
-                from ..youzu_log import DEFAULT_ADB, DEFAULT_ADDRESS
-                from ..game_state import read_events
-                cache["events"] = read_events(
-                    getattr(self.maa, "adb_path", "") or DEFAULT_ADB,
-                    getattr(self.maa, "adb_address", "") or DEFAULT_ADDRESS)
-            from ..game_state import injury_report
-            report = injury_report(cache["events"], team_no,
-                                   max_age=float(cfg.get("max_age_sec", 600)))
+            snapshot = read_team_snapshot(self, team_no, cache=cache,
+                max_age=float(cfg.get("max_age_sec", 600)), default_connection=True)
+            report = snapshot.injury_report() if snapshot is not None else None
         except Exception:
             return None, None
         if not report:
@@ -1327,4 +1321,48 @@ class BattleMixin:
             return False
 
         print(f"[ERROR] 未知阵形: {formation_name}")
+        return False
+
+    def _return_home_from_march(self, cfg) -> bool:
+        """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。
+
+        长时间挂机后游戏回本丸偶尔会卡在加载过渡几十秒。这里必须等到本丸
+        标志实际出现，不能只因点击了确认按钮就把后续盘点放出去。
+        """
+        stop_btn = None
+        for _ in range(6):
+            self.maa.screenshot(force=True)
+            # 弹窗会透出背景的返程按钮，先消除重伤确认，不能点穿它。
+            self._deny_heavy_injury_warning(cfg)
+            observer = getattr(self, "_watch_battle_frame", None)
+            if callable(observer):
+                observer()  # 有行军观察器的宿主继续记录本帧。
+            stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
+            if stop_btn:
+                break
+            time.sleep(0.5)
+        if not stop_btn:
+            return False
+        self.maa.click(stop_btn)
+        time.sleep(1.5)
+        self.maa.screenshot(force=True)
+        text = self._battle_dialog_text()
+        if self._is_heavy_injury_dialog(text):
+            self._deny_heavy_injury_warning(cfg)
+            return False
+        # 只准确认返程；孤立的“是”也可能是在同意重伤进军。
+        if "返回本丸" in text or "回到本丸" in text:
+            yes = self._battle_dialog_button("是")
+            if yes is None:
+                return False
+            self.maa.click(yes)
+        elif not self.maa.template_match(cfg["home_ui"]["template"]):
+            return False
+        time.sleep(2.0)
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            self.maa.screenshot(force=True)
+            if self.maa.template_match(cfg["home_ui"]["template"]):
+                return True
+            time.sleep(0.8)
         return False

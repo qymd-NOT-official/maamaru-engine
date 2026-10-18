@@ -25,7 +25,8 @@ import time
 from .. import sword_db
 from ..maa_adapter import roi_4to4
 from .battle import find_deploy_button
-from ..injury_recovery import RecoveryProgress, recover_injury_stream
+from ..injury_recovery import recover_injury_stream
+from ..flow_control import BattleProgress
 from ..map_read import CV2_AVAILABLE, boss_distance_from_image
 
 
@@ -371,7 +372,7 @@ class SortieMixin:
                 recovery = yield from recover_injury_stream(
                     self, team_no=team_no, injury=injury,
                     threshold=repair_threshold, action=injury_action,
-                    progress=RecoveryProgress(max_loops, loop_no - 1),
+                    progress=BattleProgress(max_loops, loop_no - 1),
                     tag="[出阵]", repair_heavy_on_stop=True)
                 if not recovery.resume:
                     recovery.raise_if_failed("[出阵]")
@@ -1086,45 +1087,3 @@ class SortieMixin:
         roi = roi_4to4(*march_cfg.get("roi", [990, 510, 1280, 720]))
         template = march_cfg.get("template", "battle/行军.png")
         return self.maa.template_match(template, roi)
-
-    def _return_home_from_march(self, cfg) -> bool:
-        """在行军选择/停止画面安全返回本丸，并等待本丸真正出现。
-
-        长时间挂机后游戏回本丸偶尔会卡在加载过渡几十秒。这里必须等到本丸
-        标志实际出现，不能只因点击了确认按钮就把后续盘点放出去。
-        """
-        stop_btn = None
-        for _ in range(6):
-            self.maa.screenshot(force=True)
-            # 弹窗会透出背景的返程按钮，先消除重伤确认，不能点穿它。
-            self._deny_heavy_injury_warning(cfg)
-            self._watch_battle_frame()  # 停止横幅下的结算页也算行军观察帧
-            stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
-            if stop_btn:
-                break
-            time.sleep(0.5)
-        if not stop_btn:
-            return False
-        self.maa.click(stop_btn)
-        time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        text = self._battle_dialog_text()
-        if self._is_heavy_injury_dialog(text):
-            self._deny_heavy_injury_warning(cfg)
-            return False
-        # 只准确认返程；孤立的“是”也可能是在同意重伤进军。
-        if "返回本丸" in text or "回到本丸" in text:
-            yes = self._battle_dialog_button("是")
-            if yes is None:
-                return False
-            self.maa.click(yes)
-        elif not self.maa.template_match(cfg["home_ui"]["template"]):
-            return False
-        time.sleep(2.0)
-        deadline = time.monotonic() + 90.0
-        while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["home_ui"]["template"]):
-                return True
-            time.sleep(0.8)
-        return False
