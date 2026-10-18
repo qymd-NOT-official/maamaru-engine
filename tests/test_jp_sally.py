@@ -319,6 +319,90 @@ def test_confirm_during_march_still_stops():
     assert not click_near(browser.clicks, *ACCEPT_CLICK)
 
 
+# ---- 出发前队伍状态门闩（jp_party.PartyWatch） ----
+
+import time as _time
+
+from touken import jp_party
+
+
+def make_payload(members, status=1, team_no=1):
+    """合成 /sally 响应：members = [(slot, serial_id, sword_id, hp, hp_max)]"""
+    slot = {str(i): {'serial_id': None} for i in range(1, 7)}
+    sword = {}
+    for slot_no, serial, sword_id, hp, hp_max in members:
+        slot[str(slot_no)] = {'serial_id': serial}
+        sword[str(serial)] = {'serial_id': serial, 'sword_id': sword_id,
+                              'hp': hp, 'hp_max': hp_max, 'fatigue': 80}
+    return {'party': {str(team_no): {'party_no': team_no, 'status': status,
+                                     'slot': slot}},
+            'sword': sword}
+
+
+HEALTHY_TEAM = [(1, 101, 3, 56, 56), (2, 102, 5, 33, 33)]
+DEPART_CLICK = KNOWN['team/depart']
+
+
+class FakeWatch:
+    def __init__(self, payload=None, age=0.0):
+        self._latest = (None if payload is None
+                        else (_time.time() - age, payload))
+
+    def latest(self):
+        return self._latest
+
+
+def test_heavy_injury_blocks_departure():
+    """队伍里有重伤：出发前拦下，出发按钮绝不点。"""
+    payload = make_payload(HEALTHY_TEAM + [(3, 103, 7, 10, 56)])  # 重伤
+    browser = FakeBrowser(happy_frames())
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='重伤'):
+        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+    assert not click_near(browser.clicks, *DEPART_CLICK)
+
+
+def test_medium_injury_logs_and_departs():
+    """中伤不拦：日志点名带伤出发，流程照常走完。"""
+    payload = make_payload(HEALTHY_TEAM + [(3, 103, 7, 20, 56)])  # 中伤
+    browser = FakeBrowser(happy_frames())
+    sally, logs = make_sally(browser)
+    sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+    assert any('带伤出发' in line and '中伤' in line for line in logs)
+    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
+
+
+def test_stale_or_missing_party_data_blocks(monkeypatch):
+    """没收到队伍数据/数据过期：刷新重拿一次仍没有，宁可停也不带盲区放行。"""
+    monkeypatch.setattr(jp_sally, 'PARTY_DATA_WAIT', 0.05)
+    monkeypatch.setattr(jp_sally.Sally, '_boot_to_home', lambda self: None)
+
+    browser = FakeBrowser(happy_frames())
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
+        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(None))
+    assert browser.reloads == 1            # 试过刷新重拿，不是直接放弃
+
+    payload = make_payload(HEALTHY_TEAM)
+    browser = FakeBrowser(happy_frames())
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
+        sally.run(team_no=1, rounds=1,
+                  party_watch=FakeWatch(payload, age=9999))
+    assert browser.reloads == 1
+
+
+def test_team_away_blocks_departure():
+    """队伍在远征/出阵中（status != 1）：拦下，不盲点出发。"""
+    payload = make_payload(HEALTHY_TEAM, status=2)
+    browser = FakeBrowser(happy_frames())
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='待命'):
+        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+    assert not click_near(browser.clicks, *DEPART_CLICK)
+
+
 def test_black_loading_too_long_reloads_and_boots(monkeypatch):
     """黑屏加载卡死 → 自动刷新一次 → 启动序列（音量/标题/问候）→ 回本丸出阵。"""
     monkeypatch.setattr(jp_sally, 'RELOAD_AFTER', -1.0)   # 第二帧黑屏即触发
@@ -383,6 +467,15 @@ def test_run_script_success_path(monkeypatch):
             return False
 
     monkeypatch.setattr(jp_sally.jp_browser, 'JpBrowser', lambda: FakeJpBrowser())
+
+    class FakePartyWatch:
+        def __enter__(self):
+            return FakeWatch(make_payload(HEALTHY_TEAM))
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(jp_sally.jp_party, 'PartyWatch', lambda: FakePartyWatch())
     lines = list(jp_sally.run_script(params={'team_no': 1, 'rounds': 1}))
     assert lines == []
     assert any(abs(c[0] - 0.905) < 0.01 for c in fake.clicks)  # 出发键按过

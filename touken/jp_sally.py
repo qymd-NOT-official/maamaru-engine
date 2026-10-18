@@ -6,6 +6,7 @@
 - 只在认得出的画面上点击；认不出就停，绝不盲点。
 - 行军中画面长时间不变且没回本丸 → 熔断（卡住比点错安全）。
 - 行军途中出现任何弹窗一律停——重伤警告就是弹窗，绝不点「继续行军」。
+- 出发前经队伍数据通道确认状态：重伤拦截、空队/不在待命/数据不新鲜一律停。
 - 只打已攻略的图 + 自动行军：不开自动行军的出阵直接拒绝。
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import time
 
-from . import jp_browser, jp_browser_probe as frames, jp_vision
+from . import jp_browser, jp_browser_probe as frames, jp_party, jp_vision
 
 # 点击目标一律「锚点模板 + 基准分辨率像素偏移」：固定归一化坐标在窗口
 # 高度变化后会漂（2026-10-12 事故：窗口 1088→944，指揮标签点歪到编成），
@@ -34,6 +35,8 @@ RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷
 BOOT_TIMEOUT = 300.0                # 刷新后重进本丸的上限（数据加载可能很慢）
 GREET_STABLE = 4.0                  # 登录问候画面稳定这么久才点中央跳过
 UNKNOWN_STABLE = 8.0                # 起手未知画面稳定这么久就刷新页面重来
+PARTY_DATA_WAIT = 10.0              # 等队伍数据跟上的宽限（进出阵菜单后接口回填要一两拍）
+PARTY_DATA_MAX_AGE = 180.0          # 队伍数据超过这么久没更新就不算数
 
 # 画面分类：按优先级从上到下
 # 注意 shiki_menu 必须排在 home 前面：指挥菜单是盖在本丸上的浮层，
@@ -367,8 +370,50 @@ class Sally:
             time.sleep(self.poll)
         raise SallyStop('行军超过 25 分钟仍未回本丸，已停止；请人工查看游戏')
 
-    def run(self, team_no: int = 1, rounds: int = 1) -> None:
-        """跑 rounds 轮出阵；日志经 self.log 回调输出，返回值无意义。"""
+    def _await_party_data(self, watch):
+        """等一份新鲜的队伍数据；宽限内没等到返回 None。
+
+        队伍数据随「进出阵菜单」由游戏自己拉取：正常导航到部队页时它
+        早已落袋，宽限只是等后台线程把响应收完；起手就停在部队页则
+        根本没有新数据，等也白等，由调用方刷新页面重拿。"""
+        deadline = time.monotonic() + PARTY_DATA_WAIT
+        while True:
+            latest = watch.latest()
+            if latest and 0 <= time.time() - latest[0] <= PARTY_DATA_MAX_AGE:
+                return latest
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(self.poll)
+
+    def _check_party(self, watch, team_no: int, latest) -> None:
+        """出发前确认队伍状态：重伤拦截，空队/不在待命/数据不新鲜一律停。"""
+        numeral = '一二三四五'[team_no - 1]
+        if latest is None:
+            raise SallyStop('没能确认部队状态，已停止；请刷新游戏页面后重试')
+        captured_at, payload = latest
+        status = jp_party.party_status(payload, team_no)
+        if status is None:
+            raise SallyStop(f'没能认出部队{numeral}的编制，已停止；请人工查看游戏')
+        if status != 1:
+            raise SallyStop(f'部队{numeral}现在不在本丸待命（可能在远征或出阵中），已停止')
+        snapshot = jp_party.build_team_snapshot(payload, team_no, now=captured_at)
+        if snapshot is None or not snapshot.injury_known:
+            raise SallyStop(f'没能确认部队{numeral}的成员状态，已停止；请人工查看游戏')
+        heavy = [m for m in snapshot.members if m.injury == '重伤']
+        if heavy:
+            names = '、'.join(m.name or f'#{m.serial_id}' for m in heavy)
+            raise SallyStop(f'{names}现在是重伤，继续出阵可能就毁了，已停止；'
+                            '请先手入或换人')
+        hurt = [m for m in snapshot.members if m.injury]
+        if hurt:
+            self.log('带伤出发：' + '、'.join(
+                f'{m.name or m.serial_id}（{m.injury}）' for m in hurt))
+
+    def run(self, team_no: int = 1, rounds: int = 1, party_watch=None) -> None:
+        """跑 rounds 轮出阵；日志经 self.log 回调输出，返回值无意义。
+
+        party_watch 给到队伍数据通道（jp_party.PartyWatch）：带上时出发前
+        确认队伍状态（重伤拦截）；不带则跳过确认（仅测试这么跑）。"""
         if team_no not in TEAM_TAB_OFFSETS:
             raise ValueError('部队番号应在 1-5 之间')
         if not 1 <= rounds <= 200:
@@ -377,6 +422,17 @@ class Sally:
         for round_no in range(1, rounds + 1):
             self.log(f'第 {round_no}/{rounds} 轮：前往出阵')
             self._navigate_to_team()
+            if party_watch is not None:
+                latest = self._await_party_data(party_watch)
+                if latest is None:
+                    # 起手已停在部队页等场景：游戏没拉新数据，刷新页面
+                    # 重走一遍导航逼它拉取，再拿不到才停。
+                    self.log('没拿到队伍数据，刷新页面重新拿一次…')
+                    self.b.reload()
+                    self._boot_to_home()
+                    self._navigate_to_team()
+                    latest = self._await_party_data(party_watch)
+                self._check_party(party_watch, team_no, latest)
             self._select_team(team_no)
             self._enable_automarch()
             self.log(f'部队{ "一二三四五"[team_no - 1] }出发')
@@ -413,7 +469,11 @@ def run_script(config_path=None, params: dict | None = None):
         raise ValueError('参数格式不正确')
     try:
         with jp_browser.JpBrowser() as browser:
-            Sally(browser).run(team_no=team_no, rounds=rounds)
+            with jp_party.PartyWatch() as watch:
+                Sally(browser).run(team_no=team_no, rounds=rounds,
+                                   party_watch=watch)
+    except jp_party.PartyWatchError as exc:
+        raise FlowAborted(str(exc)) from exc
     except SallyStop as exc:
         raise FlowAborted(str(exc)) from exc
     yield from ()
