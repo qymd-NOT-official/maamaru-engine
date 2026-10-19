@@ -380,9 +380,23 @@ class SugarMixin:
                 locked = self._sugar_row_locked(image, button.y)
                 if locked is True:
                     return button, True
-                levels = parse_levels_cell(self.maa.ocr_all(
-                    roi_4to4(540, button.y - 46, 665, button.y + 8), image=image))
+                level_roi = roi_4to4(540, button.y - 46, 665, button.y + 8)
+                levels = parse_levels_cell(self.maa.ocr_all(level_roi, image=image))
                 level = levels.get("tou_level")
+                if locked is None or level is None:
+                    # 滑动回弹没停稳就截图，顶部的行必糊（2026-10-19 第一行
+                    # 稳定碎成渣）：等一拍重拍重读一次，还读不清才放弃这行
+                    time.sleep(0.8)
+                    retry_image = self.maa.screenshot(force=True)
+                    retry_locked = self._sugar_row_locked(retry_image, button.y)
+                    if retry_locked is True:
+                        return button, True
+                    retry_levels = parse_levels_cell(self.maa.ocr_all(
+                        level_roi, image=retry_image))
+                    if retry_locked is not None:
+                        locked = retry_locked
+                    if retry_levels.get("tou_level") is not None:
+                        level = retry_levels["tou_level"]
                 if locked is None or level is None:
                     unreadable = True
                     yield f"[炼糖·习合] 当前第 {row_no} 行锁定状态或乱舞等级未读清，先看下一行"
