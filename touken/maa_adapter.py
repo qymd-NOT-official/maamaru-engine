@@ -772,8 +772,9 @@ class MAAAdapter:
 
     def _template_match_maa_detail(self, template: str, roi: Optional[Region],
                                    threshold: float):
-        """ab 诊断用：MAA 任务阈值压到 0.3 拿原始分，命中判定按调用阈值在
-        Python 侧做。返回 (Point|None, score|None)。"""
+        """ab 诊断用：与正式路径同一个任务阈值（压阈值会让 MaaFW 提前收工，
+        2026-10-19 现场：0.3 阈值下真按钮 1.000 被报成 0.517），能拿到
+        best_result 就顺带报原始分。返回 (Point|None, score|None)。"""
         image = self.screenshot()
         if image is None:
             return None, None
@@ -785,7 +786,7 @@ class MAAAdapter:
                     JTemplateMatch(
                         template=[template],
                         roi=roi_tuple,
-                        threshold=[min(threshold, 0.3)]
+                        threshold=[threshold]
                     ),
                     image,
                 ),
@@ -796,12 +797,13 @@ class MAAAdapter:
             self._maa_timeouts = 0
             tm_detail = tm_job.get()
             tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
-            if tm_reco is None or tm_reco.best_result is None:
+            if tm_reco is None:
                 return None, None
-            score = float(tm_reco.best_result.score)
-            box = tm_reco.box or getattr(tm_reco.best_result, "box", None)
-            if score < threshold or box is None:
+            best = tm_reco.best_result
+            score = float(best.score) if best is not None else None
+            if not tm_reco.hit or tm_reco.box is None:
                 return None, score
+            box = tm_reco.box
             return Point(box.x + box.w // 2, box.y + box.h // 2), score
         except Exception as exc:
             print(f"[MAA 错误] 模板匹配异常: {exc}")
