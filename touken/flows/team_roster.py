@@ -9,7 +9,8 @@ issue #7「智能编队」第 1 步工单（牛老师终版口径 + 返工单）
     行定位（切队标签锚定、卡面空位正面证据、极化徽章/白樱花）保留视觉；
   - 切队正面确认：点标签后读行首"N之M"位置标签核对队号，确认不了该队
     observation_status=failed、slots=[]，绝不张冠李戴；
-  - 伤势分类比分数选最佳（最佳+区分度+同源已证明类别），不吃配置顺序抢答；
+  - 伤势分类：OCR 读章面文字优先，模板通道比分数选最佳
+    （最佳+区分度+同源已证明类别），不吃配置顺序抢答；
   - 六槽固定输出，slot_status=occupied/empty/unknown；任一字段失败只降级本字段；
   - 事件 team_roster.observed（ts 由 telemetry 补，payload 不带 observed_at），
     顶层 observation_status=complete/partial/failed；
@@ -50,6 +51,7 @@ from ..formation_identity import GROWTH_STATS, growth_stats_match
 from ..maa_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
 from ..roi_registry import FORMATION_ROW_DEFAULTS
+from ..team_state import injury_from_ocr_tokens
 
 _TEAM_TAB = {1: (154, 91), 2: (274, 91), 3: (394, 91), 4: (516, 91), 5: (638, 91)}
 _ROW_CY = [160, 258, 357, 455, 553, 652]
@@ -795,18 +797,25 @@ class TeamRosterMixin:
         return self.config.get("sortie", {}).get("injury_stamps", {})
 
     def _read_slot_injury(self, cy, stamps, survival, survival_max):
-        """伤势视觉兜底：三类章各取真实分，比分数选最佳，不吃配置顺序抢答。
+        """伤势视觉兜底：OCR 读章面文字为主，模板比分数选最佳为辅。
 
         只在 JSON 伤势（hp/hp_max 新鲜换算）缺失/过期时由
         _read_roster_slot 调用；JSON 在席时章匹配整通道跳过。
 
-        - 最高分且 ≥ 编队页校准阈值才入围；
-        - 与次高分差距不足（脉动动画章会互相蹭分）→ unknown；
-        - 编队页真帧未证明的类别（当前只有中伤有样本）→ unknown，
+        - OCR 通道：章面就是「重伤/中伤/轻伤」两个大字，文字证据不吃
+          模板同源校准，编队页直接认（出阵页 2026-10-19 实测 OCR 稳定
+          读出「中伤」）；读不到字才进模板通道；
+        - 模板通道：最高分且 ≥ 编队页校准阈值才入围；
+          与次高分差距不足（脉动动画章会互相蹭分）→ unknown；
+          编队页真帧未证明的类别（当前只有中伤有样本）→ unknown，
           绝不出阵页阈值硬判；
         - 全部未命中：生存==上限且两个数字可靠读出 → none（正面无伤），
           否则 unknown——"章没匹配到"绝不直接当无伤。
         """
+        hit = injury_from_ocr_tokens(
+            self._roster_ocr_tokens(_shift(_INJURY_ROI, cy)))
+        if hit:
+            return _INJURY_ENUM[hit]
         img = self.maa.screenshot()
         if img is not None and stamps:
             scores = {}

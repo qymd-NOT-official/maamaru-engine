@@ -279,6 +279,26 @@ class BattleComponentTests(unittest.TestCase):
         self.assertEqual(
             flow._team_injury_status({"injury_stamps": {}}), "中伤")
 
+    def test_injury_ocr_outranks_template_channel(self):
+        """OCR 读到章面文字就不再问模板：红章灰度匹配会系统性丢分。"""
+        class Maa(FakeMaa):
+            def ocr_all(self, roi):
+                return [("中伤", Point(290, 153))]
+
+        flow = Flow(Maa(templates={"battle/ui重伤.png": Point(280, 150)}))
+        cfg = {"injury_stamps": {"重伤": {"template": "battle/ui重伤.png"}}}
+        self.assertEqual(flow._team_injury_status(cfg), "中伤")
+        self.assertEqual(flow.maa.template_calls, [])
+
+    def test_injury_template_still_covers_ocr_blind_frame(self):
+        """OCR 漏读（糊帧/动画）时模板窄栏兜底仍然生效。"""
+        flow = Flow(FakeMaa(templates={"battle/中伤.png": Point(282, 147)}))
+        cfg = {"injury_stamps": {
+            "重伤": {"template": "battle/ui重伤.png"},
+            "中伤": {"template": "battle/中伤.png"},
+        }}
+        self.assertEqual(flow._team_injury_status(cfg), "中伤")
+
     def test_formation_state_uses_the_two_status_templates(self):
         auto = Point(910, 32)
         title = Point(640, 24)

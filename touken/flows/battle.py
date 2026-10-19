@@ -12,7 +12,7 @@ from datetime import datetime
 from ..maa_adapter import roi_4to4, Point
 from ..runtime_paths import STATE_DIR
 from ..team_state_reader import read_team_snapshot
-from ..team_state import injury_reaches_threshold
+from ..team_state import injury_from_ocr_tokens, injury_reaches_threshold
 
 
 def find_deploy_button(maa, cfg: dict):
@@ -557,12 +557,18 @@ class BattleMixin:
     def _team_injury_status(self, cfg):
         """在部队列表或战斗结果页识别当前最高伤势。"""
         # 只看左侧我方六人。大阪城结果页右侧敌军会出现红色“破坏”章，
-        # 全屏模板匹配会把它误认成同为红底的“重伤”，进而错误触发手入。
+        # 全屏识别会把它误认成同为红底的“重伤”，进而错误触发手入。
         roi = roi_4to4(*cfg.get("injury_status_roi", [0, 90, 570, 690]))
-        # 三种伤势章版式几乎一样：实测中伤章能以 0.704 擦线命中重伤模板。
-        # 模板只搜六行头像右缘的伤势章窄栏，并使用分类阈值；下方 OCR 仍看
-        # 完整我方区域，作为模板漏识别时的文字兜底。
         stamp_roi = roi_4to4(*cfg.get("injury_stamp_roi", [220, 90, 340, 690]))
+        # OCR 读章面文字为主：红章转灰度后模板匹配会系统性丢分（2026-10-19
+        # AB 实测真章 cv2 0.85 擦线、无章画面噪声峰同高），文字识别没有
+        # 这层校准差。模板只作 OCR 漏读（糊帧/动画）时的兜底，且只搜六行
+        # 头像右缘的伤势章窄栏。
+        hit = injury_from_ocr_tokens(self.maa.ocr_all(roi))
+        if hit:
+            return hit
+        # 三种伤势章版式几乎一样：实测中伤章能以 0.704 擦线命中重伤模板，
+        # 分类阈值必须守住 0.88。
         stamps = cfg.get("injury_stamps", {})
         for severity in ("重伤", "中伤", "轻伤"):
             stamp_cfg = stamps.get(severity, {})
@@ -575,21 +581,6 @@ class BattleMixin:
             legacy = cfg.get("injury_stamp", {}).get("template")
             if legacy and self.maa.template_match(legacy, roi):
                 return "重伤"
-        # 通用 ocr(expected) 允许模糊匹配，曾把单独一个“伤”以高分命中“重伤”，
-        # 导致本应保持中伤挨打的极化太刀被错误送回手入。这里读取原始文字，
-        # 只有完整出现伤势名称才成立；“伤”这种残片不能推断等级。
-        tokens = self.maa.ocr_all(roi)
-        texts = [str(text).replace(" ", "") for text, _ in tokens]
-        for severity in ("重伤", "中伤", "轻伤"):
-            if any(severity in text for text in texts):
-                return severity
-            # 竖排章可能被拆成“重”“伤”；只拼同一窄栏里相邻的两个字。
-            for first, p1 in tokens:
-                if str(first).strip() != severity[0]:
-                    continue
-                if any(str(last).strip() == "伤" and abs(p1.x - p2.x) <= 14
-                       and 0 < p2.y - p1.y <= 45 for last, p2 in tokens):
-                    return severity
         return None
 
     def _battle_dialog_text(self):

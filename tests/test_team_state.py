@@ -7,7 +7,7 @@ import pytest
 
 from touken.flow_control import BattleProgress
 from touken.injury_recovery import RecoveryProgress, current_team_injury
-from touken.team_state import TeamMemberSnapshot, TeamSnapshot, injury_reaches_threshold
+from touken.team_state import TeamMemberSnapshot, TeamSnapshot, injury_from_ocr_tokens, injury_reaches_threshold
 from touken.team_state_reader import read_team_snapshot
 from touken.flows.battle import BattleMixin
 from touken.flows.osaka import OsakaMixin
@@ -152,6 +152,36 @@ def test_unknown_injury_still_reaches_the_most_conservative_threshold():
     assert injury_reaches_threshold(None, "heavy")
     assert injury_reaches_threshold("unrecognized", "heavy")
     assert not injury_reaches_threshold("中伤", "heavy")
+
+
+def _pt(x, y):
+    return SimpleNamespace(x=x, y=y)
+
+
+@pytest.mark.parametrize("texts,expected", [
+    ([("中伤", _pt(290, 153))], "中伤"),
+    ([("米中伤", _pt(290, 153))], "中伤"),      # 章面蹭字整体认出也算
+    ([("轻伤", _pt(10, 10)), ("重伤", _pt(20, 20))], "重伤"),  # 同屏取最高级
+    ([("伤", _pt(290, 153))], None),            # 残片不推断等级
+    ([("中", _pt(290, 153))], None),
+    ([], None),
+])
+def test_injury_ocr_full_words_only(texts, expected):
+    assert injury_from_ocr_tokens(texts) == expected
+
+
+def test_injury_ocr_vertical_split_chars_join_in_same_column():
+    assert injury_from_ocr_tokens(
+        [("重", _pt(100, 100)), ("伤", _pt(104, 130))]) == "重伤"
+    # 横偏太多（不同列）不拼
+    assert injury_from_ocr_tokens(
+        [("重", _pt(100, 100)), ("伤", _pt(130, 130))]) is None
+    # 纵距太远不拼
+    assert injury_from_ocr_tokens(
+        [("重", _pt(100, 100)), ("伤", _pt(100, 200))]) is None
+    # 「伤」在「重」上面（顺序反了）不拼
+    assert injury_from_ocr_tokens(
+        [("伤", _pt(100, 100)), ("重", _pt(100, 130))]) is None
 
 
 @pytest.mark.parametrize("observe", [False, True])

@@ -123,6 +123,8 @@ class _RosterMaa:
                 return self._tokens(fields.get("fatigue"), cy + 38)
             if abs(x - 62) < 5 and abs(y - (cy - 50)) < 5:
                 return self._tokens(fields.get("badge_char"), cy - 40)
+            if abs(x - 165) < 5 and abs(y - (cy - 50)) < 5:
+                return self._tokens(fields.get("stamp_ocr"), cy - 30)
         return []
 
     @staticmethod
@@ -255,13 +257,15 @@ def _make_maa(pages_spec, current=1, swallow=(), delayed=(), cards=None,
 def _read(cy=160, name=None, level=None, fatigue=None, survival=None,
           badge_char=None, badge_template=None, badge_scale=1.0,
           sakura=False, stamp_scores=None, card="occupied",
-          combined_name=None):
-    """读一个槽位：字段/徽章/伤势分数/白樱花/卡面形态按剧本组合。
+          combined_name=None, stamp_ocr=None):
+    """读一个槽位：字段/徽章/伤势分数/章面文字/白樱花/卡面形态按剧本组合。
 
     stamp_scores: {伤势中文键: 真实分}（模拟脉动帧的各类别实测分）。
+    stamp_ocr: 章面 OCR 读到的文字（伤势章 OCR 优先通道）。
     """
     fields = {"level": level, "fatigue": fatigue, "survival": survival,
-              "badge_char": badge_char, "combined_name": combined_name}
+              "badge_char": badge_char, "combined_name": combined_name,
+              "stamp_ocr": stamp_ocr}
     if name is not None:
         fields["name"] = name
     scores = {cy: stamp_scores} if stamp_scores else {}
@@ -498,6 +502,24 @@ class SlotFieldTests(unittest.TestCase):
         slot = _read(name="莺丸", badge_char="太",
                      stamp_scores={"中伤": 0.60})
         self.assertIsNone(slot["injury"])
+
+    def test_injury_ocr_word_beats_template_channel(self):
+        # 章面文字直接读出：不依赖模板分，模板通道整段不问
+        slot = _read(name="莺丸", badge_char="太", stamp_ocr="中伤",
+                     stamp_scores={"重伤": 0.91})
+        self.assertEqual(slot["injury"], "medium")
+
+    def test_injury_ocr_heavy_accepted_on_text_evidence(self):
+        # 模板通道对编队页未证明类别一律 unknown；OCR 读到「重伤」
+        # 两字本身就是证据，不受同源清单限制
+        slot = _read(name="莺丸", badge_char="太", stamp_ocr="重伤")
+        self.assertEqual(slot["injury"], "heavy")
+
+    def test_injury_ocr_fragment_stays_unknown(self):
+        # 单个「伤」残片不推断等级，模板也没分 → unknown
+        slot = _read(name="莺丸", badge_char="太", stamp_ocr="伤")
+        self.assertIsNone(slot["injury"])
+        self.assertIn("injury", slot["unknown_fields"])
 
     def test_tactical_role_with_real_config_shape(self):
         # 真实配置形状回归：中伤 + 极化 + 太刀 → 碰瓷角色（英文枚举）

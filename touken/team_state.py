@@ -11,6 +11,28 @@ def injury_reaches_threshold(injury, threshold):
     return rank >= {"light": 1, "medium": 2, "heavy": 3}.get(str(threshold or "light"), 1)
 
 
+def injury_from_ocr_tokens(tokens):
+    """从 OCR token（(文字, 中心点) 序列）里认伤势章文字，认不出返回 None。
+
+    章面就是「重伤/中伤/轻伤」两个大字，OCR 直接读字不存在红章灰度
+    模板那种系统性丢分。只认完整伤势名称：模糊匹配曾把单独一个「伤」
+    高分当成「重伤」，把该保持中伤挨打的刀错误送回手入——残片不能
+    推断等级。竖排章可能被拆成两个 token：只拼同一窄列里上下相邻的
+    「重/中/轻」+「伤」。多个级别同屏时按重伤→中伤→轻伤返回最高级。
+    """
+    texts = [str(text).replace(" ", "") for text, _ in tokens]
+    for severity in ("重伤", "中伤", "轻伤"):
+        if any(severity in text for text in texts):
+            return severity
+        for first, p1 in tokens:
+            if str(first).strip() != severity[0]:
+                continue
+            if any(str(last).strip() == "伤" and abs(p1.x - p2.x) <= 14
+                   and 0 < p2.y - p1.y <= 45 for last, p2 in tokens):
+                return severity
+    return None
+
+
 def captain_rotation_slot(fatigue, margin):
     if not fatigue or 1 not in fatigue:
         return None
