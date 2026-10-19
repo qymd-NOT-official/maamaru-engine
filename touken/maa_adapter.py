@@ -719,14 +719,21 @@ class MAAAdapter:
     def _template_match_cv2(self, template: str, roi: Optional[Region],
                             threshold: float):
         """模板匹配（自研 cv2 引擎）；返回 (x, y, score) 或 None。"""
+        hit = self._template_match_cv2_raw(template, roi)
+        if hit is None or hit[2] < threshold:
+            return None
+        return hit
+
+    def _template_match_cv2_raw(self, template: str, roi: Optional[Region]):
+        """cv2 引擎不过阈值的最佳匹配 (x, y, score)；ab 诊断要原始分。"""
         from . import vision_cv2
         image = self.screenshot()
         if image is None:
             return None
         path = Path(self.resource_dir) / 'image' / template
         try:
-            return vision_cv2.match(
-                image, path, roi.to_tuple() if roi else None, threshold)
+            return vision_cv2.best(
+                image, path, roi.to_tuple() if roi else None)
         except FileNotFoundError:
             print(f"[cv2模板] 模板不存在: {template}")
             return None
@@ -747,15 +754,58 @@ class MAAAdapter:
                   f"score={hit[2]:.3f}")
             return Point(hit[0], hit[1])
         if engine == 'ab':
-            maa_point = self._template_match_maa(template, roi, threshold)
-            hit = self._template_match_cv2(template, roi, threshold)
+            maa_point, maa_score = self._template_match_maa_detail(
+                template, roi, threshold)
+            raw = self._template_match_cv2_raw(template, roi)
+            cv2_score = raw[2] if raw else None
+            cv2_hit = (cv2_score is not None and cv2_score >= threshold)
+            cv2_desc = (f'命中({raw[0]},{raw[1]})' if cv2_hit else '未命中')
+            if cv2_score is not None:
+                cv2_desc += f' s={cv2_score:.3f}'
             maa_desc = (f'命中({maa_point.x},{maa_point.y})'
                         if maa_point else '未命中')
-            cv2_desc = (f'命中({hit[0]},{hit[1]}) score={hit[2]:.3f}'
-                        if hit else '未命中')
+            if maa_score is not None:
+                maa_desc += f' s={maa_score:.3f}'
             print(f"[AB模板] {template}: maa={maa_desc} cv2={cv2_desc}")
             return maa_point
         return self._template_match_maa(template, roi, threshold)
+
+    def _template_match_maa_detail(self, template: str, roi: Optional[Region],
+                                   threshold: float):
+        """ab 诊断用：MAA 任务阈值压到 0.3 拿原始分，命中判定按调用阈值在
+        Python 侧做。返回 (Point|None, score|None)。"""
+        image = self.screenshot()
+        if image is None:
+            return None, None
+        roi_tuple = roi.to_tuple() if roi else (0, 0, 0, 0)
+        try:
+            tm_job = self._wait_job(
+                self.tasker.post_recognition(
+                    JRecognitionType.TemplateMatch,
+                    JTemplateMatch(
+                        template=[template],
+                        roi=roi_tuple,
+                        threshold=[min(threshold, 0.3)]
+                    ),
+                    image,
+                ),
+                timeout=self.RECOGNIZE_TIMEOUT, label=f"模板匹配 {template}")
+            if tm_job is None:
+                self._note_recognize_timeout()
+                return None, None
+            self._maa_timeouts = 0
+            tm_detail = tm_job.get()
+            tm_reco = tm_detail.nodes[0].recognition if tm_detail and tm_detail.nodes else None
+            if tm_reco is None or tm_reco.best_result is None:
+                return None, None
+            score = float(tm_reco.best_result.score)
+            box = tm_reco.box or getattr(tm_reco.best_result, "box", None)
+            if score < threshold or box is None:
+                return None, score
+            return Point(box.x + box.w // 2, box.y + box.h // 2), score
+        except Exception as exc:
+            print(f"[MAA 错误] 模板匹配异常: {exc}")
+            return None, None
 
     def _template_match_maa(self, template: str, roi: Optional[Region] = None,
                             threshold: float = 0.7) -> Optional[Point]:
@@ -831,9 +881,9 @@ class MAAAdapter:
                 return 0.0
         if engine == 'ab':
             maa_score = self._template_match_score_maa(template, roi, threshold)
-            hit = self._template_match_cv2(template, roi, threshold)
+            raw = self._template_match_cv2_raw(template, roi)
             print(f"[AB模板分] {template}: maa={maa_score:.3f} "
-                  f"cv2={hit[2] if hit else 0.0:.3f}")
+                  f"cv2={raw[2] if raw else 0.0:.3f}")
             return maa_score
         return self._template_match_score_maa(template, roi, threshold)
 

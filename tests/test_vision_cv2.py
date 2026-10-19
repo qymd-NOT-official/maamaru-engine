@@ -98,8 +98,21 @@ def test_adapter_ab_mode_returns_maa_result(tmp_path, monkeypatch, capsys):
     vision_cv2._cache.clear()
     adapter = make_adapter(tmp_path, monkeypatch, 'ab')
     monkeypatch.setattr(adapter, 'screenshot', lambda: frame)
-    monkeypatch.setattr(adapter, '_template_match_maa',
-                        lambda *a, **k: Point(9, 9))
+    monkeypatch.setattr(adapter, '_template_match_maa_detail',
+                        lambda *a, **k: (Point(9, 9), 0.91))
     point = adapter.template_match('tpl.png')
     assert point == Point(9, 9)   # AB 模式以 MAA 为准
-    assert '[AB模板] tpl.png' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert '[AB模板] tpl.png' in out
+    assert 's=' in out  # 双跑日志带两边原始分
+
+
+def test_best_ignores_threshold(tmp_path):
+    frame, tpl, (cx, cy) = make_frame_and_template(tmp_path)
+    raw = vision_cv2.best(frame, tpl)
+    assert raw is not None and raw[2] > 0.99
+    assert abs(raw[0] - cx) <= 1 and abs(raw[1] - cy) <= 1
+    vision_cv2._cache.clear()
+    other = np.zeros_like(frame)
+    raw = vision_cv2.best(other, tpl)
+    assert raw is not None and raw[2] < 0.7  # 不过阈值，分数照给

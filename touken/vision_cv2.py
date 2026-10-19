@@ -30,10 +30,11 @@ def load_template(path: Path) -> np.ndarray:
     return _cache[key]
 
 
-def match(image_bgr: np.ndarray, template_path: Path,
-          roi: tuple[int, int, int, int] | None = None,
-          threshold: float = 0.7) -> tuple[int, int, float] | None:
-    """在帧里找模板；命中返回 (中心x, 中心y, 分数)，未命中返回 None。"""
+def best(image_bgr: np.ndarray, template_path: Path,
+         roi: tuple[int, int, int, int] | None = None
+         ) -> tuple[int, int, float] | None:
+    """不做阈值过滤的最佳匹配 (中心x, 中心y, 分数)；区域比模板小返回 None。
+    ab 双跑诊断要原始分，命中判定由调用方做。"""
     cut = load_template(template_path)
     gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
     origin = (0, 0)
@@ -46,10 +47,19 @@ def match(image_bgr: np.ndarray, template_path: Path,
     if gray.shape[0] < th or gray.shape[1] < tw:
         return None
     scores = cv2.matchTemplate(gray, cut, cv2.TM_CCOEFF_NORMED)
-    _, best, _, (px, py) = cv2.minMaxLoc(scores)
-    if best < threshold:
+    _, best_score, _, (px, py) = cv2.minMaxLoc(scores)
+    return (px + origin[0] + tw // 2, py + origin[1] + th // 2,
+            float(best_score))
+
+
+def match(image_bgr: np.ndarray, template_path: Path,
+          roi: tuple[int, int, int, int] | None = None,
+          threshold: float = 0.7) -> tuple[int, int, float] | None:
+    """在帧里找模板；命中返回 (中心x, 中心y, 分数)，未命中返回 None。"""
+    hit = best(image_bgr, template_path, roi)
+    if hit is None or hit[2] < threshold:
         return None
-    return (px + origin[0] + tw // 2, py + origin[1] + th // 2, float(best))
+    return hit
 
 
 def match_score(image_bgr: np.ndarray, template_path: Path,
