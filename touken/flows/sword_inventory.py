@@ -391,6 +391,29 @@ def _split_label_tokens(tokens) -> list:
     return items
 
 
+def _merge_split_grade_tokens(items):
+    """回弹/糊字期 OCR 会把「2级」拆成「2」「级」两个独立 token，
+    fullmatch 直接落空、整行判未读清（2026-10-19 炼糖第一行稳定复现）。
+    按 y 带把孤独的「级」拼回它左边唯一的纯数字：带内候选不止一个
+    就不拼（读不出胜过读错）。"""
+    digits = [(i, x, y) for i, (kind, t, x, y) in enumerate(items)
+              if not kind and re.fullmatch(r"\d{1,2}", t)]
+    consumed = set()
+    merged = {}
+    for i, (kind, t, x, y) in enumerate(items):
+        if kind or t != "级":
+            continue
+        band = [(j, dx) for j, dx, dy in digits
+                if j not in consumed and abs(dy - y) <= 6 and dx < x]
+        if len(band) != 1:
+            continue
+        j, dx = band[0]
+        consumed.add(j)
+        merged[i] = (None, f"{items[j][1]}级", dx, items[j][3])
+    return [merged.get(i, item) for i, item in enumerate(items)
+            if i not in consumed]
+
+
 def parse_levels_cell(tokens) -> dict:
     """等级格（刀剑/乱舞/生存/疲劳四行标签+值）token → 行字段。
 
@@ -403,7 +426,7 @@ def parse_levels_cell(tokens) -> dict:
     等级格本身就含四个标签，读不出就是 None，如实落库，不静默编数
     （逐格路径下 _retry_missing_levels 是多余的）。
     """
-    items = _split_label_tokens(tokens)
+    items = _merge_split_grade_tokens(_split_label_tokens(tokens))
     labels = [(kind, x, y) for kind, _t, x, y in items if kind]
     levels = [(x, y, int(m.group(1))) for kind, t, x, y in items
               if not kind and (m := re.fullmatch(r"(\d{1,2})级", t))]

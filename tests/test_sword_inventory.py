@@ -285,6 +285,26 @@ class CellParseTests(unittest.TestCase):
         self.assertIsNone(out["fatigue_max"])
         self.assertIsNone(parse_levels_cell([])["level"])
 
+    def test_levels_cell_detached_grade_merges_back(self):
+        # 2026-10-19 炼糖现场：滑动回弹期「2级」被拆成「2」「级」两个 token，
+        # 同 y 带内数字唯一时拼回再解析
+        out = parse_levels_cell([
+            _tok("刀剑", 423, 157), _tok("24", 470, 158), _tok("级", 505, 158),
+            _tok("乱舞", 423, 174), _tok("2", 470, 175), _tok("级", 500, 175),
+            _tok("生存", 424, 197), _tok("40/40", 492, 198)])
+        self.assertEqual(out["level"], 24)
+        self.assertEqual(out["tou_level"], 2)
+
+    def test_levels_cell_detached_grade_ambiguous_stays_none(self):
+        # 同 y 带内有两个数字候选：不猜、不拼，「级」保持孤独
+        from touken.flows.sword_inventory import (
+            _merge_split_grade_tokens, _split_label_tokens)
+        items = _split_label_tokens([
+            _tok("刀剑", 423, 157), _tok("1", 470, 158), _tok("24", 490, 158),
+            _tok("级", 520, 158)])
+        texts = [t for _k, t, _x, _y in _merge_split_grade_tokens(items)]
+        self.assertEqual(texts, ["刀剑", "1", "24", "级"])
+
     def test_split_stats_roi_nine_cells_with_inset(self):
         cells = split_stats_roi((521, 144, 1026, 231))
         self.assertEqual(len(cells), 9)
