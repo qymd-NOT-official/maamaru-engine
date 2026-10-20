@@ -584,6 +584,30 @@ class SwapTiredInFactsTests(unittest.TestCase):
         self.assertEqual(calls, [50])
         self.assertTrue(any("锁/等级没核实" in m for m in messages))
 
+    def test_recovered_fatigue_still_matches(self):
+        # 白山吉光事件：数据是上次同步的 46，画面已自然恢复到 49，
+        # 容差内仍视作同一振，不许回退老路
+        pool = [(201, 46, 165, 35, 1)]
+        maa = SakuraListMaa([(200, 49)], names={200: "白山吉光"})
+        result, calls, messages, gate = self._run(maa, _pool_event(pool))
+
+        self.assertIs(result, True)
+        self.assertEqual(maa.clicks, [(1033, 160), (1197, 160)])
+        self.assertEqual(calls, [])
+        self.assertEqual(gate.call_count, 1)
+        self.assertTrue(any("白山吉光" in m and "换！" in m for m in messages))
+
+    def test_beyond_recovery_slack_falls_back(self):
+        # 画面疲劳比数据高出容差以上：不能当同一振，交回视觉兜底
+        pool = [(201, 46, 165, 35, 1)]
+        maa = SakuraListMaa([(200, 60)], names={200: "白山吉光"})
+        result, calls, messages, gate = self._run(maa, _pool_event(pool))
+
+        self.assertEqual(gate.call_count, 0)
+        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(result, "legacy")
+        self.assertEqual(calls, [50])
+
 
 if __name__ == "__main__":
     unittest.main()

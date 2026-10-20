@@ -78,6 +78,14 @@ def _parse_fatigue_text(text: str):
 _SEL_DECIDE_X = 1197
 _SEL_MAX_PAGES = 80        # 翻页安全上限
 
+# 疲劳自然恢复容差：数据通道记的是上次服务器同步值，画面显示的是实时
+# 恢复后的值，只会更高（实测约 17 分钟 +1）。数据保鲜上限 600 秒，
+# 容差取 5 留足余量；名字仍须对上、锁和等级仍走画面核实，不放水。
+# 血泪（2026-10-20 白山吉光事件）：数据疲劳 46 vs 画面 49 精确匹配
+# 全灭，数据通道翻遍名单空手而归，回退老路后还从翻到的页接着扫，
+# 把排在更前面的候选漏了个干净。
+_FATIGUE_RECOVERY_SLACK = 5
+
 
 class SakuraMixin:
     """刷花。依赖宿主类的 navigate_to_stream、sortie_stream、maa。"""
@@ -551,8 +559,9 @@ class SakuraMixin:
         return rows
 
     def _swap_candidates_in(self, candidates):
-        """数据已选定候选（疲劳升序）：在名单里逐页定位候选行——疲劳+名
-        字双对上、且锁和等级经画面核实，才点「决定」换进来。
+        """数据已选定候选（疲劳升序）：在名单里逐页定位候选行——疲劳（含
+        自然恢复容差）+名字双对上、且锁和等级经画面核实，才点「决定」换
+        进来。
         Returns: True/False 定论；None = 名单里定位不到任何候选（数据与
         画面分歧），交回视觉兜底。
         """
@@ -568,7 +577,11 @@ class SakuraMixin:
             rows = self._selection_rows(tokens)
             for fy, value, name in rows:
                 for cand in candidates:
-                    if value != cand["fatigue"] or name != cand["name"]:
+                    # 画面疲劳是数据值自然恢复后的现值，只会更高；
+                    # 容差内视作同一振（名字仍须逐字对上）。
+                    if (not cand["fatigue"] <= value
+                            <= cand["fatigue"] + _FATIGUE_RECOVERY_SLACK
+                            or name != cand["name"]):
                         continue
                     # 定位到候选行。锁和等级仍以画面为准核实一遍：数据说的
                     # 是池子里那一振（serial），名单行万一是同刀异振（比如
@@ -589,7 +602,7 @@ class SakuraMixin:
                     if self._wait_list_closed():
                         return True
                     yield f"[刷花·换人] {cand['name']}目前无法选入，看下一振"
-            if rows and min(v for _, v, _ in rows) > candidates[-1]["fatigue"]:
+            if rows and min(v for _, v, _ in rows) > candidates[-1]["fatigue"] + _FATIGUE_RECOVERY_SLACK:
                 # 升序名单已经翻过所有候选的疲劳还没影：名单跟数据对不上
                 return None
             # 本页没有候选，翻页
