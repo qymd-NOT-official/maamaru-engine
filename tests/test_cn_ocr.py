@@ -60,7 +60,25 @@ def test_read_region_crops_before_engine(fake_engine):
 
 def test_read_region_clamps_out_of_bounds_roi(fake_engine):
     cn_ocr.read_region(frame(), Roi(-50, 700, 300, 100))
-    assert fake_engine.seen[0].shape == (20, 300, 3)   # 贴边裁剪不越界
+    # 贴边裁剪不越界；裁出 20px 高的矮条，按短边 40 放大 2 倍
+    assert fake_engine.seen[0].shape == (40, 600, 3)
+
+
+def test_read_region_scales_up_thin_roi(fake_engine):
+    # 24px 高的矮条 ROI（疲劳行那种）：det 直接喂全灭，放大到短边 40
+    out = cn_ocr.read_region(frame(), Roi(100, 200, 300, 24))
+    fed = fake_engine.seen[0]
+    assert fed.shape[0] == 40                          # 放大后高 40
+    # 引擎坐标在放大图上，返回必须还原到原始尺度再补 ROI 偏移
+    text, cx, cy, _ = out[0]
+    scale = 40 / 24
+    assert cx == 100 + int(25 / scale)
+    assert cy == 200 + int(12 / scale)
+
+
+def test_read_region_leaves_normal_roi_untouched(fake_engine):
+    cn_ocr.read_region(frame(), Roi(100, 200, 300, 100))
+    assert fake_engine.seen[0].shape == (100, 300, 3)  # 正常尺寸不放大
 
 
 def test_read_region_empty_inputs(fake_engine):

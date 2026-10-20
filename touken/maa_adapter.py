@@ -577,7 +577,8 @@ class MAAAdapter:
 
     def _ocr_ab_probe(self, expected, roi, match_mode, maa_point):
         """AB 双跑陪测：maa 主导已出结果后，cn_ocr 在同一缓存帧上陪跑，
-        并排记录两边结论供校准。陪跑绝不影响 MAA 结果。"""
+        并排记录两边结论供校准。陪跑绝不影响 MAA 结果。
+        分歧现场裁图存证（debug/ocr_ab/），事后拿着真图修引擎。"""
         try:
             from . import cn_ocr
             image = self.screenshot()
@@ -587,12 +588,46 @@ class MAAAdapter:
                         if maa_point else '未命中')
             nat_side = (f'命中({native[0]},{native[1]})'
                         if native else '未命中')
-            flag = '' if bool(maa_point) == bool(native) else ' ⚠分歧'
+            diverged = bool(maa_point) != bool(native)
+            flag = ' ⚠分歧' if diverged else ''
             _safe_print(f'[AB文字] "{expected}": maa={maa_side} '
                         f'native={nat_side}{flag}')
+            if diverged and image is not None:
+                self._ab_snapshot(image, roi, expected)
         except Exception as exc:
             _safe_print(f'[AB文字] "{expected}": native 异常 '
                         f'{type(exc).__name__}')
+
+    @staticmethod
+    def _ab_snapshot(image, roi, tag):
+        """AB 分歧现场存证：裁 ROI 图落盘 debug/ocr_ab/。失败不碍事；
+        目录超 300 张时删最旧，防止长期双跑把磁盘吃胖。"""
+        try:
+            import time as _time
+            import cv2
+            from .runtime_paths import DEBUG_DIR
+            out_dir = DEBUG_DIR / "ocr_ab"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            x, y = max(0, int(roi.x)), max(0, int(roi.y))
+            x2 = min(image.shape[1], x + int(roi.w))
+            y2 = min(image.shape[0], y + int(roi.h))
+            if x2 <= x or y2 <= y:
+                return
+            safe = "".join(c if c.isalnum() else "_" for c in str(tag))[:24]
+            now = _time.time()
+            stamp = _time.strftime("%Y%m%d-%H%M%S",
+                                   _time.localtime(now))
+            name = f"{stamp}-{int(now * 1000) % 1000:03d}_{safe}.png"
+            # imencode+tofile：cv2.imwrite 在 Windows 走本地代码页，
+            # 中文文件名会被 GBK 往返吃掉
+            buf = cv2.imencode(".png", image[y:y2, x:x2])[1]
+            buf.tofile(str(out_dir / name))
+            files = sorted(out_dir.glob("*.png"),
+                           key=lambda p: p.stat().st_mtime)
+            for old in files[:-300]:
+                old.unlink()
+        except Exception:
+            pass
 
     def _ocr_maa(self, expected: str, roi: Region,
             match_mode: str = "contains") -> Optional[Point]:

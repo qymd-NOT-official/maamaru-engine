@@ -15,6 +15,24 @@ import numpy as np
 
 from .jp_ocr import _get_engine
 
+# det 对矮条 ROI 检出不稳：实测单行 24px 高（疲劳行）直接喂全灭，
+# 52px 正常。短边不足门槛时按比例放大，文字物理像素高度才是检出关键。
+_MIN_SHORT_SIDE = 40
+_MAX_SCALE = 3.0
+
+
+def _scale_up_small(crop):
+    """短边不足门槛的矮条 ROI 等比放大，返回 (图, 坐标还原倍率)。"""
+    h, w = crop.shape[:2]
+    short = min(h, w)
+    if short >= _MIN_SHORT_SIDE or short <= 0:
+        return crop, 1.0
+    scale = min(_MAX_SCALE, _MIN_SHORT_SIDE / short)
+    import cv2
+    big = cv2.resize(crop, (round(w * scale), round(h * scale)),
+                     interpolation=cv2.INTER_CUBIC)
+    return big, scale
+
 
 def read_region(image, roi, min_score: float = 0.5) -> list:
     """读帧内一块像素区域的文字。
@@ -38,6 +56,7 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
     crop = image[y:y2, x:x2]
     # BGR → RGB；::-1 产生负 stride，onnx 不吃，拷一份连续内存
     rgb = np.ascontiguousarray(crop[:, :, ::-1])
+    rgb, scale = _scale_up_small(rgb)
     result, _elapse = _get_engine()(rgb)
     out = []
     for box, text, score in (result or []):
@@ -45,8 +64,8 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
             continue
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
-        cx = x + int((min(xs) + max(xs)) / 2)
-        cy = y + int((min(ys) + max(ys)) / 2)
+        cx = x + int((min(xs) + max(xs)) / 2 / scale)
+        cy = y + int((min(ys) + max(ys)) / 2 / scale)
         out.append((str(text), cx, cy, float(score)))
     return out
 

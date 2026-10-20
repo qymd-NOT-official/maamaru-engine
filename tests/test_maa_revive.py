@@ -129,5 +129,23 @@ class MaaReviveTests(unittest.TestCase):
         self.assertIsInstance(adapter.tasker, FakeTasker)
 
 
+class AbSnapshotTests(unittest.TestCase):
+    def test_divergence_snapshot_saved_under_debug_dir(self):
+        import pathlib
+        import tempfile
+
+        import numpy as np
+
+        from touken import runtime_paths
+        img = np.zeros((100, 200, 3), dtype=np.uint8)
+        roi = Region(10, 20, 50, 30)
+        with tempfile.TemporaryDirectory() as td, \
+                patch.object(runtime_paths, "DEBUG_DIR", pathlib.Path(td)):
+            maa_adapter.MAAAdapter._ab_snapshot(img, roi, "编队")
+            files = list((pathlib.Path(td) / "ocr_ab").glob("*.png"))
+        self.assertEqual(len(files), 1)
+        self.assertIn("编队", files[0].name)
+
+
 if __name__ == "__main__":
     unittest.main()
