@@ -700,7 +700,8 @@ class SakuraMixin:
                 return False
         if not self._click_panel_button("全刀剑", require_selected=True):
             return False
-        # 国服按钮实际写「櫻吹雪」，不让繁简差异变成找不到排序。
+        # 按钮印的其实是简体「樱吹雪」（早年注释误判成繁体）；查找词沿用
+        # 繁体不动——MAA 一直这么命中的，自研引擎匹配层有繁简归一兜底。
         if not self._click_panel_button("櫻吹雪", roi=(942, 430, 1082, 479), require_selected=True):
             return False
         if not self._click_panel_button("确定"):
