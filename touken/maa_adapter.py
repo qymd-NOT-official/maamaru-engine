@@ -175,11 +175,12 @@ class MAAAdapter:
         self._maa_timeouts = 0  # 连续识别超时计数
         self._revive_attempts = 0  # 本场运行已抢救次数
 
-        # 模板匹配引擎：maa（默认，现状）/ cv2（自研替换件）/ ab（双跑对比，
-        # 以 MAA 结果为准，日志并排记录两边结果供阈值校准）。
+        # 模板匹配引擎：cv2（默认，自研；AB 双跑 3800+ 条零分歧毕业后
+        # 转正）/ maa（旧引擎回退口）/ ab（双跑对比，以 MAA 结果为准，
+        # 日志并排记录两边结果供阈值校准）。
         # 拆 MAA 过渡期专用，迁完删掉。
-        engine = os.environ.get('MAAMARU_TEMPLATE_ENGINE', 'maa').strip().lower()
-        self._template_engine = engine if engine in ('maa', 'cv2', 'ab') else 'maa'
+        engine = os.environ.get('MAAMARU_TEMPLATE_ENGINE', 'cv2').strip().lower()
+        self._template_engine = engine if engine in ('maa', 'cv2', 'ab') else 'cv2'
 
         self._initialized = False
 
