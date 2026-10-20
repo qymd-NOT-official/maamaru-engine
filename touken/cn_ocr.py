@@ -23,19 +23,40 @@ _MIN_SHORT_SIDE = 40
 _MAX_SCALE = 3.0
 
 
+def _upscale_small(rgb):
+    """短边过小就放大（文字物理像素高度是检出关键），返回 (图, 倍率)。"""
+    import cv2
+    h, w = rgb.shape[:2]
+    short = min(h, w)
+    if short >= _MIN_SHORT_SIDE:
+        return rgb, 1.0
+    scale = min(_MAX_SCALE, _MIN_SHORT_SIDE / short)
+    big = cv2.resize(rgb, (round(w * scale), round(h * scale)),
+                     interpolation=cv2.INTER_CUBIC)
+    return big, scale
+
+
 def _prepare_for_det(crop):
     """pad 留白 + 小图放大，返回 (图, 坐标还原用的偏移, 放大倍率)。"""
     import cv2
     padded = cv2.copyMakeBorder(crop, _DET_PAD, _DET_PAD, _DET_PAD,
                                 _DET_PAD, cv2.BORDER_REPLICATE)
-    h, w = padded.shape[:2]
-    short = min(h, w)
-    if short >= _MIN_SHORT_SIDE:
-        return padded, _DET_PAD, 1.0
-    scale = min(_MAX_SCALE, _MIN_SHORT_SIDE / short)
-    big = cv2.resize(padded, (round(w * scale), round(h * scale)),
-                     interpolation=cv2.INTER_CUBIC)
+    big, scale = _upscale_small(padded)
     return big, _DET_PAD, scale
+
+
+def _read_tokens(rgb, min_score):
+    """在准备好的图上跑引擎，返回 [(text, cx, cy, score)]（本图局部坐标）。"""
+    result, _elapse = _get_engine()(rgb)
+    out = []
+    for box, text, score in (result or []):
+        if score < min_score:
+            continue
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        out.append((str(text), (min(xs) + max(xs)) / 2,
+                    (min(ys) + max(ys)) / 2, float(score)))
+    return out
 
 
 def read_region(image, roi, min_score: float = 0.5) -> list:
@@ -60,18 +81,17 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
     crop = image[y:y2, x:x2]
     # BGR → RGB；::-1 产生负 stride，onnx 不吃，拷一份连续内存
     rgb = np.ascontiguousarray(crop[:, :, ::-1])
-    rgb, pad, scale = _prepare_for_det(rgb)
-    result, _elapse = _get_engine()(rgb)
-    out = []
-    for box, text, score in (result or []):
-        if score < min_score:
-            continue
-        xs = [p[0] for p in box]
-        ys = [p[1] for p in box]
-        cx = x + int(((min(xs) + max(xs)) / 2 / scale) - pad)
-        cy = y + int(((min(ys) + max(ys)) / 2 / scale) - pad)
-        out.append((str(text), cx, cy, float(score)))
-    return out
+    prepared, pad, scale = _prepare_for_det(rgb)
+    out = _read_tokens(prepared, min_score)
+    if not out:
+        # 售罄事件：深色按钮 + REPLICATE 留白会把按钮边缘拉成无边暗带，
+        # det 反而整片漏检（同一张图不 pad 反而 0.999 检出）。主路检空时
+        # 退路用原图（必要时放大）再试一次；只有检空才付这次双跑成本。
+        raw, raw_scale = _upscale_small(rgb)
+        out = _read_tokens(raw, min_score)
+        pad, scale = 0, raw_scale
+    return [(text, x + int(cx / scale - pad), y + int(cy / scale - pad), score)
+            for text, cx, cy, score in out]
 
 
 # 游戏 UI 繁简混用（按钮素材沿用日服原文）：rec 倾向输出简体，

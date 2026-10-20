@@ -82,6 +82,38 @@ def test_read_region_empty_inputs(fake_engine):
     assert cn_ocr.read_region(frame(), Roi(500, 500, 0, 30)) == []
 
 
+class EmptyThenHitEngine:
+    """第一次（pad 图）检空、第二次（原图退路）命中的引擎。"""
+
+    def __init__(self):
+        self.shapes = []
+
+    def __call__(self, arr):
+        self.shapes.append(arr.shape)
+        if len(self.shapes) == 1:
+            return [], 0.1
+        return [([[10, 10], [30, 10], [30, 26], [10, 26]], '售罄', 0.99)], 0.1
+
+
+def test_read_region_retries_without_pad_when_padded_pass_empty(monkeypatch):
+    # 售罄事件：深色按钮 + REPLICATE 留白把边缘拉成无边暗带，det 整片
+    # 漏检（原图反而 0.999 检出）。主路检空必须退路原图再试，且坐标
+    # 按原图还原（无 pad 偏移）。
+    engine = EmptyThenHitEngine()
+    monkeypatch.setattr(cn_ocr, '_get_engine', lambda: engine)
+    out = cn_ocr.read_region(frame(), Roi(100, 200, 330, 95))
+    assert engine.shapes == [(127, 362, 3), (95, 330, 3)]  # pad 图 → 原图
+    text, cx, cy, _ = out[0]
+    assert text == '售罄'
+    assert (cx, cy) == (120, 218)  # 局部 (20,18) + ROI 偏移，无 pad
+
+
+def test_read_region_no_retry_when_padded_pass_hits(fake_engine):
+    # 主路有 token 就不许双跑（成本红线）
+    cn_ocr.read_region(frame(), Roi(100, 200, 300, 100))
+    assert len(fake_engine.seen) == 1
+
+
 def test_text_matches_semantics():
     assert cn_ocr.text_matches('部队记录', '部队记录', 'exact')
     assert not cn_ocr.text_matches('部队记录一', '部队记录', 'exact')
