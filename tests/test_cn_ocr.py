@@ -159,13 +159,15 @@ def _adapter(monkeypatch, engine, native_tokens):
     return adapter
 
 
-def test_ocr_engine_defaults_to_maa(monkeypatch):
+def test_ocr_engine_defaults_to_native(monkeypatch):
+    # 2026-10-20 转正：AB 双跑 3000+ 次定点查找，修完留白/检空退路后
+    # 1085 次零分歧，自研引擎毕业，MAA 退居回退口
     adapter = _adapter(monkeypatch, None, [('目录', 1224, 38, 0.99)])
     called = []
     monkeypatch.setattr(adapter, '_ocr_maa',
                         lambda *a, **k: called.append(1) or Point(1, 2))
-    assert adapter.ocr('目录', Region(1100, 0, 1280, 60)) == Point(1, 2)
-    assert called  # 默认仍走 MAA，不碰自研
+    assert adapter.ocr('目录', Region(1100, 0, 1280, 60)) == Point(1224, 38)
+    assert not called  # 默认走自研，不碰 MAA
 
 
 def test_ocr_native_engine_hit_and_miss(monkeypatch):

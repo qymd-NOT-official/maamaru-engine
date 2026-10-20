@@ -182,11 +182,12 @@ class MAAAdapter:
         engine = os.environ.get('MAAMARU_TEMPLATE_ENGINE', 'cv2').strip().lower()
         self._template_engine = engine if engine in ('maa', 'cv2', 'ab') else 'cv2'
 
-        # OCR 引擎：maa（默认，现状）/ native（自研 cn_ocr，仓内 PP-OCRv6
-        # 权重）/ ab（双跑对比，以 MAA 结果为准，日志并排记录供校准）。
+        # OCR 引擎：native（默认，自研 cn_ocr，仓内 PP-OCRv6 权重；AB 双跑
+        # 3000+ 次定点查找，修完留白/检空退路后 1085 次零分歧毕业转正）/
+        # maa（旧引擎回退口）/ ab（双跑对比，以 MAA 结果为准供校准）。
         # 拆 MAA 过渡期专用，迁完删掉。
-        ocr_engine = os.environ.get('MAAMARU_OCR_ENGINE', 'maa').strip().lower()
-        self._ocr_engine = ocr_engine if ocr_engine in ('maa', 'native', 'ab') else 'maa'
+        ocr_engine = os.environ.get('MAAMARU_OCR_ENGINE', 'native').strip().lower()
+        self._ocr_engine = ocr_engine if ocr_engine in ('maa', 'native', 'ab') else 'native'
 
         self._initialized = False
 
