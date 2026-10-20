@@ -15,7 +15,10 @@ jobs:
       - uses: actions/setup-python@v6
         if: hashFiles('pyproject.toml') != ''
         with:
-          python-version: "3.13"
+          # 与 release.yml 及玩家本机保持一致：rapidocr-onnxruntime 1.4.x
+          # 尚不支持 3.13（Requires-Python <3.13），2026-10-18 起 CI 全红
+          # 就是 3.13 装不上它。
+          python-version: "3.12"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
