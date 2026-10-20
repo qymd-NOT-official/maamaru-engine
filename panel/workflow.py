@@ -750,9 +750,33 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
         # 每跑完一块就落盘一次，防中途被杀丢数据
         _flush_report(report, finished=False)
         if not ok and (node["on_error"] == "stop" or (daily_mode and node["type"] == "login")):
+            # 翻车先看现场（2026-10-20 老大亲定「翻车智能」）：登录翻车
+            # （地基没打好）、游戏已关、远征接班（必须交还控制权）没有现场
+            # 可收拾，直接停；其余先试着导航回本丸——回得去说明现场干净，
+            # 后续积木继续跑（这块照记翻车）；回不去才是真失控，收摊。
+            recoverable = (node["type"] != "login" and not game_closed
+                           and agent is not None and not interrupted)
+            if recoverable:
+                yield "【工作流】这块翻车了，先试着回本丸看看现场……"
+                try:
+                    for nav_msg in agent.navigate_to_stream("本丸"):
+                        yield nav_msg
+                except Exception:
+                    pass
+                recoverable = getattr(agent, "current_location", None) == "本丸"
+            if recoverable:
+                yield "【工作流】已安全回本丸，现场没失控，后续积木继续跑"
+                continue
             completed = False
-            yield (f"【工作流】这块翻车了，按设定「翻车即停」，"
-                   f"剩余 {len(plan) - i - 1} 块不跑")
+            if interrupted:
+                yield (f"【工作流】远征接班，这块没跑完，剩余 {len(plan) - i - 1} "
+                       "块不跑，交还给远征排班")
+            elif node["type"] == "login" or game_closed or agent is None:
+                yield (f"【工作流】这块翻车了，没有现场可收拾，"
+                       f"按设定「翻车即停」，剩余 {len(plan) - i - 1} 块不跑")
+            else:
+                yield (f"【工作流】这块翻车了且回本丸失败，现场失控，"
+                       f"按设定「翻车即停」，剩余 {len(plan) - i - 1} 块不跑")
             report.extend(_skipped_entries(plan[i + 1:]))
             _flush_report(report, finished=False)
             break

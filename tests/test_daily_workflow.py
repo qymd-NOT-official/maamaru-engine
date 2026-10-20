@@ -230,11 +230,25 @@ class DailyWorkflowTests(unittest.TestCase):
                         self.assertEqual(len(calls), 1)
                     self.assertFalse(any(c[0] == "quick_peek" for c in agent.calls))
 
-    def test_stopped_failure_does_not_exit_but_continue_policy_reaches_finish(self):
-        for policy, should_exit in (("stop", False), ("continue", True)):
+    def test_recovered_failure_reaches_finish_but_lost_control_does_not(self):
+        """翻车智能（2026-10-20 老大亲定）：翻车但回得去本丸 = 后续照跑，
+        结束后的安排也照常执行；回本丸失败（现场失控）才一刀切不许下班。"""
+        for policy in ("stop", "continue"):
             agent = _FakeAgent({"signin_stream": ["[fake] ✗ 失败"]})
             self.run_plan([_node("signin", on_error=policy)], after="sleep", agent=agent)
-            self.assertEqual(any(c[0] == "logout_stream" for c in agent.calls), should_exit)
+            self.assertTrue(any(c[0] == "logout_stream" for c in agent.calls), policy)
+
+        class LostAgent(_FakeAgent):
+            def __init__(self, script=None):
+                super().__init__(script)
+                self.current_location = "迷子"
+
+            def navigate_to_stream(self, target):
+                yield "[fake] 回不去本丸"
+
+        agent = LostAgent({"signin_stream": ["[fake] ✗ 失败"]})
+        self.run_plan([_node("signin", on_error="stop")], after="sleep", agent=agent)
+        self.assertFalse(any(c[0] == "logout_stream" for c in agent.calls))
 
     def test_daily_uses_own_practice_settings_expedition_and_snapshot(self):
         agent = _FakeAgent()

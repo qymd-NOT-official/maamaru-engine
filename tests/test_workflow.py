@@ -293,7 +293,20 @@ class WorkflowRunnerTests(unittest.TestCase):
                          {"run_id", "finished_at", "finished", "all_green", "steps"})
 
     def test_failure_stops_and_marks_rest_skipped(self):
-        agent = _FakeAgent({
+        """翻车 + 回本丸失败 = 现场失控：按「翻车即停」收摊，后续 ⏭ 跳过。"""
+
+        class LostAgent(_FakeAgent):
+            """导航回不去本丸的假 Agent（游戏真的失控了）。"""
+
+            def __init__(self, script=None):
+                super().__init__(script)
+                self.current_location = "迷子"
+
+            def navigate_to_stream(self, target):
+                self.calls.append(("navigate_to_stream", (target,), {}))
+                yield "[fake] 导航迷路，回不去本丸"
+
+        agent = LostAgent({
             "signin_stream": ["[签到] ✓ 签到了"],
             "claim_free_gift_stream": ["[万屋] 未找到暖心礼包，停"],
             "naihanka_stream": ["[内番] 不该跑到这"],
@@ -301,8 +314,9 @@ class WorkflowRunnerTests(unittest.TestCase):
         messages, agent, made = self._run(
             [_node("signin"), _node("free_gift"), _node("naihanka")], agent)
         ran = [c[0] for c in agent.calls if c[0].endswith("_stream")]
-        self.assertEqual(ran, ["signin_stream", "claim_free_gift_stream"])
-        self.assertTrue(any("翻车即停" in m for m in messages))
+        self.assertIn("claim_free_gift_stream", ran)
+        self.assertNotIn("naihanka_stream", ran)
+        self.assertTrue(any("现场失控" in m and "翻车即停" in m for m in messages))
         report = self._latest_report()
         self.assertEqual(report["steps"], [
             {"name": "签到", "status": "✓"},
@@ -312,6 +326,34 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertFalse(report["all_green"])
         # ⏭ 不算翻车项
         self.assertFalse(any("内番" in m and "翻车项" in m for m in messages))
+
+    def test_failure_recovers_to_honmaru_and_continues(self):
+        """翻车但回得去本丸 = 现场没失控：这块照记 ✗，后续积木继续跑。
+
+        2026-10-20 老大亲定「翻车智能」：回本丸成功就不一刀切全停。
+        """
+        agent = _FakeAgent({
+            "signin_stream": ["[签到] ✓ 签到了"],
+            "claim_free_gift_stream": ["[万屋] 未找到暖心礼包，停"],
+            "naihanka_stream": ["[内番] ✓ 已安排上工"],
+        })
+        messages, agent, made = self._run(
+            [_node("signin"), _node("free_gift"), _node("naihanka")], agent)
+        ran = [c[0] for c in agent.calls if c[0].endswith("_stream")]
+        # 翻车后有回现场看（_FakeAgent.navigate_to_stream 是真方法，不进 calls）
+        self.assertTrue(any("先试着回本丸看看现场" in m for m in messages))
+        self.assertIn("naihanka_stream", ran)     # 后续积木照跑
+        self.assertTrue(any("现场没失控" in m for m in messages))
+        self.assertFalse(any("现场失控" in m for m in messages))
+        report = self._latest_report()
+        self.assertEqual(report["steps"], [
+            {"name": "签到", "status": "✓"},
+            {"name": "万屋领免费礼包", "status": "✗ 未找到暖心礼包"},
+            {"name": "内番", "status": "✓"},
+        ])
+        # 翻车块照记 ✗，all_green 仍是 False
+        self.assertFalse(report["all_green"])
+        self.assertTrue(any("翻车项" in m and "万屋领免费礼包" in m for m in messages))
 
     def test_on_error_continue_marks_fail_and_keeps_going(self):
         agent = _FakeAgent({
@@ -371,9 +413,18 @@ class WorkflowRunnerTests(unittest.TestCase):
 
     def test_login_failure_stops_workflow(self):
         class NoStartAgent(_FakeAgent):
+            def __init__(self, script=None):
+                super().__init__(script)
+                # 游戏根本没起来，不在本丸，导航也回不去
+                self.current_location = "启动页"
+
             def _ensure_game_started(self):
                 yield "[fake] 点了游戏图标"
                 return False
+
+            def navigate_to_stream(self, target):
+                self.calls.append(("navigate_to_stream", (target,), {}))
+                yield "[fake] 游戏没起来，导航无果"
 
         messages, agent, made = self._run(
             [_node("login"), _node("signin")], NoStartAgent())

@@ -13,6 +13,7 @@ class MaaAdapterLoggingTests(unittest.TestCase):
         job = SimpleNamespace(done=True, get=lambda: detail)
 
         adapter = MAAAdapter.__new__(MAAAdapter)
+        adapter._ocr_engine = "maa"  # 这条测的是 MAA 老路的日志容错
         adapter.tasker = SimpleNamespace(post_recognition=lambda *_args: job)
         adapter.screenshot = lambda force=False: object()
         adapter._record_ocr = lambda *_args, **_kwargs: None
