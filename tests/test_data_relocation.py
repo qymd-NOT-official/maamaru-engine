@@ -1,6 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from touken.data_relocation import (
     DataRelocationError,
@@ -30,7 +32,10 @@ class DataRelocationTests(unittest.TestCase):
         )
 
     def test_copy_is_verified_and_source_is_kept_until_explicit_cleanup(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        # conftest 的测试隔离会设 MAAMARU_DATA_DIR，而迁移守卫拒绝在
+        # 环境变量重定向下工作——本用例测的恰是无重定向的注册表迁移路径
+        with patch.dict(os.environ, {"MAAMARU_DATA_DIR": ""}), \
+                tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "old" / "Maamaru"
             (source / "config").mkdir(parents=True)
