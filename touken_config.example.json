@@ -750,7 +750,7 @@
           489
         ]
       },
-      "check_template": "道具勾选.png",
+      "check_template": "team/ui道具勾选.png",
       "confirm": {
         "template": "通用_确定.png",
         "roi": [
