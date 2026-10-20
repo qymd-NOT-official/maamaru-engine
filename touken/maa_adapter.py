@@ -182,6 +182,12 @@ class MAAAdapter:
         engine = os.environ.get('MAAMARU_TEMPLATE_ENGINE', 'cv2').strip().lower()
         self._template_engine = engine if engine in ('maa', 'cv2', 'ab') else 'cv2'
 
+        # OCR 引擎：maa（默认，现状）/ native（自研 cn_ocr，仓内 PP-OCRv6
+        # 权重）/ ab（双跑对比，以 MAA 结果为准，日志并排记录供校准）。
+        # 拆 MAA 过渡期专用，迁完删掉。
+        ocr_engine = os.environ.get('MAAMARU_OCR_ENGINE', 'maa').strip().lower()
+        self._ocr_engine = ocr_engine if ocr_engine in ('maa', 'native', 'ab') else 'maa'
+
         self._initialized = False
 
     # ---------- MAA 任务限时等待（同线程轮询，不开新线程） ----------
@@ -529,8 +535,69 @@ class MAAAdapter:
 
     def ocr(self, expected: str, roi: Region,
             match_mode: str = "contains") -> Optional[Point]:
+        """OCR 识别文字：按 _ocr_engine 路由（maa 现状 / native 自研 /
+        ab 双跑以 MAA 为准并记录分歧）。"""
+        engine = self._ocr_engine
+        if engine == "native":
+            return self._ocr_native(expected, roi, match_mode)
+        if engine == "ab":
+            point = self._ocr_maa(expected, roi, match_mode)
+            self._ocr_ab_probe(expected, roi, match_mode, point)
+            return point
+        return self._ocr_maa(expected, roi, match_mode)
+
+    def _ocr_native(self, expected, roi, match_mode="contains"):
+        """自研 OCR（cn_ocr，仓内 PP-OCRv6 权重）的 ocr() 等价实现。"""
+        from . import cn_ocr
+        image = self.screenshot()
+        if image is None:
+            self._record_ocr("match", roi, [], expected, match_mode, False,
+                             "screenshot_unavailable")
+            return None
+        try:
+            tokens = cn_ocr.read_region(image, roi)
+        except Exception as exc:
+            _safe_print(f"[cnOCR 错误] OCR 异常: {exc}")
+            self._record_ocr("match", roi, [], expected, match_mode, False,
+                             type(exc).__name__)
+            return None
+        structured = [{"text": t, "score": s, "center": [cx, cy], "box": None}
+                      for t, cx, cy, s in tokens]
+        for text, cx, cy, score in tokens:
+            if cn_ocr.text_matches(text, expected, match_mode):
+                _safe_print(f'[cnOCR] OCR 命中: "{text}" (目标: "{expected}") '
+                            f'at ({cx}, {cy}), score={score:.3f}')
+                self._record_ocr("match", roi, structured, expected,
+                                 match_mode, True)
+                return Point(cx, cy)
+        _safe_print(f'[cnOCR] OCR 识别到文字但未匹配: '
+                    f'{[t for t, *_ in tokens]}, expected="{expected}"')
+        self._record_ocr("match", roi, structured, expected, match_mode, False)
+        return None
+
+    def _ocr_ab_probe(self, expected, roi, match_mode, maa_point):
+        """AB 双跑陪测：maa 主导已出结果后，cn_ocr 在同一缓存帧上陪跑，
+        并排记录两边结论供校准。陪跑绝不影响 MAA 结果。"""
+        try:
+            from . import cn_ocr
+            image = self.screenshot()
+            native = (cn_ocr.find_text(image, roi, expected, match_mode)
+                      if image is not None else None)
+            maa_side = (f'命中({maa_point.x},{maa_point.y})'
+                        if maa_point else '未命中')
+            nat_side = (f'命中({native[0]},{native[1]})'
+                        if native else '未命中')
+            flag = '' if bool(maa_point) == bool(native) else ' ⚠分歧'
+            _safe_print(f'[AB文字] "{expected}": maa={maa_side} '
+                        f'native={nat_side}{flag}')
+        except Exception as exc:
+            _safe_print(f'[AB文字] "{expected}": native 异常 '
+                        f'{type(exc).__name__}')
+
+    def _ocr_maa(self, expected: str, roi: Region,
+            match_mode: str = "contains") -> Optional[Point]:
         """
-        OCR 识别文字
+        OCR 识别文字（MAA 引擎路径）
 
         Args:
             expected: 期望识别的文字
@@ -614,8 +681,59 @@ class MAAAdapter:
             return None
 
     def ocr_all(self, roi: Region, image=None) -> list:
+        """识别区域内所有文字：按 _ocr_engine 路由（maa/native/ab）。"""
+        engine = self._ocr_engine
+        if engine == "native":
+            return self._ocr_all_native(roi, image)
+        if engine == "ab":
+            tokens = self._ocr_all_maa(roi, image)
+            self._ocr_all_ab_probe(roi, tokens)
+            return tokens
+        return self._ocr_all_maa(roi, image)
+
+    def _ocr_all_native(self, roi, image=None):
+        """自研 OCR（cn_ocr）的 ocr_all() 等价实现。"""
+        from . import cn_ocr
+        if image is None:
+            image = self.screenshot()
+        if image is None:
+            self._record_ocr("all", roi, [], error="screenshot_unavailable")
+            return []
+        try:
+            raw = cn_ocr.read_region(image, roi)
+        except Exception as exc:
+            _safe_print(f"[cnOCR 错误] OCR 全量识别异常: {exc}")
+            self._record_ocr("all", roi, [], error=type(exc).__name__)
+            return []
+        out = [(text, Point(cx, cy)) for text, cx, cy, _s in raw]
+        _safe_print(f"[cnOCR] OCR 全量识别: {[t for t, _ in out]}")
+        self._record_ocr("all", roi,
+                         [{"text": t, "score": s, "center": [cx, cy],
+                           "box": None} for t, cx, cy, s in raw])
+        return out
+
+    def _ocr_all_ab_probe(self, roi, maa_tokens):
+        """OCR 全量双跑陪测：并排记录两边 token 文本差异供校准。"""
+        try:
+            from . import cn_ocr
+            image = self.screenshot()
+            if image is None:
+                return
+            native_texts = [t for t, *_ in cn_ocr.read_region(image, roi)]
+            maa_texts = [t for t, _ in maa_tokens]
+            only_maa = [t for t in maa_texts if t not in native_texts]
+            only_native = [t for t in native_texts if t not in maa_texts]
+            diff = ''
+            if only_maa or only_native:
+                diff = f' ⚠分歧 仅maa={only_maa[:8]} 仅native={only_native[:8]}'
+            _safe_print(f'[AB文字] 全量: maa={len(maa_texts)}词 '
+                        f'native={len(native_texts)}词{diff}')
+        except Exception as exc:
+            _safe_print(f'[AB文字] 全量: native 异常 {type(exc).__name__}')
+
+    def _ocr_all_maa(self, roi: Region, image=None) -> list:
         """
-        识别区域内所有文字（不筛选，全都要）
+        识别区域内所有文字（不筛选，全都要；MAA 引擎路径）
 
         用途：读取界面上的信息文本（第几部队、地图名、刀名），
         拿到文字后由上层自己做解析判断。

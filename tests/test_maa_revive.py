@@ -17,6 +17,8 @@ def _make_adapter(connect_ok=True, bind_ok=True):
     adapter._last_image = object()
     adapter._maa_timeouts = 0
     adapter._revive_attempts = 0
+    adapter._template_engine = "maa"
+    adapter._ocr_engine = "maa"
     adapter._initialized = True
 
     adb_calls = []
