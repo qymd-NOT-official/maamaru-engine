@@ -11,9 +11,11 @@ class FakeEngine:
 
     def __call__(self, arr):
         self.seen.append(arr)
+        # box 坐标是引擎收到的 pad 图上的（真实引擎在 pad 图上跑，
+        # 文字坐标带 16px 留白偏移），read_region 负责还原
         return [
-            ([[10, 4], [40, 4], [40, 20], [10, 20]], '部队记录', 0.99),
-            ([[0, 30], [8, 30], [8, 38], [0, 38]], '糊', 0.30),
+            ([[26, 20], [56, 20], [56, 36], [26, 36]], '部队记录', 0.99),
+            ([[16, 46], [24, 46], [24, 54], [16, 54]], '糊', 0.30),
         ], 0.1
 
 
@@ -48,37 +50,31 @@ def test_read_region_feeds_bgr_as_rgb(fake_engine):
     img[10:20, 10:20] = (255, 0, 0)           # BGR 纯蓝块
     cn_ocr.read_region(img, Roi(0, 0, 100, 100))
     fed = fake_engine.seen[0]
-    assert fed.shape == (100, 100, 3)
-    assert fed[15, 15].tolist() == [0, 0, 255]  # 引擎看到的应是 RGB 红块
+    assert fed.shape == (132, 132, 3)              # pad 16 留白
+    assert fed[15 + 16, 15 + 16].tolist() == [0, 0, 255]  # RGB 红块
     assert fed.flags['C_CONTIGUOUS']
 
 
 def test_read_region_crops_before_engine(fake_engine):
     cn_ocr.read_region(frame(), Roi(100, 200, 300, 100))
-    assert fake_engine.seen[0].shape == (100, 300, 3)   # 只送裁后区域
+    assert fake_engine.seen[0].shape == (132, 332, 3)  # 裁后区域 + pad
 
 
 def test_read_region_clamps_out_of_bounds_roi(fake_engine):
     cn_ocr.read_region(frame(), Roi(-50, 700, 300, 100))
-    # 贴边裁剪不越界；裁出 20px 高的矮条，按短边 40 放大 2 倍
-    assert fake_engine.seen[0].shape == (40, 600, 3)
+    # 贴边裁剪不越界；裁出 20x300，pad 后 52x332
+    assert fake_engine.seen[0].shape == (52, 332, 3)
 
 
-def test_read_region_scales_up_thin_roi(fake_engine):
-    # 24px 高的矮条 ROI（疲劳行那种）：det 直接喂全灭，放大到短边 40
+def test_read_region_pads_thin_roi(fake_engine):
+    # 白山吉光事件：贴边裁剪的矮条 ROI det 检出全灭，留白是命门。
+    # pad 后坐标必须还原到原始尺度再补 ROI 偏移。
     out = cn_ocr.read_region(frame(), Roi(100, 200, 300, 24))
     fed = fake_engine.seen[0]
-    assert fed.shape[0] == 40                          # 放大后高 40
-    # 引擎坐标在放大图上，返回必须还原到原始尺度再补 ROI 偏移
+    assert fed.shape[0] == 56                            # 24 + 16×2 留白
     text, cx, cy, _ = out[0]
-    scale = 40 / 24
-    assert cx == 100 + int(25 / scale)
-    assert cy == 200 + int(12 / scale)
-
-
-def test_read_region_leaves_normal_roi_untouched(fake_engine):
-    cn_ocr.read_region(frame(), Roi(100, 200, 300, 100))
-    assert fake_engine.seen[0].shape == (100, 300, 3)  # 正常尺寸不放大
+    assert (cx, cy) == (125, 212)                        # pad 已还原
+    assert text == '部队记录'
 
 
 def test_read_region_empty_inputs(fake_engine):
@@ -96,6 +92,13 @@ def test_text_matches_semantics():
     # contains 是双向的：残片「伤」也命中「重伤」——安全敏感处不许用
     # contains，扫原始 token 比对（injury_from_ocr_tokens 守着这条）
     assert cn_ocr.text_matches('伤', '重伤')
+
+
+def test_text_matches_traditional_simplified_normalization():
+    # 游戏 UI 繁简混用：画面印「櫻吹雪」，引擎可能认成简体「樱吹雪」
+    assert cn_ocr.text_matches('樱吹雪', '櫻吹雪')
+    assert cn_ocr.text_matches('櫻吹雪', '樱吹雪')
+    assert cn_ocr.text_matches('櫻吹雪', '櫻吹雪', 'exact')
 
 
 def test_find_text_hit_and_miss(fake_engine):

@@ -15,23 +15,27 @@ import numpy as np
 
 from .jp_ocr import _get_engine
 
-# det 对矮条 ROI 检出不稳：实测单行 24px 高（疲劳行）直接喂全灭，
-# 52px 正常。短边不足门槛时按比例放大，文字物理像素高度才是检出关键。
+# det 需要四周留白：贴边裁剪的文字行检出全灭（白山吉光事件——名字、
+# 疲劳行、绿底按钮、阴刻标题全是贴边 ROI）。REPLICATE 复制边缘色，
+# 不引入新边界。短边仍过小再放大兜底（文字物理像素高度是检出关键）。
+_DET_PAD = 16
 _MIN_SHORT_SIDE = 40
 _MAX_SCALE = 3.0
 
 
-def _scale_up_small(crop):
-    """短边不足门槛的矮条 ROI 等比放大，返回 (图, 坐标还原倍率)。"""
-    h, w = crop.shape[:2]
-    short = min(h, w)
-    if short >= _MIN_SHORT_SIDE or short <= 0:
-        return crop, 1.0
-    scale = min(_MAX_SCALE, _MIN_SHORT_SIDE / short)
+def _prepare_for_det(crop):
+    """pad 留白 + 小图放大，返回 (图, 坐标还原用的偏移, 放大倍率)。"""
     import cv2
-    big = cv2.resize(crop, (round(w * scale), round(h * scale)),
+    padded = cv2.copyMakeBorder(crop, _DET_PAD, _DET_PAD, _DET_PAD,
+                                _DET_PAD, cv2.BORDER_REPLICATE)
+    h, w = padded.shape[:2]
+    short = min(h, w)
+    if short >= _MIN_SHORT_SIDE:
+        return padded, _DET_PAD, 1.0
+    scale = min(_MAX_SCALE, _MIN_SHORT_SIDE / short)
+    big = cv2.resize(padded, (round(w * scale), round(h * scale)),
                      interpolation=cv2.INTER_CUBIC)
-    return big, scale
+    return big, _DET_PAD, scale
 
 
 def read_region(image, roi, min_score: float = 0.5) -> list:
@@ -56,7 +60,7 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
     crop = image[y:y2, x:x2]
     # BGR → RGB；::-1 产生负 stride，onnx 不吃，拷一份连续内存
     rgb = np.ascontiguousarray(crop[:, :, ::-1])
-    rgb, scale = _scale_up_small(rgb)
+    rgb, pad, scale = _prepare_for_det(rgb)
     result, _elapse = _get_engine()(rgb)
     out = []
     for box, text, score in (result or []):
@@ -64,16 +68,22 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
             continue
         xs = [p[0] for p in box]
         ys = [p[1] for p in box]
-        cx = x + int((min(xs) + max(xs)) / 2 / scale)
-        cy = y + int((min(ys) + max(ys)) / 2 / scale)
+        cx = x + int(((min(xs) + max(xs)) / 2 / scale) - pad)
+        cy = y + int(((min(ys) + max(ys)) / 2 / scale) - pad)
         out.append((str(text), cx, cy, float(score)))
     return out
 
 
+# 游戏 UI 繁简混用（按钮素材沿用日服原文）：rec 倾向输出简体，
+# 匹配前把两边都归一到简体。遇到的繁体字按需扩充。
+_T2S = str.maketrans({'櫻': '樱'})
+
+
 def text_matches(text, expected, match_mode: str = "contains") -> bool:
-    """与 maa_adapter._ocr_text_matches 同语义；空串永远不算命中。"""
-    text = str(text or "").strip()
-    expected = str(expected or "").strip()
+    """与 maa_adapter._ocr_text_matches 同语义；空串永远不算命中。
+    比对前两边都过一遍繁简归一（画面印繁体、引擎可能认成简体）。"""
+    text = str(text or "").strip().translate(_T2S)
+    expected = str(expected or "").strip().translate(_T2S)
     if not text or not expected:
         return False
     if match_mode == "exact":
