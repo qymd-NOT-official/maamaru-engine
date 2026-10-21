@@ -239,8 +239,8 @@ export const api = {
   saveConfigLists: (value: Record<string, string[]>) => request<{ ok: boolean }>('/api/config-lists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
-  emulatorConfig: () => request<{ adb_address: string; default_address: string; adb_path: string }>('/api/emulator-config'),
-  saveEmulatorConfig: (value: { adb_address: string }) => request<{ ok: boolean; adb_address: string }>('/api/emulator-config', {
+  emulatorConfig: () => request<{ adb_address: string; default_address: string; adb_path: string; performance_mode: 'fast' | 'eco' }>('/api/emulator-config'),
+  saveEmulatorConfig: (value: { adb_address: string; performance_mode?: string }) => request<{ ok: boolean; adb_address: string; performance_mode: string }>('/api/emulator-config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   expeditionSchedule: () => request<ExpeditionSchedule>('/api/expedition-schedule'),

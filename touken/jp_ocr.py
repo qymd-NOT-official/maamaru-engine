@@ -28,6 +28,23 @@ _MODEL_DIR = RESOURCE_DIR / 'model' / 'ocr'
 # 精度验证：售罄证物 + 介绍页竖排书法/对话文本，与旧配置逐项对齐。
 _ENGINE_KW = dict(use_cls=False, det_limit_type='max', det_limit_side_len=2000)
 
+# 省电模式（设置-模拟器-性能档位）：限制 onnxruntime 推理线程数，
+# 每次 OCR 稍慢但 CPU 占用平缓，笔记本散热差的场景（酒店桌面惨案）
+# 画面不卡。fast=不限线程（默认）。
+_ECO_ENGINE_KW = dict(intra_op_num_threads=2, inter_op_num_threads=1)
+
+
+def _performance_mode() -> str:
+    """读主配置的 performance_mode；缺省/读不到都算 fast。"""
+    try:
+        import json
+        from .runtime_paths import CONFIG_PATH
+        cfg = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
+        mode = str(cfg.get('performance_mode', '')).strip().lower()
+        return mode if mode in ('fast', 'eco') else 'fast'
+    except Exception:
+        return 'fast'
+
 
 def _get_engine():
     global _engine
@@ -38,15 +55,18 @@ def _get_engine():
             raise RuntimeError(
                 '文字识别组件没装上（缺 rapidocr_onnxruntime），'
                 '请重新安装まあ丸或联系作者') from exc
+        kw = dict(_ENGINE_KW)
+        if _performance_mode() == 'eco':
+            kw.update(_ECO_ENGINE_KW)
         det, rec, keys = (_MODEL_DIR / 'det.onnx', _MODEL_DIR / 'rec.onnx',
                           _MODEL_DIR / 'keys.txt')
         if all(p.is_file() for p in (det, rec, keys)):
             _engine = RapidOCR(det_model_path=str(det),
                                rec_model_path=str(rec),
                                rec_keys_path=str(keys),
-                               **_ENGINE_KW)
+                               **kw)
         else:
-            _engine = RapidOCR(**_ENGINE_KW)
+            _engine = RapidOCR(**kw)
     return _engine
 
 

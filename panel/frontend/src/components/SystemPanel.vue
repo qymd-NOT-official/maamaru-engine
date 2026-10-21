@@ -95,7 +95,7 @@ async function save() {
     } else if (isJp.value) {
       return
     } else if (selected.value === 'emulator') {
-      await api.saveEmulatorConfig({ adb_address: emu.value.adb_address })
+      await api.saveEmulatorConfig({ adb_address: emu.value.adb_address, performance_mode: emu.value.performance_mode })
     } else {
       await api.saveBotConfig({
         enabled: bot.value.telegram.enabled || bot.value.qq.enabled,
@@ -129,7 +129,11 @@ const qqBroadcastEnabled = computed({
     <div class="system-layout"><nav class="system-nav"><template v-if="ready"><SideNavItem v-if="!isJp" :active="selected === 'broadcast'" @click="selected = 'broadcast'">播报</SideNavItem><SideNavItem :active="selected === 'appearance'" @click="selected = 'appearance'">外观</SideNavItem><SideNavItem v-if="!isJp" :active="selected === 'emulator'" @click="selected = 'emulator'">模拟器</SideNavItem><SideNavItem v-if="isJp" :active="selected === 'connection'" @click="selected = 'connection'">连接</SideNavItem></template></nav>
       <div class="system-form" :class="`${selected}-form`">
         <template v-if="selected === 'appearance'"><h3>景趣</h3><label>舞台景趣<PixelControl v-model="scenery" as="select" @update:model-value="value => applyScenery(String(value))"><option v-for="option in sceneryOptions" :key="option.value" :value="option.value">{{ option.label }}</option><option value="random">随机景趣</option></PixelControl></label><p>选择后立刻预览，点「保存设置」记住选择。随机景趣每次打开面板选一张，使用期间保持不变。</p><h3>舞台小人</h3><label>刀剑男士<PixelControl :model-value="companion" as="select" @update:model-value="value => applyCompanion(String(value))"><option v-for="option in companionOptions" :key="option.value" :value="option.value">{{ option.label }}</option></PixelControl></label><p>选择后立刻上岗，点「保存设置」记住选择。小狐狸会继续陪着他。</p><h3>庭院背景色</h3><div class="swatch-row"><button v-for="preset in backdropPresets" :key="preset.value" type="button" class="swatch" :class="{ active: backdrop === preset.value }" :style="{ background: preset.value }" :title="preset.name" :aria-label="preset.name" @click="pickBackdrop(preset.value)"></button><label class="swatch-custom"><input v-model="backdrop" type="color" @input="pickBackdrop(backdrop)" />自定义</label></div><p>点色块立刻试穿，点「保存设置」让它记住。和纸、像素两个主题共用这块背景。</p></template>
-        <template v-else-if="selected === 'emulator'"><h3>模拟器</h3><label>ADB 地址<PixelControl v-model="emu.adb_address" :placeholder="emu.default_address" /></label><p>留空表示自动探测；手动填写后脚本会固定连接这个地址。MuMu 多开时端口是 16384 + 32 × 实例号（例如二号实例是 16416）。改动在下次运行脚本时生效。</p></template>
+        <template v-else-if="selected === 'emulator'"><h3>模拟器</h3><label>ADB 地址<PixelControl v-model="emu.adb_address" :placeholder="emu.default_address" /></label><p>留空表示自动探测；手动填写后脚本会固定连接这个地址。MuMu 多开时端口是 16384 + 32 × 实例号（例如二号实例是 16416）。改动在下次运行脚本时生效。</p>
+          <h3>性能档位</h3>
+          <label class="check-label"><input v-model="emu.performance_mode" type="radio" value="fast" />火力全开</label>
+          <label class="check-label"><input v-model="emu.performance_mode" type="radio" value="eco" />省着点跑</label>
+          <p>火力全开：文字识别最快，风扇会比较响。省着点跑：识别稍慢一点，但 CPU 占用平缓，适合笔记本散热差的环境。改动在下次运行脚本时生效。</p></template>
         <template v-else-if="selected === 'connection'"><h3>日服连接</h3><p>打开日服浏览器，进入游戏后自动更新家底、刀账与本丸近况。这里只更新数据，不会替你出阵或消耗资源。</p><button class="primary" :disabled="connecting" @click="connect">{{ connecting ? '连接中…' : '打开日服浏览器' }}</button>
           <h3>熄屏画面诊断</h3><p>先进入游戏本丸，再开始诊断。接电后放开鼠标键盘，让屏幕按你的设置自行关闭，约 7 分钟后回来查看结果。期间不点击游戏、不改电源设置、不保存截图。</p>
           <button class="secondary" :disabled="probeBusy || probe?.state === 'running'" @click="browserProbe(true)">开始画面诊断</button>

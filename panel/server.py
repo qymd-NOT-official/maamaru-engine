@@ -2141,10 +2141,12 @@ def _valid_adb_address(address: str) -> bool:
 async def api_get_emulator_config():
     """当前 ADB 连接配置；adb_address 为空表示下次启动时自动探测。"""
     cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    mode = str(cfg.get("performance_mode", "")).strip().lower()
     return {
         "adb_address": str(cfg.get("adb_address", "")).strip(),
         "default_address": _DEFAULT_ADB_ADDR,
         "adb_path": str(cfg.get("adb_path", "")),
+        "performance_mode": mode if mode in ("fast", "eco") else "fast",
     }
 
 
@@ -2158,13 +2160,20 @@ async def api_save_emulator_config(request: Request):
             {"error": "地址格式不对，应该类似 127.0.0.1:16384 或 emulator-5554"},
             status_code=400,
         )
+    mode = str(body.get("performance_mode", "")).strip().lower()
+    if mode and mode not in ("fast", "eco"):
+        return JSONResponse({"error": "性能档位只认 fast / eco"},
+                            status_code=400)
     cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
     if address:
         cfg["adb_address"] = address
     else:
         cfg.pop("adb_address", None)
+    if mode:
+        cfg["performance_mode"] = mode
     _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"ok": True, "adb_address": address}
+    return {"ok": True, "adb_address": address,
+            "performance_mode": cfg.get("performance_mode", "fast")}
 
 
 # ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
