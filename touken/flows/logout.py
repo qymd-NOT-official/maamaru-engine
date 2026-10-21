@@ -18,7 +18,7 @@ _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 class LogoutMixin:
-    """下线。依赖宿主类的 maa。"""
+    """下线。依赖宿主类的 device。"""
 
     def logout_stream(self, kill_game: bool = None,
                       close_emulator: bool = None, sleep_pc: bool = None):
@@ -44,7 +44,7 @@ class LogoutMixin:
             pkg = cfg.get("package", "com.youzu.djlw")
             try:
                 subprocess.run(
-                    [self.maa.adb_path, "-s", self.maa.adb_address,
+                    [self.device.adb_path, "-s", self.device.adb_address,
                      "shell", "am", "force-stop", pkg],
                     timeout=15, capture_output=True, creationflags=_NO_WINDOW)
                 yield f"[下线] 游戏进程已杀（{pkg}）"

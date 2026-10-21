@@ -202,8 +202,8 @@ def test_daily_ledger_sync_wires_pipeline_and_consumer(monkeypatch, harness):
     from panel import server
     run = server._workflow.NODE_REGISTRY["ledger_sync"]["run"]
     agent = Mock()
-    agent.maa.adb_path = "adb"
-    agent.maa.adb_address = "127.0.0.1:16384"
+    agent.device.adb_path = "adb"
+    agent.device.adb_address = "127.0.0.1:16384"
     messages = list(run(agent, {}, None))
     assert any("账本已同步：观察 1 条，收支 0 条" in m for m in messages)
     assert not (tmp_path / "pulled.log").exists()
@@ -214,7 +214,7 @@ def test_daily_ledger_sync_wires_pipeline_and_consumer(monkeypatch, harness):
 # ---------------------------------------------------------------- 启动前收账钩子
 
 def _boot_flow():
-    """带假 maa 的日课流：resolve/am start 都走脚本化的 _adb_run。"""
+    """带假 device 的日课流：resolve/am start 都走脚本化的 _adb_run。"""
     flow = DailyMixin.__new__(DailyMixin)
     flow.config = {"daily": {"logout": {"package": "com.youzu.djlw"}}}
     flow.recorded = []
@@ -246,7 +246,7 @@ def _boot_flow():
         def ocr(self, expected, roi, match_mode="exact"):
             return None
 
-    flow.maa = Maa()
+    flow.device = Maa()
     flow.record_event = lambda event_type, **payload: flow.recorded.append(
         (event_type, payload))
     return flow
@@ -282,12 +282,12 @@ def test_launch_collect_failure_still_starts_silently(monkeypatch):
 def test_launch_skips_collect_when_component_unresolved(monkeypatch):
     flow = _boot_flow()
 
-    class BrokenMaa(flow.maa.__class__):
+    class BrokenMaa(flow.device.__class__):
         def _adb_run(self, args, timeout=None):
             flow.adb_calls.append(args)
             return b"Error: unable to resolve activity\n"
 
-    flow.maa = BrokenMaa()
+    flow.device = BrokenMaa()
     collect = Mock()
     monkeypatch.setattr("touken.flows.daily.collect_game_records", collect)
     assert flow._launch_game_via_adb() is False

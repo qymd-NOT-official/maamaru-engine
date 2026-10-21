@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from touken import game_state as gs
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 def event(endpoint, body, at=1000, direction="S->C"):
@@ -83,10 +83,10 @@ def test_troop_requires_new_slot_update_but_reuses_known_instance_name():
 def test_compose_return_page_alone_never_overrides_game_result(monkeypatch, outcome):
     from touken.flows import synthesize as module
     host = module.SynthesizeMixin()
-    host.maa = Mock(adb_address=None)
-    host.maa.template_match.return_value = Point(1200, 166)
-    host.maa.ocr.return_value = Point(500, 130)
-    host.maa.ocr_all.return_value = [("乱藤四郎", Point(440, 180))]
+    host.device = Mock(adb_address=None)
+    host.device.template_match.return_value = Point(1200, 166)
+    host.device.ocr.return_value = Point(500, 130)
+    host.device.ocr_all.return_value = [("乱藤四郎", Point(440, 180))]
     host._protect_filter_on = lambda: False
     host.current_location = "强化"
     host.navigate_to_stream = lambda _: iter(())
@@ -101,9 +101,9 @@ def test_compose_return_page_alone_never_overrides_game_result(monkeypatch, outc
 def test_reward_game_result_overrides_visual_and_supplies_amount(monkeypatch, outcome):
     from test_flow_resource_changes import _RewardsHost, _ClaimFakeMaa
     from touken.flows import rewards as module
-    maa = _ClaimFakeMaa()
-    maa.stale_dismissed = True
-    host = _RewardsHost(maa)
+    device = _ClaimFakeMaa()
+    device.stale_dismissed = True
+    host = _RewardsHost(device)
     host._read_popup_guarded = Mock(side_effect=AssertionError("known game result needs no OCR"))
     def confirm(_maa, result, _kind):
         result["result_body"] = {"item": [{"item_type": 4, "item_num": 250}]}
@@ -120,22 +120,22 @@ def test_reward_game_result_overrides_visual_and_supplies_amount(monkeypatch, ou
 
 def test_duplicate_troop_rows_are_interchangeable():
     from touken.flows import formation_troops as module
-    maa = Mock()
-    maa.ocr_all.return_value = [("轻步兵·新春", Point(1000, 250)), ("轻步兵·新春", Point(1000, 150))]
-    assert module.find_troop_in_list(maa, "轻步兵·新春") == Point(1000, 150)
+    device = Mock()
+    device.ocr_all.return_value = [("轻步兵·新春", Point(1000, 250)), ("轻步兵·新春", Point(1000, 150))]
+    assert module.find_troop_in_list(device, "轻步兵·新春") == Point(1000, 150)
 
 
 @pytest.mark.parametrize("outcome", [True, False])
 def test_troop_game_result_overrides_missing_or_positive_ocr(monkeypatch, outcome):
     from test_formation_troops import FakeMaa
     from touken.flows import formation_troops as module
-    maa = FakeMaa()
-    agent = type("Agent", (), {"maa": maa})()
+    device = FakeMaa()
+    agent = type("Agent", (), {"device": device})()
     monkeypatch.setattr(gs, "troop_matches", Mock(side_effect=[False, outcome]))
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
     if outcome:
-        original = maa.ocr_all
-        maa.ocr_all = lambda roi: [] if roi.x == 315 else original(roi)
+        original = device.ocr_all
+        device.ocr_all = lambda roi: [] if roi.x == 315 else original(roi)
     stream = module.equip_preset_troop_stream(agent, 1, 1, "轻步兵·新春", team_no=1)
     while True:
         try:
@@ -153,8 +153,8 @@ def test_standalone_duty_dialogue_preserves_existing_clock(monkeypatch, tmp_path
     host = module.NaihankaMixin()
     host.config = {"naihanka": {"running_marker": {"template": "running"},
         "ui_title": {"template": "title"}, "cancel_button": {"template": "cancel"}, "skip_tap": (0, 0)}}
-    host.maa = Mock(adb_address=None)
-    host.maa.template_match.side_effect = lambda template, *_: None if template == "cancel" else Point(1, 1)
+    host.device = Mock(adb_address=None)
+    host.device.template_match.side_effect = lambda template, *_: None if template == "cancel" else Point(1, 1)
     host._click_point = Mock()
     monkeypatch.setattr(module, "STATUS_DIR", tmp_path)
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
@@ -181,13 +181,13 @@ def test_free_gift_game_result_prevents_extra_purchase(monkeypatch, outcome):
         "find_text": {"expected": "暖心", "roi": [0, 100, 700, 650]},
         "claim_button": {"template": "claim"}, "popup_verify": {"expected": "0", "roi": [0, 0, 1280, 720]},
         "popup_buy": {"template": "buy"}}}}
-    host.maa = Mock(adb_address=None)
-    host.maa.ocr.side_effect = lambda expected, *args, **kwargs: Point(145, 145) if expected in ("暖心", "0") else None
-    host.maa.template_match.side_effect = lambda template, **kwargs: Point(500, 600) if template == "buy" else Point(500, 300)
+    host.device = Mock(adb_address=None)
+    host.device.ocr.side_effect = lambda expected, *args, **kwargs: Point(145, 145) if expected in ("暖心", "0") else None
+    host.device.template_match.side_effect = lambda template, **kwargs: Point(500, 600) if template == "buy" else Point(500, 300)
     monkeypatch.setattr(module, "confirm_operation", lambda *_: outcome)
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
     messages = list(host.claim_free_gift_stream())
-    buys = [call for call in host.maa.click.call_args_list if call.args[0] == Point(500, 600)]
+    buys = [call for call in host.device.click.call_args_list if call.args[0] == Point(500, 600)]
     assert len(buys) == 1
     assert any("领取成功" in m for m in messages) is outcome
 
@@ -197,8 +197,8 @@ def test_duty_running_data_skips_start_even_without_marker(monkeypatch, tmp_path
     host = module.NaihankaMixin()
     host.current_location = "内番"
     host.config = {"naihanka": {"running_marker": {"template": "running"}}}
-    host.maa = Mock(adb_address=None)
-    host.maa.template_match.return_value = None
+    host.device = Mock(adb_address=None)
+    host.device.template_match.return_value = None
     host.navigate_to_stream = lambda _: iter(())
     host.naihanka_observe_stream = lambda: iter(())
     host.naihanka_snapshot_stream = lambda: iter(())
@@ -207,7 +207,7 @@ def test_duty_running_data_skips_start_even_without_marker(monkeypatch, tmp_path
         "started_at": "2026-10-12 10:00:00", "finished_at": "2026-10-13 10:00:00"})
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
     assert any("已经在内番中" in m for m in host.naihanka_stream())
-    host.maa.click.assert_not_called()
+    host.device.click.assert_not_called()
     assert json.loads((tmp_path / "naihanka.json").read_text(encoding="utf-8"))["started_at"] == "2026-10-12 10:00:00"
 
 
@@ -230,8 +230,8 @@ def test_duty_receipt_avoids_missing_marker_wait_and_preserves_rejection(monkeyp
     host = module.NaihankaMixin()
     host.config = {"naihanka": {"running_marker": {"template": "running"},
         "ui_title": {"template": "title"}, "cancel_button": {"template": "cancel"}, "skip_tap": (0, 0)}}
-    host.maa = Mock(adb_address=None)
-    host.maa.template_match.side_effect = lambda template, *_: Point(1, 1) if template == "title" else None
+    host.device = Mock(adb_address=None)
+    host.device.template_match.side_effect = lambda template, *_: Point(1, 1) if template == "title" else None
     host._click_point = Mock()
     host._duty_boundary = {"result_at": 1000}
     monkeypatch.setattr(module, "STATUS_DIR", tmp_path)

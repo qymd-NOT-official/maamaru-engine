@@ -18,7 +18,7 @@ Maamaru/
 ├─ profiles/overrides/     用户识别素材覆盖
 ├─ state/                  日课、远征、库存和会话状态
 ├─ logs/                   面板数据库与启动器日志
-├─ debug/                  MAA 调试输出
+├─ debug/                  调试输出
 ├─ backups/                迁移前备份
 ├─ updates/                未来更新下载暂存
 ├─ migration.json          旧版迁移记录

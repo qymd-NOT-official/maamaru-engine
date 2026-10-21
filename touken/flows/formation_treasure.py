@@ -8,7 +8,7 @@
 import re
 import time
 
-from ..maa_adapter import Point, roi_4to4
+from ..device_adapter import Point, roi_4to4
 from ..roi_overrides import get_roi
 
 
@@ -24,14 +24,14 @@ _COUNT_RE = re.compile(r"未装备\s*/\s*总所持\s*(\d+)\s*个\s*/\s*(\d+)\s*�
 _OWNER_RE = re.compile(r"确认卸下(.+?)的装备吗")
 
 
-def _tokens(maa, roi):
-    maa.screenshot(force=True)
-    return maa.ocr_all(roi_4to4(*roi)) or []
+def _tokens(device, roi):
+    device.screenshot(force=True)
+    return device.ocr_all(roi_4to4(*roi)) or []
 
 
-def _has_text(maa, expected, roi):
-    maa.screenshot(force=True)
-    return bool(maa.ocr(expected, roi_4to4(*roi)))
+def _has_text(device, expected, roi):
+    device.screenshot(force=True)
+    return bool(device.ocr(expected, roi_4to4(*roi)))
 
 
 def parse_treasure_count(tokens):
@@ -91,12 +91,12 @@ def visible_treasures(tokens):
     return cards
 
 
-def find_treasure_in_list(maa, target, total):
+def find_treasure_in_list(device, target, total):
     """从列表顶端扫描；只在恰好读全 total 件且目标指纹唯一时返回位置。"""
     seen = {}
     target_page = None
     for page in range(12):
-        cards = visible_treasures(_tokens(maa, _LIST))
+        cards = visible_treasures(_tokens(device, _LIST))
         for name, level, affection, occupied, point in cards:
             key = (name, level, affection)
             if key in seen and seen[key][0] != page - 1:
@@ -108,17 +108,17 @@ def find_treasure_in_list(maa, target, total):
             break
         if len(seen) > total or page == 11:
             return None
-        maa.swipe(1100, 595, 1100, 245, 650)
+        device.swipe(1100, 595, 1100, 245, 650)
         time.sleep(0.4)
     else:
         return None
     if target_page is None:
         return None
     for _ in range(page - target_page):
-        maa.swipe(1100, 245, 1100, 595, 650)
+        device.swipe(1100, 245, 1100, 595, 650)
         time.sleep(0.4)
     matches = [(occupied, point) for name, level, affection, occupied, point
-               in visible_treasures(_tokens(maa, _LIST))
+               in visible_treasures(_tokens(device, _LIST))
                if (name, level, affection) ==
                (target["name"], target["level"], target["affection"])]
     return matches[0] if len(matches) == 1 else None
@@ -135,43 +135,43 @@ def transfer_owner(tokens):
 def equip_preset_treasure_stream(agent, slot_no, target, team_no=None):
     """在已确认的编队页给一个槽位换宝物；失败时绝不点未知卡片。"""
     from ..game_state import available_events, equipped_asset
-    maa = agent.maa
+    device = agent.device
     from .team_roster import _ROW_CY
 
     if not isinstance(slot_no, int) or not 1 <= slot_no <= 6:
         yield "[宝物] 位置不认识，停"
         return False
-    if not _has_text(maa, "部队编成", (480, 0, 800, 60)):
+    if not _has_text(device, "部队编成", (480, 0, 800, 60)):
         yield "[宝物] 不在部队编成页，停"
         return False
 
-    maa.click(Point(964, _ROW_CY[slot_no - 1]))
+    device.click(Point(964, _ROW_CY[slot_no - 1]))
     time.sleep(0.7)
-    if not _has_text(maa, "更换装备", _TITLE):
+    if not _has_text(device, "更换装备", _TITLE):
         yield "[宝物] 装备页没打开，停"
         return False
 
     try:
-        before = available_events(maa) if team_no else []
+        before = available_events(device) if team_no else []
         current = equipped_asset(before, team_no, slot_no, "treasure") if team_no else None
         if current is not None and all(current.get(field) == target.get(field) for field in ("name", "level", "affection")):
             yield f"[宝物] {slot_no}号位已经装着指定的「{target['name']}」"
             return True
-        maa.click(Point(634, 365))
+        device.click(Point(634, 365))
         time.sleep(0.4)
-        if not _has_text(maa, "宝物", _PANEL_TITLE):
+        if not _has_text(device, "宝物", _PANEL_TITLE):
             yield "[宝物] 宝物列表没打开，停"
             return False
-        count = parse_treasure_count(_tokens(maa, _COUNT))
+        count = parse_treasure_count(_tokens(device, _COUNT))
         if not count or count[1] < 1:
             yield "[宝物] 所持数量没有读清，停"
             return False
         if count[1] == 1:
-            tokens = _tokens(maa, _CARD)
+            tokens = _tokens(device, _CARD)
             point = match_single_treasure(tokens, target)
             equipped_elsewhere = any("装备中" in str(value) for value, _ in tokens)
         else:
-            found = find_treasure_in_list(maa, target, count[1])
+            found = find_treasure_in_list(device, target, count[1])
             point = found[1] if found else None
             equipped_elsewhere = found[0] if found else False
         if point is None:
@@ -181,42 +181,42 @@ def equip_preset_treasure_stream(agent, slot_no, target, team_no=None):
             yield "[宝物] 所持计数与装备状态矛盾，停"
             return False
 
-        maa.click(point)
+        device.click(point)
         time.sleep(0.35)
-        maa.screenshot(force=True)
-        confirm = maa.ocr("确定", roi_4to4(960, point.y + 35, 1140, min(point.y + 90, 705)))
+        device.screenshot(force=True)
+        confirm = device.ocr("确定", roi_4to4(960, point.y + 35, 1140, min(point.y + 90, 705)))
         if not confirm:
             yield "[宝物] 候选卡片没有出现确认按钮，停"
             return False
-        maa.click(confirm)
+        device.click(confirm)
         time.sleep(0.5)
-        owner = transfer_owner(_tokens(maa, _TRANSFER))
+        owner = transfer_owner(_tokens(device, _TRANSFER))
         if equipped_elsewhere:
             if not owner:
                 yield "[宝物] 装备中宝物的原持有者没有读清，停止确认"
                 return False
-            maa.click(Point(497, 468))
+            device.click(Point(497, 468))
             time.sleep(0.55)
             yield f"[宝物] 已确认从「{owner}」转交宝物"
         elif owner:
             yield "[宝物] 未装备宝物却出现转交弹窗，停止确认"
             return False
-        actual = equipped_asset(available_events(maa), team_no, slot_no, "treasure", previous=before) if team_no else None
+        actual = equipped_asset(available_events(device), team_no, slot_no, "treasure", previous=before) if team_no else None
         details_wrong = actual is not None and (actual.get("empty") or any(actual.get(field) != target.get(field) for field in ("level", "affection"))
                          or actual.get("name") is not None and actual["name"] != target["name"])
         # Unknown names retain the screen confirmation after selecting the full target fingerprint.
         named = actual is not None and actual.get("name") == target["name"]
         if details_wrong or not named and not any(str(value).strip() == target["name"]
-                   for value, _ in _tokens(maa, _SLOT)):
+                   for value, _ in _tokens(device, _SLOT)):
             yield "[宝物] 换装后槽位未读到目标宝物，停"
             return False
         yield f"[宝物] ✓ {slot_no}号位已装备「{target['name']}」"
         return True
     finally:
         # 装备中途失明或原持有者不明时，可能还开着转交弹窗：先点否。
-        if _has_text(maa, "否", (680, 430, 900, 510)):
-            maa.click(Point(785, 468))
+        if _has_text(device, "否", (680, 430, 900, 510)):
+            device.click(Point(785, 468))
             time.sleep(0.3)
-        if _has_text(maa, "更换装备", _TITLE):
-            maa.click(Point(152, 26))
+        if _has_text(device, "更换装备", _TITLE):
+            device.click(Point(152, 26))
             time.sleep(0.5)

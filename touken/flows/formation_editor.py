@@ -63,7 +63,7 @@ import time
 import numpy as np
 
 from .. import sword_db
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
 from .team_roster import _match_name, _ROW_CY, _TEAM_TAB, link_visible_slot
 
@@ -679,7 +679,7 @@ def _slot_no(key):
 # ==================== 执行器 ====================
 
 class FormationEditorMixin:
-    """共用编队执行器。依赖宿主：maa、config、record_event、
+    """共用编队执行器。依赖宿主：device、config、record_event、
     navigate_to_stream、current_location，以及 TeamRosterMixin 的
     _read_team_page / _read_row_label（经 _formation_* 注入缝调用）。"""
 
@@ -718,43 +718,43 @@ class FormationEditorMixin:
         """点「筛选/排序」开面板，标题 OCR 正面确认。Returns bool。"""
         text, roi = _FILTER_PANEL_TITLE
         for _ in range(2):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(text, roi_4to4(*roi)):
+            self.device.screenshot(force=True)
+            if self.device.ocr(text, roi_4to4(*roi)):
                 return True             # 已经开着
-            pt = self.maa.ocr(_FILTER_OPEN_TEXT,
+            pt = self.device.ocr(_FILTER_OPEN_TEXT,
                               roi_4to4(*_FILTER_OPEN_ROI))
             if not pt:
                 # 已套过筛选时入口文字变成「筛选中」。同一按钮、同一 ROI。
-                pt = self.maa.ocr("筛选中", roi_4to4(*_FILTER_OPEN_ROI))
+                pt = self.device.ocr("筛选中", roi_4to4(*_FILTER_OPEN_ROI))
             if not pt:
                 # 真机上「筛选中」的细白字偶发完全读不出。列表标题正面
                 # 命中、且同源帧按钮内部是深灰时，才用标定过的按钮中心。
-                image = self.maa.screenshot(force=True)
+                image = self.device.screenshot(force=True)
                 title, title_roi = _LIST_TITLE
                 if (getattr(image, "shape", None) == (720, 1280, 3)
-                        and self.maa.ocr(title, roi_4to4(*title_roi))
+                        and self.device.ocr(title, roi_4to4(*title_roi))
                         and max(int(v) for v in image[100, 850]) < 75
                         and max(int(v) for v in image[85, 830]) < 75):
                     pt = Point(850, 100)
             if not pt:
                 time.sleep(0.5)
                 continue
-            self.maa.click(pt)
+            self.device.click(pt)
             time.sleep(0.8)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr(text, roi_4to4(*roi)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr(text, roi_4to4(*roi)))
 
     def _click_panel_button(self, text, roi=None, require_selected=False):
         """面板里按文字（exact）找按钮并点。Returns 找没找到。"""
-        self.maa.screenshot(force=True)
-        pt = self.maa.ocr(text, roi_4to4(*(roi or _FILTER_PANEL_ROI)),
+        self.device.screenshot(force=True)
+        pt = self.device.ocr(text, roi_4to4(*(roi or _FILTER_PANEL_ROI)),
                           match_mode="exact")
         if not pt:
             return False
-        self.maa.click(pt)
+        self.device.click(pt)
         time.sleep(0.5)
         if require_selected:
-            image = self.maa.screenshot(force=True)
+            image = self.device.screenshot(force=True)
             if image is None or getattr(image, "shape", None) != (720, 1280, 3):
                 return False
             # 实际运行帧：已选按钮为绿底，未选为深灰。点在文字中心，
@@ -773,7 +773,7 @@ class FormationEditorMixin:
         点不上也不追加尝试，结果已定。"""
         ok = yield from self._apply_list_filter_flow(tgt)
         if not ok:
-            self.maa.click(Point(*_FILTER_CLOSE_X))
+            self.device.click(Point(*_FILTER_CLOSE_X))
             time.sleep(0.8)
             self._wait_list_open(attempts=4)
         return ok
@@ -801,8 +801,8 @@ class FormationEditorMixin:
             return False
         # 「取消筛选」可能顺手关了面板：关了就重开再选
         text, roi = _FILTER_PANEL_TITLE
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr(text, roi_4to4(*roi)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr(text, roi_4to4(*roi)):
             if not self._open_filter_panel():
                 yield "[编队] 重置筛选后叫不回筛选面板，停"
                 return False
@@ -902,7 +902,7 @@ class FormationEditorMixin:
         #    但可以继续打开名单寻找明确目标
         if client_serial is not None and not ranked:
             from ..selection_identity import client_events, identity_target, selected_serial, identity_unique
-            events = client_events(self.maa)
+            events = client_events(self.device)
             # 进入编队时的完整回传已能确认现有成员；同一振再次点决定
             # 不会产生 setsword，不能要求它晚于本槽换人流程的开始时间。
             if selected_serial(events, team_no, slot_no, time.time() - 300) == client_serial:
@@ -955,7 +955,7 @@ class FormationEditorMixin:
 
         # 4) 点"替换"，确认进入"刀剑男士选择"
         cy = _ROW_CY[slot_no - 1]
-        self.maa.click(Point(_SWAP_X, cy))
+        self.device.click(Point(_SWAP_X, cy))
         if not self._wait_list_open():
             yield "[编队] 刀剑男士选择列表没打开，停（未做任何变更）"
             return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
@@ -1044,7 +1044,7 @@ class FormationEditorMixin:
                                 team_before=team_before)
 
         selected_at = time.time() - 1
-        self.maa.click(Point(_DECIDE_X, row["y"] + _DECIDE_DY))
+        self.device.click(Point(_DECIDE_X, row["y"] + _DECIDE_DY))
         if not self._wait_list_closed():
             yield ("[编队] 决定已点但列表不关闭：目标可能被游戏规则禁用"
                    "（手入/修行/同位互斥/远征中），停")
@@ -1055,7 +1055,7 @@ class FormationEditorMixin:
 
         if client_serial is not None and not ranked:
             from ..selection_identity import client_events, selected_serial
-            actual = selected_serial(client_events(self.maa), team_no, slot_no, selected_at)
+            actual = selected_serial(client_events(self.device), team_no, slot_no, selected_at)
             if actual != client_serial:
                 yield "[编队] 选入后客户端编号未核对成功，停止；不继续装备或出发"
                 return self._finish(SCREEN_UNRECOGNIZED, team_no, slot_no, tgt,
@@ -1096,7 +1096,7 @@ class FormationEditorMixin:
         if self.current_location != "编队":
             yield "[预设编队] 无法到编队页，预设没应用完"
             return False
-        self.maa.click(Point(*_TEAM_TAB[team_no]))
+        self.device.click(Point(*_TEAM_TAB[team_no]))
         time.sleep(1.5)
 
         changed = already = 0
@@ -1133,7 +1133,7 @@ class FormationEditorMixin:
             for slot_no, equipment in equipment_slots:
                 expected = slots[str(slot_no)]
                 from ..game_state import available_events, team_member_matches
-                member = team_member_matches(available_events(self.maa), team_no, slot_no, expected)
+                member = team_member_matches(available_events(self.device), team_no, slot_no, expected)
                 if member is None:
                     current_team = self._formation_read_team()
                     current = (current_team[slot_no - 1]
@@ -1175,12 +1175,12 @@ class FormationEditorMixin:
 
     def _detect_shell(self):
         """认当前编队外壳：标题 OCR 判定，不看主题色。"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         text, roi = _FORMATION_TITLE
-        if self.maa.ocr(text, roi_4to4(*roi)):
+        if self.device.ocr(text, roi_4to4(*roi)):
             return "formation"
         text, roi = _TEAM_SELECT_TITLE
-        if self.maa.ocr(text, roi_4to4(*roi)):
+        if self.device.ocr(text, roi_4to4(*roi)):
             return "team_select"
         return None
 
@@ -1200,9 +1200,9 @@ class FormationEditorMixin:
     def _select_team_confirmed(self, team_no):
         """点部队标签并用位置标签正面确认（team_roster 同款纪律）。"""
         for attempt in (1, 2, 3):
-            self.maa.click(Point(*_TEAM_TAB[team_no]))
+            self.device.click(Point(*_TEAM_TAB[team_no]))
             time.sleep(1.0)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             seen = (self._formation_row_label(_ROW_CY[0]),
                     self._formation_row_label(_ROW_CY[5]))
             if seen == (team_no, team_no):
@@ -1215,8 +1215,8 @@ class FormationEditorMixin:
     def _wait_list_open(self, attempts=10):
         text, roi = _LIST_TITLE
         for _ in range(attempts):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(text, roi_4to4(*roi)):
+            self.device.screenshot(force=True)
+            if self.device.ocr(text, roi_4to4(*roi)):
                 return True
             time.sleep(0.5)
         return False
@@ -1226,14 +1226,14 @@ class FormationEditorMixin:
         text, roi = _LIST_TITLE
         for _ in range(attempts):
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            pt = self.maa.template_match(_CONFIRM_POPUP_TEMPLATE,
+            self.device.screenshot(force=True)
+            pt = self.device.template_match(_CONFIRM_POPUP_TEMPLATE,
                                          threshold=0.7)
             if pt:
-                self.maa.click(pt)
+                self.device.click(pt)
                 time.sleep(0.8)
-                self.maa.screenshot(force=True)
-            if not self.maa.ocr(text, roi_4to4(*roi)):
+                self.device.screenshot(force=True)
+            if not self.device.ocr(text, roi_4to4(*roi)):
                 return True
         return False
 
@@ -1244,8 +1244,8 @@ class FormationEditorMixin:
 
     def _read_list_page(self):
         """当前帧读列表页。Returns (rows, unreadable)。"""
-        image = self.maa.screenshot(force=True)
-        tokens = self.maa.ocr_all(roi_4to4(*_LIST_ROI)) or []
+        image = self.device.screenshot(force=True)
+        tokens = self.device.ocr_all(roi_4to4(*_LIST_ROI)) or []
         rows, unreadable = self._parse_selection_rows(tokens)
         target = getattr(self, '_selection_identity_target', None)
         if (target and image is not None and not any(
@@ -1258,7 +1258,7 @@ class FormationEditorMixin:
                               and _parse_fatigue_token(text) is not None
                               and 141 <= pt.y <= 682})
             for y in centers:
-                name_tokens = self.maa.ocr_all(roi_4to4(100, y - 17, 325, y + 18), image=image) or []
+                name_tokens = self.device.ocr_all(roi_4to4(100, y - 17, 325, y + 18), image=image) or []
                 recovered.extend((text, pt) for text, pt in name_tokens
                                  if _match_name(text) == target['sword_catalog_id'])
             if recovered:
@@ -1277,14 +1277,14 @@ class FormationEditorMixin:
                 frame_height = image.shape[0] if image is not None else 720
                 if y - 48 < 124 or y + 13 > min(700, frame_height):
                     continue
-                tokens = self.maa.ocr_all(roi_4to4(470, y - 48, 591, y - 27)) or []
+                tokens = self.device.ocr_all(roi_4to4(470, y - 48, 591, y - 27)) or []
                 text = ''.join(t for t, _ in tokens)
                 levels = re.findall(r'乱舞\s*(\d+)\s*级', text)
                 row['tou_level'] = int(levels[0]) if len(levels) == 1 else None
                 for field, x in (('survival_max', 596), ('recon', 873)):
                     if target.get(field) is None:
                         continue
-                    tokens = self.maa.ocr_all(roi_4to4(x + 3, y - 21, x + 52, y + 13)) or []
+                    tokens = self.device.ocr_all(roi_4to4(x + 3, y - 21, x + 52, y + 13)) or []
                     numbers = [int(t.strip()) for t, _ in tokens
                                if re.fullmatch(r'\d{1,3}', t.strip())]
                     row[field] = numbers[0] if len(numbers) == 1 else None
@@ -1306,7 +1306,7 @@ class FormationEditorMixin:
             seen.add(fingerprint)
             # 已校准的短滑手势保留完整行重叠；长滑会从首屏跨到末屏，
             # 漏掉中间的目标。客户端找人只向前移动，不回扫。
-            self.maa.swipe(*_SWIPE_RANKED_NEXT)
+            self.device.swipe(*_SWIPE_RANKED_NEXT)
             time.sleep(1.2)
         return None, index
 
@@ -1358,7 +1358,7 @@ class FormationEditorMixin:
                         break
                     pending = recovered            # 候选页之后还有页：继续扫
                     continue
-                self.maa.swipe(*swipe_next)
+                self.device.swipe(*swipe_next)
                 time.sleep(1.2)
                 continue
             if fp in fps:
@@ -1378,7 +1378,7 @@ class FormationEditorMixin:
             if len(pages) >= max_pages:
                 status = "truncated"
                 break
-            self.maa.swipe(*swipe_next)
+            self.device.swipe(*swipe_next)
             time.sleep(1.2)
         yield (f"[编队] 列表扫描 {len(pages)} 页"
                f"（{'已到底' if status == 'complete' else '未到底：' + status}，"
@@ -1417,7 +1417,7 @@ class FormationEditorMixin:
         candidate_fp = fps[-1]
         bottom = _SCROLLBAR_BOTTOM_Y - _SCROLLBAR_BOTTOM_TOL
         for _stage in range(_BOTTOM_PROOF_STAGES):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             b0 = self._scrollbar_bottom()
             if b0 is None:
                 return "stalled", None          # 滑块读数缺失：证据不足
@@ -1425,14 +1425,14 @@ class FormationEditorMixin:
                 # 滑块没贴底：候选页不是底，停滞是前滑被吞——续滑把
                 # 新页找回来交还主循环（找不回/失明就 stalled）。
                 for _retry in range(2):
-                    self.maa.swipe(*swipe_next)
+                    self.device.swipe(*swipe_next)
                     time.sleep(1.2)
                     rows, bad = self._read_list_page()
                     if rows and page_fingerprint(rows) != candidate_fp:
                         return "advanced", (rows, bad)
                 return "stalled", None
             # 候选页自称贴底：先正面验证反向滑动有效……
-            self.maa.swipe(*swipe_prev)
+            self.device.swipe(*swipe_prev)
             time.sleep(1.2)
             rows, _bad = self._read_list_page()
             b1 = self._scrollbar_bottom()
@@ -1446,7 +1446,7 @@ class FormationEditorMixin:
             # 帧才与候选页比对。
             restored = False
             for _retry in range(3):
-                self.maa.swipe(*swipe_next)
+                self.device.swipe(*swipe_next)
                 time.sleep(1.2)
                 rows, bad = self._read_list_page()
                 b2 = self._scrollbar_bottom()
@@ -1475,7 +1475,7 @@ class FormationEditorMixin:
         689→482；恢复滑欠程可只回 588（不吸附整页）。测试经子类
         注入剧本读数。
         """
-        img = self.maa.screenshot()     # 复用核验刚读过的那一帧，不再截
+        img = self.device.screenshot()     # 复用核验刚读过的那一帧，不再截
         if img is None or img.shape[0] < 690 or img.shape[1] < 1270:
             return None
         x0, x1 = _SCROLLBAR_BAND_X
@@ -1519,7 +1519,7 @@ class FormationEditorMixin:
         if not (180 <= min(r["y"] for r in rows) <= 220
                 and max(r["y"] for r in rows) <= 510):
             return False
-        image = self.maa.screenshot(force=True)
+        image = self.device.screenshot(force=True)
         if image is None or getattr(image, "shape", None) != (720, 1280, 3):
             return False
         start = max(r["y"] for r in rows) + 65
@@ -1569,7 +1569,7 @@ class FormationEditorMixin:
                     return hit3
                 yield "[编队] 已到目标页位置但目标行读不出来，停"
                 return None
-            self.maa.swipe(*(swipe_next if b < b_target else swipe_prev))
+            self.device.swipe(*(swipe_next if b < b_target else swipe_prev))
             time.sleep(1.2)
         yield f"[编队] 重定位翻满 {_GOTO_MAX_SWIPES} 次仍未找到目标行，停"
         return None

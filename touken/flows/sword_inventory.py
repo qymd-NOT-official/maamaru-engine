@@ -25,7 +25,7 @@ import re
 import time
 from pathlib import Path
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from .. import sword_db
 from .. import avatar_db
 from ..roi_overrides import get_roi
@@ -744,7 +744,7 @@ class SwordInventoryMixin:
 
     def sword_inventory_stream(self):
         """主入口：一览逐页扫描，每行一把刀（等级/乱舞/血条/属性/显现日期）"""
-        maa = self.maa
+        device = self.device
         # ── 1. 到本丸 → 进一览 ──
         if self.current_location != "本丸":
             yield "[刀帐] 先回本丸..."
@@ -754,7 +754,7 @@ class SwordInventoryMixin:
         yield "[刀帐] 打开刀剑男士一览..."
         opened = False
         for attempt in range(3):
-            maa.click(Point(*_SWORD_MENU_POINT))
+            device.click(Point(*_SWORD_MENU_POINT))
             if self._wait_list_page():
                 opened = True
                 break
@@ -765,13 +765,13 @@ class SwordInventoryMixin:
 
         # ── 2. 排序设为「刀帐顺序」（稳定编号序；重复设置无害） ──
         yield "[刀帐] 排序设为刀帐顺序..."
-        maa.click(Point(*_FILTER_BTN))
+        device.click(Point(*_FILTER_BTN))
         time.sleep(1.2)
-        maa.screenshot(force=True)
-        if maa.ocr("排序", roi_4to4(910, 60, 1120, 115)):
-            maa.click(Point(*_SORT_ROSTER_BTN))
+        device.screenshot(force=True)
+        if device.ocr("排序", roi_4to4(910, 60, 1120, 115)):
+            device.click(Point(*_SORT_ROSTER_BTN))
             time.sleep(0.6)
-            maa.click(Point(*_SORT_CONFIRM))
+            device.click(Point(*_SORT_CONFIRM))
             time.sleep(1.5)
             if not self._wait_list_page():
                 yield "[刀帐] ✗ 排序后没回到一览页，停"
@@ -807,8 +807,8 @@ class SwordInventoryMixin:
                 yield "[刀帐] ✗ 翻页翻到上限还没收尾，停"
                 return
 
-            maa.screenshot(force=True)
-            img = maa.screenshot()
+            device.screenshot(force=True)
+            img = device.screenshot()
             if debug_dir is not None:
                 from PIL import Image
                 Image.fromarray(img[:, :, ::-1]).save(debug_dir / f"page_{page_no:02d}.png")
@@ -819,8 +819,8 @@ class SwordInventoryMixin:
             if not parsed["rows"] and page_no > 1:
                 # 整页读空：多半撞上翻页转场尾巴，等两秒重读一次再算数
                 time.sleep(2.0)
-                maa.screenshot(force=True)
-                img = maa.screenshot()
+                device.screenshot(force=True)
+                img = device.screenshot()
                 parsed, fell_back = self._scan_list_page(img)
                 if fell_back:
                     yield (f"[刀帐] 第 {page_no} 页逐格精读一行名字都没认出，"
@@ -877,13 +877,13 @@ class SwordInventoryMixin:
             old_strip = img[sy0:sy1, sx0:sx1]
             turned = False
             for _ in range(3):
-                maa.touch_swipe(*_NEXT_PAGE_SWIPE[0], *_NEXT_PAGE_SWIPE[1],
+                device.touch_swipe(*_NEXT_PAGE_SWIPE[0], *_NEXT_PAGE_SWIPE[1],
                                 _NEXT_PAGE_SWIPE[2])
                 time.sleep(_PAGE_TURN_WAIT_S)
-                maa.screenshot(force=True)
-                img = maa.screenshot()
+                device.screenshot(force=True)
+                img = device.screenshot()
                 tokens = [(t, (p.x, p.y)) for t, p in
-                          maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
+                          device.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
                 check = parse_list_tokens(tokens)
                 new_fp = sorted(_row_key(r) for r in check["rows"])
                 if _page_turned(old_fp, new_fp, old_strip,
@@ -923,14 +923,14 @@ class SwordInventoryMixin:
 
     def sword_album_stream(self):
         """附入口：刀帐图鉴扫描（收集度+极化标记，没有等级）"""
-        maa = self.maa
+        device = self.device
         if self.current_location != "本丸":
             yield "[刀帐] 先回本丸..."
             if not self.navigate_to("本丸"):
                 return
         opened = False
         for attempt in range(3):
-            maa.click(Point(*_SWORD_MENU_POINT))
+            device.click(Point(*_SWORD_MENU_POINT))
             if self._wait_album_ready():
                 opened = True
                 break
@@ -943,17 +943,17 @@ class SwordInventoryMixin:
             yield f"[刀帐] 图鉴收集 {collected}/{total or '？'}，开始逐屏认卡"
 
         for _ in range(6):
-            maa.touch_swipe(*_TO_TOP_SWIPE[0], *_TO_TOP_SWIPE[1],
+            device.touch_swipe(*_TO_TOP_SWIPE[0], *_TO_TOP_SWIPE[1],
                             _TO_TOP_SWIPE[2])
             time.sleep(0.8)
 
         seen: dict[int, dict] = {}
-        yield from self._album_sweep(maa, seen, downward=True)
+        yield from self._album_sweep(device, seen, downward=True)
         missing_now = (collected - len(seen)) if collected else None
         if missing_now:
             yield (f"[刀帐] 第一遍认出 {len(seen)} 格、缺 {missing_now}，"
                    f"反向再扫一遍补漏...")
-            yield from self._album_sweep(maa, seen, downward=False)
+            yield from self._album_sweep(device, seen, downward=False)
 
         rows = []
         for no in sorted(seen):
@@ -985,7 +985,7 @@ class SwordInventoryMixin:
         逐格路径的行自带 _badge_rect；整列兜底路径的行按行基线换算老位置。
         """
         templates = load_flower_templates(
-            getattr(self.maa, "resource_dir", "resource/base"))
+            getattr(self.device, "resource_dir", "resource/base"))
         for row in rows:
             if not row.get("sword_id"):
                 continue
@@ -1004,27 +1004,27 @@ class SwordInventoryMixin:
         退回条件刻意收紧：逐格有名字命中就不混用；逐格全空且整列也全空
         （真空页/转场帧）不算兜底，安静按空页处理。返回 (parsed, fell_back)。
         """
-        maa = self.maa
+        device = self.device
 
         def cell_ocr(roi):
             return [(t, (p.x, p.y)) for t, p in
-                    maa.ocr_all(roi_4to4(*roi), img) or []]
+                    device.ocr_all(roi_4to4(*roi), img) or []]
 
         parsed = read_page_cells(cell_ocr)
         if img is not None:
             templates, _skipped = avatar_db.load_avatar_templates(
-                getattr(maa, "resource_dir", "resource/base"))
+                getattr(device, "resource_dir", "resource/base"))
             verify_rows_by_avatar(img, parsed, templates, cell_ocr)
         if any(r.get("sword_id") for r in parsed["rows"]):
             return parsed, False
         tokens = [(t, (p.x, p.y)) for t, p in
-                  maa.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
+                  device.ocr_all(roi_4to4(*_LIST_ROI), img) or []]
         legacy = parse_list_tokens(tokens)
         if parsed["fail_rows"] or any(r.get("sword_id") for r in legacy["rows"]):
             # 标题门禁：部队选择页（2026-09-20 离线验收 221316 实锤）同样
             # 能读出刀名 token，无标题时整列路径读出的全是假行，宁可空页。
-            # maa.ocr 用最近缓存帧（调用点都是刚 force 截图后，与 img 同源）。
-            if maa.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI)):
+            # device.ocr 用最近缓存帧（调用点都是刚 force 截图后，与 img 同源）。
+            if device.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI)):
                 return legacy, True
         return parsed, False
 
@@ -1037,7 +1037,7 @@ class SwordInventoryMixin:
             if not base_y:
                 continue
             x0, y0, x1, y1 = _LEVEL_RETRY_ROI(base_y)
-            tokens = self.maa.ocr_all(roi_4to4(x0, y0, x1, y1)) or []
+            tokens = self.device.ocr_all(roi_4to4(x0, y0, x1, y1)) or []
             levels = sorted(
                 _int_of(t) for t, _pt in tokens
                 if re.fullmatch(r"\d{1,2}\s*级", t.strip()))
@@ -1063,10 +1063,10 @@ class SwordInventoryMixin:
                     time.sleep(1.0)
                     roi = (max(0, roi[0] - 6), max(0, roi[1] - 6),
                            min(1280, roi[2] + 6), min(720, roi[3] + 6))
-                self.maa.screenshot(force=True)
-                img = self.maa.screenshot()
+                self.device.screenshot(force=True)
+                img = self.device.screenshot()
                 tokens = [(t, (p.x, p.y)) for t, p in
-                          self.maa.ocr_all(roi_4to4(*roi), img) or []]
+                          self.device.ocr_all(roi_4to4(*roi), img) or []]
                 date = parse_date_cell(tokens)
                 if date:
                     row["kiwame_date"] = date
@@ -1077,14 +1077,14 @@ class SwordInventoryMixin:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             time.sleep(0.8)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI)):
+            self.device.screenshot(force=True)
+            if self.device.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI)):
                 return True
         return False
 
     def _read_owned(self) -> tuple:
-        self.maa.screenshot(force=True)
-        tokens = self.maa.ocr_all(roi_4to4(*_OWNED_ROI)) or []
+        self.device.screenshot(force=True)
+        tokens = self.device.ocr_all(roi_4to4(*_OWNED_ROI)) or []
         for text, _pt in tokens:
             owned, capacity = parse_owned(text)
             if owned:
@@ -1097,31 +1097,31 @@ class SwordInventoryMixin:
         on_album = False
         while time.time() < deadline:
             time.sleep(0.8)
-            self.maa.screenshot(force=True)
-            if (self.maa.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI))
-                    or self.maa.ocr("刀帐", roi_4to4(*_TITLE_ROI))):
+            self.device.screenshot(force=True)
+            if (self.device.ocr("刀剑男士一览", roi_4to4(*_TITLE_ROI))
+                    or self.device.ocr("刀帐", roi_4to4(*_TITLE_ROI))):
                 on_album = True
                 break
         if not on_album:
             return False
-        self.maa.screenshot(force=True)
-        if self.maa.ocr("刀帐", roi_4to4(*_TITLE_ROI)):
+        self.device.screenshot(force=True)
+        if self.device.ocr("刀帐", roi_4to4(*_TITLE_ROI)):
             return True
-        self.maa.click(Point(*_ALBUM_TAB_POINT))
+        self.device.click(Point(*_ALBUM_TAB_POINT))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("刀帐", roi_4to4(*_TITLE_ROI)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("刀帐", roi_4to4(*_TITLE_ROI)))
 
     def _read_collected(self) -> tuple:
-        self.maa.screenshot(force=True)
-        tokens = self.maa.ocr_all(roi_4to4(*_COLLECT_ROI)) or []
+        self.device.screenshot(force=True)
+        tokens = self.device.ocr_all(roi_4to4(*_COLLECT_ROI)) or []
         for text, _pt in tokens:
             collected, total = parse_collected(text)
             if collected:
                 return collected, total
         return None, None
 
-    def _album_sweep(self, maa, seen: dict, downward: bool):
+    def _album_sweep(self, device, seen: dict, downward: bool):
         """图鉴单方向扫一趟。结束判定看「页面位置不再变化」——
         补漏趟从已扫区域出发，一路全是旧卡是正常现象，按有无新卡判定
         会在出发第二屏就误判到边。"""
@@ -1132,10 +1132,10 @@ class SwordInventoryMixin:
         screen_no = 0
         while screen_no < _MAX_ALBUM_SCREENS:
             screen_no += 1
-            maa.screenshot(force=True)
-            img = maa.screenshot()
+            device.screenshot(force=True)
+            img = device.screenshot()
             tokens = [(t, (p.x, p.y)) for t, p in
-                      maa.ocr_all(roi_4to4(*_GRID_ROI), img) or []]
+                      device.ocr_all(roi_4to4(*_GRID_ROI), img) or []]
             cells = parse_album_tokens(tokens)
             fresh = [c for c in cells if c["no"] not in seen]
             for cell in fresh:
@@ -1159,7 +1159,7 @@ class SwordInventoryMixin:
                 still = 0
             last_seqs = seqs_now
 
-            maa.touch_swipe(*swipe[0], *swipe[1], swipe[2])
+            device.touch_swipe(*swipe[0], *swipe[1], swipe[2])
             time.sleep(_ALBUM_SCROLL_WAIT_S)
         yield "[刀帐] ✗ 单趟滚了太多屏还没到边，停"
         return

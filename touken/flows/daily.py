@@ -30,7 +30,7 @@ import time
 
 from ..runtime_paths import STATUS_DIR
 
-from ..maa_adapter import Point, roi_4to4
+from ..device_adapter import Point, roi_4to4
 from ..record_sync import collect_game_records
 from . import naihanka_report
 # 判分词表抽到 report_judge 共用（工作流节点判分复用同一份，行为不变）；
@@ -263,7 +263,7 @@ class DailyMixin:
 
     def _daily_update_gate(self):
         """日课导航前的更新门卫；兼容只勾中间步骤的断点续跑。"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         recovered = yield from self.recover_game_update_stream()
         if recovered is None:
             return None
@@ -310,7 +310,7 @@ class DailyMixin:
         # 玩家优先：手动刀解不经过脚本标记，但会留下 /sword/dismantle_many
         # 成功响应——翻到就说明玩家今天自己解过了，别再白解一把（不可逆）。
         # 拿不到数据（None）时回退只看脚本标记的旧行为。
-        seen = dismantled_today_in_log(getattr(self, "maa", None))
+        seen = dismantled_today_in_log(getattr(self, "device", None))
         if seen:
             yield "[日课] ✓ 游戏记录显示今天已经刀解过了（你自己动手的？），这步跳过"
             return
@@ -337,7 +337,7 @@ class DailyMixin:
         # 的队记录已销，照常往下走派遣。
         from . import expedition as expedition_flow
         reconciled = expedition_flow.reconcile_records_with_game(
-            getattr(self, "maa", None))
+            getattr(self, "device", None))
         if reconciled:
             yield ("[远征] 部队" + "、".join(str(t) for t in sorted(reconciled))
                    + " 的记录与游戏现状不符（你已手动收菜？），"
@@ -549,7 +549,7 @@ class DailyMixin:
         """
         self._records_precollected = None
         try:
-            result = collect_game_records(self.maa.adb_path, self.maa.adb_address)
+            result = collect_game_records(self.device.adb_path, self.device.adb_address)
         except Exception:
             return
         self._records_precollected = result
@@ -566,7 +566,7 @@ class DailyMixin:
         """通过已配置的包名解析入口并启动游戏；不依赖可能被广告遮住的桌面。"""
         package = (self.config.get("daily", {}).get("logout", {})
                    .get("package", "com.youzu.djlw"))
-        resolve = self.maa._adb_run([
+        resolve = self.device._adb_run([
             "shell", "cmd", "package", "resolve-activity", "--brief",
             "-a", "android.intent.action.MAIN",
             "-c", "android.intent.category.LAUNCHER", package,
@@ -586,7 +586,7 @@ class DailyMixin:
         # 启动前顺手收走上一局日志：游戏一旦 am start，旧日志立刻没了
         self._collect_pending_game_records()
 
-        started = self.maa._adb_run(
+        started = self.device._adb_run(
             ["shell", "am", "start", "-W", "-n", component], timeout=30.0)
         return started is not None
 
@@ -594,19 +594,19 @@ class DailyMixin:
         """等待登录页或本丸出现，返回是否确认游戏已进入可接管状态。"""
         for i in range(75):  # 最多等 150s
             time.sleep(2.0)
-            self.maa.screenshot(force=True)
-            if self.maa.exists("目录.png", threshold=0.7):
+            self.device.screenshot(force=True)
+            if self.device.exists("目录.png", threshold=0.7):
                 yield f"[日课] 游戏已进入本丸（{i * 2 + 2}s）"
                 return True
-            if self.maa.exists("登录.png", threshold=0.7):
+            if self.device.exists("登录.png", threshold=0.7):
                 yield f"[日课] 登录按钮出现（{i * 2 + 2}s）"
                 return True
             # 版本更新框会挡在登录前（「检测到更新」→ 选线路），偶尔查一次
             if i % 6 == 3:
-                upd = self.maa.ocr("线路一", roi_4to4(200, 300, 900, 600))
+                upd = self.device.ocr("线路一", roi_4to4(200, 300, 900, 600))
                 if upd:
                     yield "[日课] 检测到游戏更新，选线路一更新..."
-                    self.maa.click(upd)
+                    self.device.click(upd)
             # 游戏其实已经在跑、只是停在签到/公告等中间界面时，
             # 死等本丸/登录页只会白等——认出来就交给登录流程接管
             if i % 4 == 2:
@@ -622,11 +622,11 @@ class DailyMixin:
         检查游戏开没开：在本丸就跳过；否则优先让 ADB 按包名直接启动。
         只有 ADB 明确失败，才点击经图标模板 + 文字 OCR 双重确认的桌面入口。
         """
-        self.maa.screenshot(force=True)
-        if self.maa.exists("目录.png", threshold=0.7):
+        self.device.screenshot(force=True)
+        if self.device.exists("目录.png", threshold=0.7):
             yield "[日课] 游戏已在本丸，直接开跑"
             return True
-        if self.maa.exists("登录.png", threshold=0.7):
+        if self.device.exists("登录.png", threshold=0.7):
             yield "[日课] 游戏已在登录页，直接接管"
             return True
         # 游戏开着但停在签到页/公告等中间界面（issue#7 翻车现场）：
@@ -646,7 +646,7 @@ class DailyMixin:
             return (yield from self._wait_for_game_entry())
 
         yield "[日课] ADB 直启失败，尝试寻找经过文字确认的桌面图标"
-        pt = self.maa.template_match("刀剑乱舞.png", threshold=0.8)
+        pt = self.device.template_match("刀剑乱舞.png", threshold=0.8)
         if not pt:
             yield "[日课] 没找到可安全点击的刀剑乱舞入口；没有在当前画面盲点"
             return False
@@ -658,12 +658,12 @@ class DailyMixin:
             max(0, pt.x - 80), pt.y + 10,
             min(1280, pt.x + 80), min(720, pt.y + 110),
         )
-        if not self.maa.ocr("刀剑乱舞", guard):
+        if not self.device.ocr("刀剑乱舞", guard):
             yield "[日课] ⚠️ 找到疑似图标但底下没写「刀剑乱舞」——怕是广告，没敢点"
             return False
 
         yield "[日课] 游戏没开，点图标启动（OCR 验明正身 ✓）..."
-        self.maa.click(pt)
+        self.device.click(pt)
         return (yield from self._wait_for_game_entry())
 
     def _ingame_hint(self):
@@ -671,11 +671,11 @@ class DailyMixin:
         返回界面描述（给人看的），认不出返回 None。调用前要有新截图。
         只加「点了安全」的识别：这里只负责认，接管后的动作由登录流程和扫地决定。"""
         # 启动后的签到日历：底部有「领取奖励」按钮（领过变灰字也在）
-        if self.maa.ocr("领取奖励", roi_4to4(750, 550, 1100, 670)):
+        if self.device.ocr("领取奖励", roi_4to4(750, 550, 1100, 670)):
             return "签到页"
         # 公告/登录礼物弹窗：右上 X 或「今日不再弹出」
         for tpl in ("今日不再弹出.png", "通用_关闭.png"):
-            if self.maa.template_match(tpl, threshold=0.7):
+            if self.device.template_match(tpl, threshold=0.7):
                 return "公告/弹窗"
         return None
 
@@ -695,12 +695,12 @@ class DailyMixin:
         claimed_signin = False  # 启动签到奖励每轮扫地最多领一次（领完按钮变灰，字还在，别空点死循环）
         settle_seen = []      # 本轮已记账远征结算屏的像素指纹（同一屏只记一次）
         for _ in range(max_rounds):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             acted = False
             for tpl in ("今日不再弹出.png", "通用_关闭.png"):
-                pt = self.maa.template_match(tpl, threshold=0.7)
+                pt = self.device.template_match(tpl, threshold=0.7)
                 if pt:
-                    self.maa.click(pt)
+                    self.device.click(pt)
                     time.sleep(1.5)
                     acted = True
                     break
@@ -713,10 +713,10 @@ class DailyMixin:
             # （断网自愈流程里的【是】是另一码事：那是脚本自己刚断的线。）
             if self._network_resume_visible():
                 print("[扫地] 检测到续打弹窗（上次出阵中断），点【否】清掉回本丸")
-                no_pt = self.maa.ocr("否", roi_4to4(680, 420, 930, 510),
+                no_pt = self.device.ocr("否", roi_4to4(680, 420, 930, 510),
                                      match_mode="exact")
                 if no_pt:
-                    self.maa.click(no_pt)
+                    self.device.click(no_pt)
                 else:
                     self._click_point((800, 467))  # 【否】1280x720 固定坐标兜底
                 time.sleep(3.0)
@@ -725,34 +725,34 @@ class DailyMixin:
             # 冷启动恰逢资源更新时，选完线路后登录页可能晚到或重新出现。
             # login() 只负责配置里的那一次点击；扫地阶段再看见登录按钮就补点，
             # 直到真正通过本丸目录探针，不能把“点过登录”当成“已经登录”。
-            login_pt = self.maa.template_match("登录.png", threshold=0.7)
+            login_pt = self.device.template_match("登录.png", threshold=0.7)
             if login_pt:
-                self.maa.click(login_pt)
+                self.device.click(login_pt)
                 clean = 0
                 time.sleep(2.0)
                 continue
             # 内番报告屏：谁+1 在这儿，先读再点穿（自然收工的横幅在本丸随机蹦）
-            if self.maa.ocr("内番报告", roi_4to4(*naihanka_report.REPORT_TITLE_ROI)):
+            if self.device.ocr("内番报告", roi_4to4(*naihanka_report.REPORT_TITLE_ROI)):
                 for msg in self._collect_report_gains():
                     print(msg)
                 # 报告已经读完才点穿，避免登录扫地每轮都停在同一张报告上。
-                self.maa.click(Point(993, 690))
+                self.device.click(Point(993, 690))
                 time.sleep(1.0)
                 continue
             # 道具详情窗（签到领奖后蹦的）：X 在 (945,105)，不是通用_关闭的样式
-            if self.maa.ocr("道具详情", roi_4to4(450, 80, 830, 140)):
+            if self.device.ocr("道具详情", roi_4to4(450, 80, 830, 140)):
                 print("[扫地] 关道具详情弹窗")
-                self.maa.click(Point(945, 105))
+                self.device.click(Point(945, 105))
                 time.sleep(1.5)
                 clean = 0
                 continue
             # 启动签到日历：领每日奖励。领完按钮变灰但字还在，所以一轮只领一次；
             # 之后日历窗的 X 交给最上面的通用_关闭/今日不再弹出分支关
             if not claimed_signin:
-                claim = self.maa.ocr("领取奖励", roi_4to4(750, 550, 1100, 670))
+                claim = self.device.ocr("领取奖励", roi_4to4(750, 550, 1100, 670))
                 if claim:
                     print("[扫地] 签到页，点领取奖励")
-                    self.maa.click(claim)
+                    self.device.click(claim)
                     claimed_signin = True
                     time.sleep(2.0)
                     clean = 0
@@ -761,10 +761,10 @@ class DailyMixin:
             # 派遣 XX 修行）。点【取消】婉拒——弹窗自己写着随时能在强化/组织
             # 界面再派，可逆；点确认才要烧三件道具送走 96 小时，不替主人决定。
             # （2026-09-11 真机取帧：取消在左 (496,614)，确认在右，别记反。）
-            if self.maa.ocr("修行启程", roi_4to4(450, 40, 830, 110)):
-                cancel = self.maa.ocr("取消", roi_4to4(400, 560, 640, 670),
+            if self.device.ocr("修行启程", roi_4to4(450, 40, 830, 110)):
+                cancel = self.device.ocr("取消", roi_4to4(400, 560, 640, 670),
                                       match_mode="exact")
-                self.maa.click(cancel if cancel else Point(496, 614))
+                self.device.click(cancel if cancel else Point(496, 614))
                 print("[扫地] 有刀剑男士申请修行，点【取消】婉拒"
                       "（想去的话到强化/组织界面手动派）")
                 time.sleep(2.0)
@@ -773,12 +773,12 @@ class DailyMixin:
             # 修行中的来信：狐之助说有信、全屏信纸、读完后的提示分别推进。
             # 狐之助对话仍露着目录按钮，必须先认字再判定本丸已安静。
             letter_roi = roi_4to4(360, 445, 800, 550)
-            if (self.maa.ocr("书信", letter_roi)
-                    or (not self.maa.exists("目录.png", threshold=0.7)
-                        and self.maa.ocr("致主人", roi_4to4(85, 85, 245, 170),
+            if (self.device.ocr("书信", letter_roi)
+                    or (not self.device.exists("目录.png", threshold=0.7)
+                        and self.device.ocr("致主人", roi_4to4(85, 85, 245, 170),
                                          match_mode="exact"))):
                 print("[扫地] 修行来信，点过当前画面")
-                self.maa.click(Point(993, 690))
+                self.device.click(Point(993, 690))
                 time.sleep(1.5)
                 clean = 0
                 continue
@@ -795,11 +795,11 @@ class DailyMixin:
                               f"{obs.get('header') or '未知地图'} 回来"
                               f"（结果{obs.get('result') or 'unknown'}），"
                               f"照实记账，点过")
-                    self.maa.click(Point(993, 690))
+                    self.device.click(Point(993, 690))
                     clean = 0
                     time.sleep(1.5)
                     continue
-            if self.maa.exists("目录.png", threshold=0.7):
+            if self.device.exists("目录.png", threshold=0.7):
                 clean += 1
                 if clean >= 2:
                     # 看着到本丸了还不算数——15:00 实测翻车教训：结算动画余波里
@@ -811,7 +811,7 @@ class DailyMixin:
             else:
                 # 没弹窗也没目录按钮：在演结算动画/对话/加载，点跳过点往前推
                 # (993,690) 是内番对话验证过的跳过点，结算动画也是点哪都前进
-                self.maa.click(Point(993, 690))
+                self.device.click(Point(993, 690))
                 clean = 0
             time.sleep(2.0)
         return False
@@ -821,14 +821,14 @@ class DailyMixin:
         落地探针：本丸看着到了，再验一刀——目录能不能真打开。
         能打开就顺手点"本丸"回本体（也是后续步骤的安全出发位），返回 True。
         """
-        pt = self.maa.template_match("目录.png", threshold=0.7)
+        pt = self.device.template_match("目录.png", threshold=0.7)
         if not pt:
             return False
-        self.maa.click(pt)
+        self.device.click(pt)
         for _ in range(4):
             time.sleep(0.7)
-            self.maa.screenshot(force=True)
-            if self.maa.exists("menu/ui目录.png"):
+            self.device.screenshot(force=True)
+            if self.device.exists("menu/ui目录.png"):
                 self.current_location = "通用入口"
                 return self.navigate_to("本丸")
         return False

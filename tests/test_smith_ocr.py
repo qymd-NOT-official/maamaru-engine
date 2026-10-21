@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from touken import sword_db
 from touken.flows.smith import SmithMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class _FakeMaa:
@@ -21,12 +21,12 @@ class SmithOcrTests(unittest.TestCase):
     def test_scan_whitelist_reads_the_dedicated_name_strip(self):
         sword_id, _ = sword_db.find_by_name("笑面青江")
         flow = SmithMixin()
-        flow.maa = _FakeMaa()
+        flow.device = _FakeMaa()
 
         result = flow._scan_whitelist_row({sword_id})
 
         self.assertEqual(result, ("笑面青江", 195))
-        self.assertEqual(flow.maa.rois[0], [120, 215, 240, 30])
+        self.assertEqual(flow.device.rois[0], [120, 215, 240, 30])
 
 
 class _RevealFakeMaa:
@@ -71,7 +71,7 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
 
     def test_collect_slot_without_log_hit_still_collects(self):
         flow = SmithMixin()
-        flow.maa = _RevealFakeMaa([])  # 获得画面干净
+        flow.device = _RevealFakeMaa([])  # 获得画面干净
 
         with patch("touken.flows.smith.time.sleep"):
             collected, sword = flow._collect_slot(205)
@@ -84,7 +84,7 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         （响应直接带 sword_id，2026-10-21 真机核实）。"""
         import time as _time
         flow = SmithMixin()
-        flow.maa = _RevealFakeMaa([])  # 获得画面没字
+        flow.device = _RevealFakeMaa([])  # 获得画面没字
         flow._forge_events = lambda: [
             {"endpoint": "/forge/complete", "direction": "C->S", "status": 200,
              "payload": {"slot_no": "1"}, "ts": "2026-10-21 12:00:00"},
@@ -118,9 +118,9 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
             def ocr_all(self, roi):
                 return self.tokens
 
-        flow.maa = _TimerMaa([("01:27:30", Point(500, 300))])
+        flow.device = _TimerMaa([("01:27:30", Point(500, 300))])
         self.assertEqual(flow._read_countdown(205), ("1:27:30", 5250))
-        flow.maa = _TimerMaa([("空闲中", Point(500, 300))])
+        flow.device = _TimerMaa([("空闲中", Point(500, 300))])
         self.assertIsNone(flow._read_countdown(205))
         self.assertIsNone(flow._watch_hit(("1:27:30", 5250), set()))
 
@@ -138,13 +138,13 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
             def ocr_all(self, roi):
                 return self.tokens
 
-        flow.maa = _TimerMaa([("02", Point(0, 0)), ("剩余时间", Point(0, 0)),
+        flow.device = _TimerMaa([("02", Point(0, 0)), ("剩余时间", Point(0, 0)),
                               ("59", Point(0, 0)), ("53", Point(0, 0))])
         self.assertEqual(flow._read_countdown(205), ("2:59:53", 10793))
         # 位数不够（读丢了）或分秒超界（不是倒计时）都不算数
-        flow.maa = _TimerMaa([("完成", Point(0, 0)), ("00", Point(0, 0))])
+        flow.device = _TimerMaa([("完成", Point(0, 0)), ("00", Point(0, 0))])
         self.assertIsNone(flow._read_countdown(205))
-        flow.maa = _TimerMaa([("997788", Point(0, 0))])
+        flow.device = _TimerMaa([("997788", Point(0, 0))])
         self.assertIsNone(flow._read_countdown(205))
         self.assertIsNone(flow._watch_hit(("1:27:30", 5250), {5400}))  # 差 150s 超出容忍
         self.assertEqual(flow._watch_hit(("1:27:30", 5250), {5340}), "1:27:30")
@@ -156,7 +156,7 @@ class _ForgeHost(SmithMixin):
     收完 3 炉后烧光次数，点火一炉都排不上（2026-08-23 日课只收不锻的 bug）。"""
 
     def __init__(self):
-        self.maa = _RevealFakeMaa([])
+        self.device = _RevealFakeMaa([])
         self.current_location = None
         self.completed = [205, 345, 475]  # 待收炉队列（cy）
         self.collect_calls = {}           # cy → 已尝试收的次数
@@ -273,23 +273,23 @@ class _LimitedForgeMaa:
 class StartForgeLimitedCampaignTests(unittest.TestCase):
     def test_popup_is_confirmed_with_yes(self):
         flow = SmithMixin()
-        flow.maa = _LimitedForgeMaa(popup=True)
+        flow.device = _LimitedForgeMaa(popup=True)
 
         with patch("touken.flows.smith.time.sleep"):
             ok = flow._start_forge(205)
 
         self.assertTrue(ok)
-        self.assertEqual(flow.maa.clicked, [(850, 205), (1146, 608), (660, 380)])
+        self.assertEqual(flow.device.clicked, [(850, 205), (1146, 608), (660, 380)])
 
     def test_no_popup_unchanged(self):
         flow = SmithMixin()
-        flow.maa = _LimitedForgeMaa(popup=False)
+        flow.device = _LimitedForgeMaa(popup=False)
 
         with patch("touken.flows.smith.time.sleep"):
             ok = flow._start_forge(205)
 
         self.assertTrue(ok)
-        self.assertEqual(flow.maa.clicked, [(850, 205), (1146, 608)])
+        self.assertEqual(flow.device.clicked, [(850, 205), (1146, 608)])
 
 
 class RecipeValidationTests(unittest.TestCase):
@@ -361,43 +361,43 @@ class ApplyRecipeTests(unittest.TestCase):
     def test_rows_already_matching_are_skipped(self):
         flow = SmithMixin()
         flow.config = {"forge": {}}
-        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
+        flow.device = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
         with patch("touken.flows.smith.time.sleep"):
             self.assertTrue(flow._apply_recipe([700, 700, 700, 700]))
-        self.assertEqual(flow.maa.clicked, [])  # 一致就一下都不点
+        self.assertEqual(flow.device.clicked, [])  # 一致就一下都不点
 
     def test_mismatching_rows_get_typed_in_full(self):
         flow = SmithMixin()
         flow.config = {"forge": {}}
-        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 300, "冷却材": 700, "砥石": 300})
+        flow.device = _RecipeMaa({"木炭": 700, "玉钢": 300, "冷却材": 700, "砥石": 300})
         with patch("touken.flows.smith.time.sleep"):
             self.assertTrue(flow._apply_recipe([300, 300, 300, 300]))
-        self.assertEqual(flow.maa.current["木炭"], 300)
-        self.assertEqual(flow.maa.current["冷却材"], 300)
+        self.assertEqual(flow.device.current["木炭"], 300)
+        self.assertEqual(flow.device.current["冷却材"], 300)
         # 已一致的行不重设
-        self.assertNotIn((700, 353), flow.maa.clicked)
-        self.assertNotIn((700, 577), flow.maa.clicked)
+        self.assertNotIn((700, 353), flow.device.clicked)
+        self.assertNotIn((700, 577), flow.device.clicked)
 
     def test_dialog_not_opening_aborts_safely(self):
         flow = SmithMixin()
         flow.config = {"forge": {}}
-        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700},
+        flow.device = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700},
                               broken_row="木炭")
         with patch("touken.flows.smith.time.sleep"):
             self.assertFalse(flow._apply_recipe([300, 300, 300, 300]))
         # 键盘没开就一个数字键都不许敲
         keypad = set(SmithMixin._KEYPAD.values())
-        self.assertFalse(any(c in keypad for c in flow.maa.clicked))
+        self.assertFalse(any(c in keypad for c in flow.device.clicked))
 
     def test_unreadable_row_is_reset_not_guessed(self):
         flow = SmithMixin()
         flow.config = {"forge": {}}
-        flow.maa = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
-        flow.maa.ocr_all = lambda roi: []  # 全读不出
+        flow.device = _RecipeMaa({"木炭": 700, "玉钢": 700, "冷却材": 700, "砥石": 700})
+        flow.device.ocr_all = lambda roi: []  # 全读不出
         with patch("touken.flows.smith.time.sleep"):
             self.assertTrue(flow._apply_recipe([700, 700, 700, 700]))
         # 读不出就当不一致，重设一遍（幂等无害）
-        self.assertIn((700, 221), flow.maa.clicked)
+        self.assertIn((700, 221), flow.device.clicked)
 
 
 class PanelRecipeFieldTests(unittest.TestCase):
@@ -518,8 +518,8 @@ class _TenrenMaa:
 
 
 class _TenrenHost(SmithMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.current_location = None
         self.config = {}
         self.events = []
@@ -539,7 +539,7 @@ class _TenrenHost(SmithMixin):
 
     def dismantle_stream(self, max_dismantle=1, _from_forge=False, whitelist=None):
         self.dismantled += max_dismantle
-        self.maa.cap -= max_dismantle
+        self.device.cap -= max_dismantle
         yield f"分解完成 {max_dismantle} 把"
 
     def _capture_inventory(self, phase=""):
@@ -547,7 +547,7 @@ class _TenrenHost(SmithMixin):
         yield
 
     def _shugo_loop_stream(self, dry_run):
-        self.maa.cap -= 10
+        self.device.cap -= 10
         yield "炼糖完成"
         return 1
 
@@ -559,18 +559,18 @@ _BOARD2 = ["歌仙兼定", "蜂须贺虎彻", "千子村正", "鹤丸国永", "�
 
 
 class LimitedForgeTests(unittest.TestCase):
-    def _run(self, maa, **kw):
-        host = _TenrenHost(maa)
+    def _run(self, device, **kw):
+        host = _TenrenHost(device)
         with patch("touken.flows.smith.time.sleep"):
             messages = list(host.limited_forge_stream(**kw))
         return host, messages
 
     def test_two_batches_costs_and_names(self):
-        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
-        host, messages = self._run(maa, total=20)
-        self.assertEqual(maa.fired, 2)
-        self.assertTrue(maa.speedup)                       # 加速符勾上了
-        self.assertEqual(maa.screen, "status")             # 收工回到状况页
+        device = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(device, total=20)
+        self.assertEqual(device.fired, 2)
+        self.assertTrue(device.speedup)                       # 加速符勾上了
+        self.assertEqual(device.screen, "status")             # 收工回到状况页
         # 每发：四资源各 -7000、委托符 -9、加速符 -10
         self.assertEqual(host.changes.count(("委托符", -9)), 2)
         self.assertEqual(host.changes.count(("加速符", -10)), 2)
@@ -583,28 +583,28 @@ class LimitedForgeTests(unittest.TestCase):
 
     def test_stop_on_hit(self):
         # 目标小狐丸第一发就中，总共要 5 发也立刻收手
-        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
-        host, messages = self._run(maa, total=50, watch_names=["小狐丸"])
-        self.assertEqual(maa.fired, 1)
+        device = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(device, total=50, watch_names=["小狐丸"])
+        self.assertEqual(device.fired, 1)
         self.assertTrue(any("喜报" in m and "小狐丸" in m for m in messages))
         self.assertTrue(any("收手" in m for m in messages))
 
     def test_watch_no_hit_runs_all(self):
-        maa = _TenrenMaa(boards=[_BOARD1, _BOARD2])
-        host, messages = self._run(maa, total=20, watch_names=["三日月宗近"])
-        self.assertEqual(maa.fired, 2)
+        device = _TenrenMaa(boards=[_BOARD1, _BOARD2])
+        host, messages = self._run(device, total=20, watch_names=["三日月宗近"])
+        self.assertEqual(device.fired, 2)
         self.assertFalse(any("喜报" in m for m in messages))
 
     def test_preflight_insufficient_tokens(self):
-        maa = _TenrenMaa(tokens=(5, 3))
-        host, messages = self._run(maa, total=50)
-        self.assertEqual(maa.fired, 0)
-        self.assertEqual(maa.clicks, [])                   # 一发没点，白嫖动画都没看
+        device = _TenrenMaa(tokens=(5, 3))
+        host, messages = self._run(device, total=50)
+        self.assertEqual(device.fired, 0)
+        self.assertEqual(device.clicks, [])                   # 一发没点，白嫖动画都没看
         self.assertTrue(any("库存不够" in m for m in messages))
 
     def test_unreadable_capacity_never_fires(self):
-        maa = _TenrenMaa(boards=[_BOARD1])
-        original = maa.ocr_all
+        device = _TenrenMaa(boards=[_BOARD1])
+        original = device.ocr_all
 
         def unread_capacity(roi):
             x1, y1, _x2, _y2 = roi.to_list()
@@ -612,71 +612,71 @@ class LimitedForgeTests(unittest.TestCase):
                 return []
             return original(roi)
 
-        maa.ocr_all = unread_capacity
-        _host, messages = self._run(maa, total=10)
-        self.assertEqual(maa.fired, 0)
+        device.ocr_all = unread_capacity
+        _host, messages = self._run(device, total=10)
+        self.assertEqual(device.fired, 0)
         self.assertTrue(any("刀位数量读不出来" in m for m in messages))
 
     def test_capacity_short_defaults_to_stop(self):
-        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
-        host, messages = self._run(maa, total=10)
+        device = _TenrenMaa(cap=196, boards=[_BOARD1])
+        host, messages = self._run(device, total=10)
         self.assertEqual(host.dismantled, 0)
-        self.assertEqual(maa.fired, 0)
+        self.assertEqual(device.fired, 0)
         self.assertTrue(any("不自动处理刀剑" in m for m in messages))
 
     def test_full_slots_dismantle_rescue(self):
-        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
+        device = _TenrenMaa(cap=196, boards=[_BOARD1])
         host, messages = self._run(
-            maa, total=10, capacity_action="dismantle")
+            device, total=10, capacity_action="dismantle")
         self.assertEqual(host.dismantled, 6)               # 只腾本发缺的 6 格
-        self.assertEqual(maa.fired, 1)
+        self.assertEqual(device.fired, 1)
         self.assertTrue(any("刀位只剩" in m for m in messages))
 
     def test_missed_fire_tap_is_not_retried(self):
-        maa = _TenrenMaa(boards=[_BOARD1], swallow_first_fire=True)
-        host, messages = self._run(maa, total=10)
-        self.assertEqual(maa.fired, 0)
+        device = _TenrenMaa(boards=[_BOARD1], swallow_first_fire=True)
+        host, messages = self._run(device, total=10)
+        self.assertEqual(device.fired, 0)
         self.assertEqual(
-            sum(1 for point in maa.clicks if point == SmithMixin._TENREN_FIRE), 1)
+            sum(1 for point in device.clicks if point == SmithMixin._TENREN_FIRE), 1)
         self.assertTrue(any("绝不自动补点" in m for m in messages))
 
     def test_deferred_reveal_read_at_exit(self):
         # 动画攒着：批量中没揭榜，退出时补读
-        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
-        host, messages = self._run(maa, total=10)
-        self.assertEqual(maa.fired, 1)
-        self.assertEqual(maa.screen, "status")
+        device = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        host, messages = self._run(device, total=10)
+        self.assertEqual(device.fired, 1)
+        self.assertEqual(device.screen, "status")
         self.assertTrue(any("补读揭榜" in m and "小狐丸" in m for m in messages))
 
     def test_deferred_reveal_with_lost_capacity_never_double_fires(self):
-        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
-        original = maa.ocr_all
+        device = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        original = device.ocr_all
 
         def lose_capacity_after_fire(roi):
             x1, y1, _x2, _y2 = roi.to_list()
-            if maa.fired and 960 <= x1 <= 1100 and y1 <= 90:
+            if device.fired and 960 <= x1 <= 1100 and y1 <= 90:
                 return []
             return original(roi)
 
-        maa.ocr_all = lose_capacity_after_fire
-        _host, messages = self._run(maa, total=10)
-        self.assertEqual(maa.fired, 1)
+        device.ocr_all = lose_capacity_after_fire
+        _host, messages = self._run(device, total=10)
+        self.assertEqual(device.fired, 1)
         self.assertEqual(
-            sum(1 for point in maa.clicks if point == SmithMixin._TENREN_FIRE), 1)
+            sum(1 for point in device.clicks if point == SmithMixin._TENREN_FIRE), 1)
         self.assertTrue(any("不会重复点火" in m for m in messages))
 
     def test_sugar_capacity_action_rechecks_then_fires(self):
-        maa = _TenrenMaa(cap=196, boards=[_BOARD1])
+        device = _TenrenMaa(cap=196, boards=[_BOARD1])
         _host, messages = self._run(
-            maa, total=10, capacity_action="sugar")
-        self.assertEqual(maa.fired, 1)
+            device, total=10, capacity_action="sugar")
+        self.assertEqual(device.fired, 1)
         self.assertTrue(any("习合完成 1 轮" in m for m in messages))
 
     def test_deferred_hit_still_celebrated_at_exit(self):
         # 攒着播的榜里中了目标：本发退出揭榜后立刻收手，不得烧下一发
-        maa = _TenrenMaa(boards=[_BOARD1], deferred=True)
-        host, messages = self._run(maa, total=50, watch_names=["小狐丸"])
-        self.assertEqual(maa.fired, 1)
+        device = _TenrenMaa(boards=[_BOARD1], deferred=True)
+        host, messages = self._run(device, total=50, watch_names=["小狐丸"])
+        self.assertEqual(device.fired, 1)
         self.assertTrue(any("喜报" in m and "小狐丸" in m for m in messages))
         self.assertTrue(any("按设定收手" in m for m in messages))
         self.assertTrue(any("目标命中" in m for m in messages))

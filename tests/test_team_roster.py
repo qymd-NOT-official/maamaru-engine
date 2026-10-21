@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """编队页只读点名（team_roster）的单元测试。
 
-假 MAA 是**点击驱动的页面状态机**：只有 click(部队标签) 才会切页，
+假设备 是**点击驱动的页面状态机**：只有 click(部队标签) 才会切页，
 页面内容（含位置标签）只取决于当前页——切队确认逻辑读错队会直接暴露，
 不存在"按截图次数自动翻页"的假宿主。可模拟点击被吞（swallow）和
 慢一拍才切成功（delayed）两类真实故障。
@@ -61,7 +61,7 @@ class _Page:
 
 
 class _RosterMaa:
-    """点击驱动的编队页状态机假 MAA。
+    """点击驱动的编队页状态机假设备。
 
     页面只由 click(部队标签) 切换：
       - swallow 集合里的队号模拟"点击被吞"，永远停在当前页；
@@ -157,8 +157,8 @@ class _RosterMaa:
         return 0.0
 
 class _RosterHost(TeamRosterMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         # 与 touken_config.example.json/sortie 相同的真实形状：中文键
         self.config = {"sortie": {"injury_stamps": {
             "重伤": {"template": "battle/ui重伤.png", "threshold": 0.88},
@@ -232,7 +232,7 @@ def _labels_for(team_no):
             for slot, cy in enumerate(_ROW_CY, start=1)}
 
 
-def _make_maa(pages_spec, current=1, swallow=(), delayed=(), cards=None,
+def _make_device(pages_spec, current=1, swallow=(), delayed=(), cards=None,
               badge_scale=1.0):
     """pages_spec: {team_no: (rows, badges, sakura, stamp_scores)}。
 
@@ -248,10 +248,10 @@ def _make_maa(pages_spec, current=1, swallow=(), delayed=(), cards=None,
         pages[team_no] = _Page(frame, rows=rows,
                                labels=_labels_for(team_no), sakura=sakura,
                                stamp_scores=stamp_scores)
-    maa = _RosterMaa(pages, current=current)
-    maa.swallow = set(swallow)
-    maa.delayed = set(delayed)
-    return maa
+    device = _RosterMaa(pages, current=current)
+    device.swallow = set(swallow)
+    device.delayed = set(delayed)
+    return device
 
 
 def _read(cy=160, name=None, level=None, fatigue=None, survival=None,
@@ -270,11 +270,11 @@ def _read(cy=160, name=None, level=None, fatigue=None, survival=None,
         fields["name"] = name
     scores = {cy: stamp_scores} if stamp_scores else {}
     cards = {cy: card} if card != "occupied" else None
-    maa = _make_maa({1: ({cy: fields},
+    device = _make_device({1: ({cy: fields},
                          {cy: badge_template} if badge_template else None,
                          {cy} if sakura else set(), scores)},
                     cards=cards, badge_scale=badge_scale)
-    host = _RosterHost(maa)
+    host = _RosterHost(device)
     return host._read_roster_slot(_ROW_CY.index(cy) + 1, cy,
                                   host._roster_injury_stamps())
 
@@ -309,7 +309,7 @@ class TabConfirmTests(unittest.TestCase):
                  3: self._spec(3, "物吉貞宗", "脇"),
                  4: self._spec(4, "莺丸", "太"),
                  5: self._spec(5, "小豆长光", "太")}
-        host = _RosterHost(_make_maa(pages))
+        host = _RosterHost(_make_device(pages))
         list(host.team_roster_stream(teams=[1, 2, 3, 4, 5]))
         self.assertEqual(len(host.events), 5)
         for event, team in zip(host.events, (1, 2, 3, 4, 5)):
@@ -322,7 +322,7 @@ class TabConfirmTests(unittest.TestCase):
         # 点部队四被吞，页面停在一队：必须 failed、slots=[]，绝不读一队冒充四队
         pages = {1: self._spec(1, "へし切長谷部", "打"),
                  4: self._spec(4, "莺丸", "太")}
-        host = _RosterHost(_make_maa(pages, swallow={4}))
+        host = _RosterHost(_make_device(pages, swallow={4}))
         list(host.team_roster_stream(teams=[4]))
         self.assertEqual(len(host.events), 1)
         payload = host.events[0]["payload"]
@@ -335,7 +335,7 @@ class TabConfirmTests(unittest.TestCase):
         # 慢一拍才切成功：第一次标签核对失败，重试后确认，正常落账
         pages = {1: self._spec(1, "へし切長谷部", "打"),
                  4: self._spec(4, "莺丸", "太")}
-        host = _RosterHost(_make_maa(pages, delayed={4}))
+        host = _RosterHost(_make_device(pages, delayed={4}))
         list(host.team_roster_stream(teams=[4]))
         self.assertEqual(len(host.events), 1)
         payload = host.events[0]["payload"]
@@ -346,7 +346,7 @@ class TabConfirmTests(unittest.TestCase):
         # 连跑两队、第二队点击被吞：第一队数据不得被记到第二队名下
         pages = {1: self._spec(1, "へし切長谷部", "打"),
                  2: self._spec(2, "小夜左文字", "短")}
-        host = _RosterHost(_make_maa(pages, swallow={2}))
+        host = _RosterHost(_make_device(pages, swallow={2}))
         list(host.team_roster_stream(teams=[1, 2]))
         self.assertEqual(len(host.events), 2)
         self.assertEqual(host.events[0]["payload"]["team_no"], 1)
@@ -369,7 +369,7 @@ class TeamRosterFlowTests(unittest.TestCase):
                        "fatigue": "66/100", "survival": "38/42",
                        "badge_char": "太"}}, None, set(), {}),
         }
-        host = _RosterHost(_make_maa(spec, swallow=swallow))
+        host = _RosterHost(_make_device(spec, swallow=swallow))
         list(host.team_roster_stream(teams=[1, 2]))
         return host
 
@@ -409,11 +409,11 @@ class TeamRosterFlowTests(unittest.TestCase):
     def test_only_tab_clicks(self):
         # 只读约束：全程点击只落在部队标签坐标
         host = self._run_two_team_flow()
-        self.assertTrue(set(host.maa.clicks) <= set(_TEAM_TAB.values()))
+        self.assertTrue(set(host.device.clicks) <= set(_TEAM_TAB.values()))
 
     def test_nav_failure_records_failed_event(self):
-        maa = _make_maa({1: ({}, None, set(), {})})
-        host = _RosterHost(maa)
+        device = _make_device({1: ({}, None, set(), {})})
+        host = _RosterHost(device)
         host.current_location = "本丸"  # 导航失败：到达地不是编队
 
         def broken_nav(dest):
@@ -800,8 +800,8 @@ def _party_events(now, *, team_no=1, serial="111", sword_id=118, level="99",
 class _FactsHost(_RosterHost):
     """注入固定 JSON 事件流的点名宿主（覆写事件源注入缝）。"""
 
-    def __init__(self, maa, events):
-        super().__init__(maa)
+    def __init__(self, device, events):
+        super().__init__(device)
         self._facts_events = events
 
     def _roster_game_events(self):
@@ -811,8 +811,8 @@ class _FactsHost(_RosterHost):
 def _facts_host(now, *, events=None, rows=None, pages_team=1):
     """JSON 事件（默认一份新鲜全量快照）+ 指定页面剧本的点名宿主。"""
     pages = {pages_team: (rows or {}, None, set(), {})}
-    maa = _make_maa(pages, current=pages_team)
-    return _FactsHost(maa,
+    device = _make_device(pages, current=pages_team)
+    return _FactsHost(device,
                       _party_events(now) if events is None else events)
 
 
@@ -995,7 +995,7 @@ class GameFactsFirstTests(unittest.TestCase):
                       "fatigue": "40/100", "survival": "23/79",
                       "badge_char": "打"}}
         pages = {1: (rows, None, set(), {160: {"中伤": 0.89}})}
-        host = _FactsHost(_make_maa(pages), events)
+        host = _FactsHost(_make_device(pages), events)
         slot = host._read_team_page()[0]
         self.assertEqual(slot["injury"], "medium")
         self.assertEqual((slot["survival"], slot["survival_max"]), (23, 79))
@@ -1053,8 +1053,8 @@ class RealFrameCalibrationTests(unittest.TestCase):
 
     def _host(self, team):
         page = _Page(self.frames[team])
-        maa = _RosterMaa({team: page}, current=team)
-        return _RosterHost(maa)
+        device = _RosterMaa({team: page}, current=team)
+        return _RosterHost(device)
 
     def test_blank_classification_matches_real_occupancy(self):
         host = self._host(1)

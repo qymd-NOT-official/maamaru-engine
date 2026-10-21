@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from touken.flows.daily import DailyMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 def _gen_result(gen):
@@ -83,7 +83,7 @@ class _SweepMaa:
 
 class _SweepFlow(DailyMixin):
     def __init__(self, stage):
-        self.maa = _SweepMaa(stage)
+        self.device = _SweepMaa(stage)
 
     # 生产上由 LoginMixin / Naihanka 提供；扫地测试默认没有续打弹窗
     def _network_resume_visible(self):
@@ -93,7 +93,7 @@ class _SweepFlow(DailyMixin):
         return []
 
     def _probe_nav_ready(self):
-        return self.maa.stage == "home"
+        return self.device.stage == "home"
 
 
 class EnsureGameStartedTests(unittest.TestCase):
@@ -114,7 +114,7 @@ class EnsureGameStartedTests(unittest.TestCase):
                 return None
 
         flow = _SweepFlow("nowhere")
-        flow.maa = Maa("nowhere")
+        flow.device = Maa("nowhere")
         flow._launch_game_via_adb = lambda: (_ for _ in ()).throw(
             AssertionError("游戏明明开着，不该去启动"))
 
@@ -136,7 +136,7 @@ class PopupSweepNewBranchTests(unittest.TestCase):
         with patch("touken.flows.daily.time.sleep"):
             self.assertTrue(flow._popup_sweep(max_rounds=8, verify_navigation=False))
         flow._probe_nav_ready.assert_not_called()
-        self.assertEqual(flow.maa.clicks, [(993, 690)] * 4)
+        self.assertEqual(flow.device.clicks, [(993, 690)] * 4)
 
     def test_login_still_checks_navigation_by_default(self):
         flow = _SweepFlow("home")
@@ -150,7 +150,7 @@ class PopupSweepNewBranchTests(unittest.TestCase):
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=8)
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [(900, 600)])
+        self.assertEqual(flow.device.clicks, [(900, 600)])
 
     def test_gray_claim_button_is_not_clicked_twice(self):
         # 领完按钮变灰但字还在：一轮扫地只许领一次，剩下靠别的分支推进
@@ -160,18 +160,18 @@ class PopupSweepNewBranchTests(unittest.TestCase):
                 return True
 
         flow = _SweepFlow("signin")
-        flow.maa = Maa("signin")
+        flow.device = Maa("signin")
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=4)
         self.assertFalse(arrived)
-        self.assertEqual(flow.maa.clicks.count((900, 600)), 1)
+        self.assertEqual(flow.device.clicks.count((900, 600)), 1)
 
     def test_item_detail_popup_is_closed_by_its_own_x(self):
         flow = _SweepFlow("item_detail")
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=6)
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [(945, 105)])
+        self.assertEqual(flow.device.clicks, [(945, 105)])
 
     def test_training_request_popup_is_declined_with_cancel(self):
         # 「修行启程」确认窗：取消在左、确认在右（2026-09-11 真机取帧）。
@@ -180,14 +180,14 @@ class PopupSweepNewBranchTests(unittest.TestCase):
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=6)
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [(496, 614)])
+        self.assertEqual(flow.device.clicks, [(496, 614)])
 
     def test_training_letter_is_advanced_before_home_probe(self):
         flow = _SweepFlow("training_letter_notice")
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=8)
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [(993, 690)] * 4)
+        self.assertEqual(flow.device.clicks, [(993, 690)] * 4)
 
 
 if __name__ == "__main__":

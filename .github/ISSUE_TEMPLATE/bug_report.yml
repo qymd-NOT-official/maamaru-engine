@@ -86,7 +86,7 @@ body:
         常见位置 / Common locations:
         - debug/
         - logs/
-        - MaaFW or GUI exported log archive
+        - 截图/日志目录（程序内「反馈错误」可一键导出）
     validations:
       required: true
 

@@ -19,7 +19,7 @@ def drain(stream):
 
 
 def host(repaired=0, speedups=0):
-    agent = SimpleNamespace(maa=SimpleNamespace(), repairs=[],
+    agent = SimpleNamespace(device=SimpleNamespace(), repairs=[],
         _injury_reaches_threshold=BattleMixin._injury_reaches_threshold)
 
     def repair(**kwargs):

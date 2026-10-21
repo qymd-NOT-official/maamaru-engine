@@ -5,15 +5,15 @@ import pytest
 from touken import game_state
 from touken.flow_control import FlowAborted
 from touken.flows.sugar import SugarMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class InboxFlow(SugarMixin):
     def __init__(self):
         self.current_location = "收件箱"
-        self.maa = Mock()
-        self.maa.template_match.return_value = Point(1170, 622)
-        self.maa.ocr.return_value = False
+        self.device = Mock()
+        self.device.template_match.return_value = Point(1170, 622)
+        self.device.ocr.return_value = False
         self._apply_inbox_filter = Mock()
 
     def navigate_to_stream(self, target):
@@ -35,7 +35,7 @@ def setup(monkeypatch):
     monkeypatch.setattr(game_state, "begin_operation", lambda _: {})
 
     def configure(entries, *, selected="2", claimed=None):
-        def confirm(maa, boundary, operation, **kwargs):
+        def confirm(device, boundary, operation, **kwargs):
             if operation == "inbox_list":
                 boundary.update(result_filter=selected, result_body={"receive": entries, "receive_total": 46})
                 return True
@@ -51,8 +51,8 @@ def test_filtered_empty_does_not_click_false_positive_claim_button(setup, entrie
     flow = setup(entries)
     result, _ = collect(flow._inbox_claim_stream(False))
     assert result == "empty"
-    flow.maa.template_match.assert_not_called()
-    assert [call.args[0] for call in flow.maa.click.call_args_list] == [Point(1248, 32)]
+    flow.device.template_match.assert_not_called()
+    assert [call.args[0] for call in flow.device.click.call_args_list] == [Point(1248, 32)]
 
 
 def test_empty_mailbox_and_no_fodder_finish_after_one_cycle(setup):
@@ -70,12 +70,12 @@ def test_click_without_receipt_is_not_claimed_and_not_repeated(setup):
     flow = setup({"mail": {"item_type": "2"}})
     with pytest.raises(FlowAborted, match="未确认领到邮件"):
         list(flow._inbox_claim_stream(False))
-    assert flow.maa.click.call_count == 1
+    assert flow.device.click.call_count == 1
 
 
 def test_nonempty_mail_with_no_claim_button_is_blocked_not_empty(setup):
     flow = setup({"mail": {"item_type": "2"}})
-    flow.maa.template_match.return_value = None
+    flow.device.template_match.return_value = None
     assert collect(flow._inbox_claim_stream(False))[0] == "blocked"
 
 
@@ -83,13 +83,13 @@ def test_receipt_or_reward_window_confirms_claim(setup):
     flow = setup({"mail": {}}, claimed=True)
     assert collect(flow._inbox_claim_stream(False))[0] == "claimed"
     flow = setup({"mail": {}})
-    flow.maa.ocr.side_effect = lambda text, *args: text == "奖励确认"
+    flow.device.ocr.side_effect = lambda text, *args: text == "奖励确认"
     assert collect(flow._inbox_claim_stream(False))[0] == "claimed"
 
 
 def test_wrong_filter_cannot_prove_sword_mailbox_empty(setup):
     flow = setup([], selected="4")
-    flow.maa.template_match.return_value = None
+    flow.device.template_match.return_value = None
     with pytest.raises(FlowAborted, match="未确认邮件为空"):
         list(flow._inbox_claim_stream(False))
 

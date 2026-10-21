@@ -105,7 +105,7 @@ def test_floor_maintenance_returns_home_and_finishes_only_remaining_floors(selec
     assert calls[1]["team_record_saved"]
     assert flow._osaka_floors_total == 2
     assert flow._return_home_from_march.call_count == 2
-    assert flow.maa.clicks == 0
+    assert flow.device.clicks == 0
     assert any("继续剩余 1 层" in message for message in logs)
     assert [e["payload"]["completed"] for e in flow.events if e["event_type"] == "osaka.floor_completed"] == [1, 2]
     assert flow._select_osaka_floor.call_count == (2 if select_floor else 0)

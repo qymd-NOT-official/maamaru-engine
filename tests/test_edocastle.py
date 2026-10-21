@@ -169,7 +169,7 @@ class _MapRunHost(EdocastleMixin):
     def __init__(self, step_reads):
         import tempfile
         from types import SimpleNamespace
-        self.maa = SimpleNamespace(
+        self.device = SimpleNamespace(
             screenshot=lambda force=False: None,
             ocr=lambda expected, roi=None: None,
             ocr_all=lambda roi, image=None: [],
@@ -254,7 +254,7 @@ class _BattleGateMaa:
 
 class _BattleGateHost(EdocastleMixin, BattleMixin):
     def __init__(self, frames):
-        self.maa = _BattleGateMaa(frames)
+        self.device = _BattleGateMaa(frames)
         self.clicked = []
         self.config = {}
 
@@ -418,7 +418,7 @@ class EdocastleNodeOutcomeTests(unittest.TestCase):
 
 
 class _OutcomeMapRunHost(_MapRunHost):
-    """节点结果按剧本给：None=啥也没发生，配合 maa.ocr 走点空重试/停手。"""
+    """节点结果按剧本给：None=啥也没发生，配合 device.ocr 走点空重试/停手。"""
 
     def __init__(self, step_reads, outcomes):
         super().__init__(step_reads)
@@ -440,7 +440,7 @@ class EdocastleMistapRecoveryTests(unittest.TestCase):
             [6, 5, 4, 2, 1, None],
             [None, "map", "map", "map", "map", "map"],
         )
-        flow.maa.ocr = lambda expected, roi=None: expected  # 地图活着
+        flow.device.ocr = lambda expected, roi=None: expected  # 地图活着
         msgs, result = _run_map(flow, MAP_CFG)
         self.assertEqual(result, (0, True))
         self.assertTrue(any("点空" in m for m in msgs))
@@ -451,7 +451,7 @@ class EdocastleMistapRecoveryTests(unittest.TestCase):
     def test_unknown_outcome_stops_without_blind_retreat(self):
         """既没开打也没回地图：停手留证返回失败，不点任何撤退坐标。"""
         flow = _OutcomeMapRunHost([6], [None])
-        # maa.ocr 默认返回 None：地图也认不出
+        # device.ocr 默认返回 None：地图也认不出
         msgs, result = _run_map(flow, MAP_CFG)
         self.assertEqual(result, (0, False))
         self.assertTrue(any("停手留证" in m for m in msgs))

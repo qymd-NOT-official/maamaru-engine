@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 from touken import vision_cv2
-from touken.maa_adapter import MAAAdapter, Point, Region
+from touken.device_adapter import DeviceAdapter, Point, Region
 
 
 def make_frame_and_template(tmp_path, box=(100, 60, 40, 30)):
@@ -57,21 +57,19 @@ def test_missing_template_raises(tmp_path):
         vision_cv2.match(frame, tmp_path / '不存在.png')
 
 
-# ---- adapter 路由 ----
+# ---- adapter 模板匹配通道 ----
 
-def make_adapter(tmp_path, monkeypatch, engine):
-    monkeypatch.setenv('MAAMARU_TEMPLATE_ENGINE', engine)
-    adapter = MAAAdapter(adb_path='x', adb_address='x',
+def _make_adapter(tmp_path):
+    return DeviceAdapter(adb_path='x', adb_address='x',
                          resource_dir=str(tmp_path))
-    return adapter
 
 
-def test_adapter_cv2_engine(tmp_path, monkeypatch):
+def test_adapter_template_match(tmp_path, monkeypatch):
     (tmp_path / 'image').mkdir()
     frame, tpl, (cx, cy) = make_frame_and_template(tmp_path / 'image')
     (tmp_path / 'image' / 'tpl.png').write_bytes(tpl.read_bytes())
     vision_cv2._cache.clear()
-    adapter = make_adapter(tmp_path, monkeypatch, 'cv2')
+    adapter = _make_adapter(tmp_path)
     monkeypatch.setattr(adapter, 'screenshot', lambda: frame)
     point = adapter.template_match('tpl.png')
     assert isinstance(point, Point)
@@ -80,46 +78,16 @@ def test_adapter_cv2_engine(tmp_path, monkeypatch):
     assert adapter.exists('tpl.png')
 
 
-def test_adapter_default_engine_is_cv2(tmp_path, monkeypatch):
-    monkeypatch.delenv('MAAMARU_TEMPLATE_ENGINE', raising=False)
-    (tmp_path / 'image').mkdir()
-    frame, tpl, (cx, cy) = make_frame_and_template(tmp_path / 'image')
-    (tmp_path / 'image' / 'tpl.png').write_bytes(tpl.read_bytes())
-    vision_cv2._cache.clear()
-    adapter = MAAAdapter(adb_path='x', adb_address='x',
-                         resource_dir=str(tmp_path))
-    monkeypatch.setattr(adapter, 'screenshot', lambda: frame)
-    called = []
-    monkeypatch.setattr(adapter, '_template_match_maa',
-                        lambda *a, **k: called.append(1) or Point(1, 2))
-    point = adapter.template_match('tpl.png')
-    assert abs(point.x - cx) <= 1 and abs(point.y - cy) <= 1
-    assert not called  # 默认走自研 cv2，不碰 MAA
-
-
-def test_adapter_maa_engine_remains_available_as_fallback(tmp_path, monkeypatch):
-    adapter = make_adapter(tmp_path, monkeypatch, 'maa')
-    called = []
-    monkeypatch.setattr(adapter, '_template_match_maa',
-                        lambda *a, **k: called.append(1) or Point(1, 2))
-    assert adapter.template_match('任意.png') == Point(1, 2)
-    assert called  # 显式设 maa 仍走旧引擎（回退口）
-
-
-def test_adapter_ab_mode_returns_maa_result(tmp_path, monkeypatch, capsys):
+def test_adapter_template_miss_returns_none(tmp_path, monkeypatch):
     (tmp_path / 'image').mkdir()
     frame, tpl, _ = make_frame_and_template(tmp_path / 'image')
     (tmp_path / 'image' / 'tpl.png').write_bytes(tpl.read_bytes())
     vision_cv2._cache.clear()
-    adapter = make_adapter(tmp_path, monkeypatch, 'ab')
-    monkeypatch.setattr(adapter, 'screenshot', lambda: frame)
-    monkeypatch.setattr(adapter, '_template_match_maa_detail',
-                        lambda *a, **k: (Point(9, 9), 0.91))
-    point = adapter.template_match('tpl.png')
-    assert point == Point(9, 9)   # AB 模式以 MAA 为准
-    out = capsys.readouterr().out
-    assert '[AB模板] tpl.png' in out
-    assert 's=' in out  # 双跑日志带两边原始分
+    adapter = _make_adapter(tmp_path)
+    other = np.zeros_like(frame)  # 纯黑帧里找不到花模板
+    monkeypatch.setattr(adapter, 'screenshot', lambda: other)
+    assert adapter.template_match('tpl.png', threshold=0.99) is None
+    assert adapter.template_match_score('tpl.png', threshold=0.99) == 0.0
 
 
 def test_best_ignores_threshold(tmp_path):

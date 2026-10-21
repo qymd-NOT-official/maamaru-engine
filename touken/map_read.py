@@ -496,7 +496,7 @@ def boss_distance_from_image(img):
     """算当前节点到 BOSS 的图距离。
 
     Args:
-        img: BGR numpy 截图（maa.screenshot() 的返回值）
+        img: BGR numpy 截图（device.screenshot() 的返回值）
 
     Returns:
         int: 距王点 N 步（1 = 下一脚就是王点）

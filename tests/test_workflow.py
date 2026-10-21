@@ -48,7 +48,7 @@ class _FakeAgent:
             yield item
 
     def __getattr__(self, name):
-        # 只兜底 *_stream 方法；其余属性（maa/config 等）不存在
+        # 只兜底 *_stream 方法；其余属性（device/config 等）不存在
         if not name.endswith("_stream"):
             raise AttributeError(name)
         def method(*args, **kwargs):
@@ -370,7 +370,7 @@ class WorkflowRunnerTests(unittest.TestCase):
 
     def test_exception_in_node_counts_as_failure(self):
         agent = _FakeAgent({
-            "signin_stream": [RuntimeError("MAA 炸了")],
+            "signin_stream": [RuntimeError("设备炸了")],
             "status_snapshot_stream": ["[快照] ✓ 拍完了"],
         })
         messages, agent, _ = self._run(
@@ -611,7 +611,7 @@ class LogoutOverrideTests(unittest.TestCase):
 
     def _flow(self, cfg_logout):
         flow = LogoutMixin()
-        flow.maa = self._Maa()
+        flow.device = self._Maa()
         flow.config = {"daily": {"logout": cfg_logout}}
         return flow
 

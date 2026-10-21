@@ -22,7 +22,7 @@ import re
 import subprocess
 import time
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from .. import sword_db
 
 _TEAM_NUMERAL = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
@@ -250,11 +250,11 @@ class RepairMixin:
     # ==================== 内部 ====================
 
     def _repair_game_facts(self):
-        if not getattr(self.maa, "adb_address", None):
+        if not getattr(self.device, "adb_address", None):
             return None
         from ..game_state import read_events, sword_facts
         try:
-            return sword_facts(read_events(self.maa.adb_path, self.maa.adb_address))
+            return sword_facts(read_events(self.device.adb_path, self.device.adb_address))
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return None
 
@@ -306,19 +306,19 @@ class RepairMixin:
 
         free = None
         for _ in range(6):
-            self.maa.screenshot(force=True)
-            free = self.maa.ocr(expected=free_ocr["expected"], roi=free_roi)
+            self.device.screenshot(force=True)
+            free = self.device.ocr(expected=free_ocr["expected"], roi=free_roi)
             if free:
                 break
             time.sleep(0.5)
         if not free:
             return False
-        self.maa.click(free)
+        self.device.click(free)
         time.sleep(1.0)
 
         for _ in range(10):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=ui_ocr["expected"], roi=ui_roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=ui_ocr["expected"], roi=ui_roi):
                 time.sleep(0.5)
                 return True
             time.sleep(0.5)
@@ -342,9 +342,9 @@ class RepairMixin:
             junk: 被过滤的文本（伤势章不再算 junk）
         """
         # 翻页后画面变了，必须强制截图，不然 OCR 读的是旧缓存图
-        self.maa.screenshot(force=True)
-        names = self.maa.ocr_all(roi_4to4(*cfg["name_col_roi"]))
-        prefixes = self.maa.ocr_all(roi_4to4(*cfg["prefix_col_roi"]))
+        self.device.screenshot(force=True)
+        names = self.device.ocr_all(roi_4to4(*cfg["name_col_roi"]))
+        prefixes = self.device.ocr_all(roi_4to4(*cfg["prefix_col_roi"]))
 
         # 编号列先过滤：只留"三之x"格式的
         valid_prefixes = [
@@ -385,13 +385,13 @@ class RepairMixin:
         x1, y1 = cfg["scroll_from"]
         x2, y2 = cfg["scroll_to"]
         # 滑动要快于 400ms 会被游戏吞掉，实测 800ms 才稳
-        self.maa.swipe(x1, y1, x2, y2, 800)
+        self.device.swipe(x1, y1, x2, y2, 800)
 
     def _repair_one(self, cfg, name_y: int, need_speed: bool):
         """点选择 → （可选）勾加速符 → 修复开始 → 确认"""
         from ..game_state import begin_operation, confirm_operation
         sx = cfg["select_btn_x"]
-        self.maa.click(Point(sx, name_y + cfg["select_offset_y"]))
+        self.device.click(Point(sx, name_y + cfg["select_offset_y"]))
         time.sleep(1.2)
 
         if need_speed:
@@ -399,37 +399,37 @@ class RepairMixin:
             use_ocr = cfg.get("speedup_use_ocr")
             pt = None
             if use_ocr:
-                self.maa.screenshot(force=True)
-                pt = self.maa.ocr(expected=use_ocr["expected"],
+                self.device.screenshot(force=True)
+                pt = self.device.ocr(expected=use_ocr["expected"],
                                   roi=roi_4to4(*use_ocr["roi"]))
             if pt:
-                self.maa.click(Point(pt.x - 33, pt.y))
+                self.device.click(Point(pt.x - 33, pt.y))
             else:
                 cx, cy = cfg["speedup_checkbox"]
-                self.maa.click(Point(cx, cy))
+                self.device.click(Point(cx, cy))
             time.sleep(0.5)
 
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         # 修复开始之前，先把左面板「所需资源」的真实成本读下来（记账用）
         costs = self._read_repair_costs(cfg)
-        start = self.maa.template_match(cfg["start_button"]["template"])
+        start = self.device.template_match(cfg["start_button"]["template"])
         if not start:
             yield "[手入] 找不到修复开始按钮"
             return False
-        boundary = begin_operation(self.maa)
-        self.maa.click(start)
+        boundary = begin_operation(self.device)
+        self.device.click(start)
         time.sleep(1.2)
 
         # 可能有二次确认弹窗（确定/确认都试试）
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         for tpl in ("通用_确定.png", "team/是.png"):
-            confirm = self.maa.template_match(tpl)
+            confirm = self.device.template_match(tpl)
             if confirm:
-                self.maa.click(confirm)
+                self.device.click(confirm)
                 time.sleep(1.0)
                 break
 
-        confirmed = confirm_operation(self.maa, boundary, "repair",
+        confirmed = confirm_operation(self.device, boundary, "repair",
                                       getattr(self, "_repair_target_serial", None))
         if confirmed is not True:
             yield "[手入] 未确认手入结果，本次不再重复点击" if confirmed is None else "[手入] 手入失败：游戏拒绝本次操作，未开工"
@@ -451,7 +451,7 @@ class RepairMixin:
         for roi in rois[:4]:
             value = None
             try:
-                tokens = self.maa.ocr_all(roi_4to4(*roi))
+                tokens = self.device.ocr_all(roi_4to4(*roi))
                 m = re.search(r"[\d,]+", "".join(t for t, _ in tokens))
                 if m:
                     value = int(m.group(0).replace(",", ""))

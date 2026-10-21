@@ -135,8 +135,8 @@ class DailyWorkflowTests(unittest.TestCase):
         log_file = self.root / "pulled.log"
         log_file.write_text("x", encoding="utf-8")
         agent = Mock()
-        agent.maa.adb_path = "adb"
-        agent.maa.adb_address = "127.0.0.1:16384"
+        agent.device.adb_path = "adb"
+        agent.device.adb_address = "127.0.0.1:16384"
         with patch.object(youzu_log, "pull_log", return_value=log_file), \
              patch.object(youzu_log, "write_ledger",
                           return_value={"observations_written": 2,
@@ -150,8 +150,8 @@ class DailyWorkflowTests(unittest.TestCase):
         from touken import youzu_log
         run = server._workflow.NODE_REGISTRY["ledger_sync"]["run"]
         agent = Mock()
-        agent.maa.adb_path = "adb"
-        agent.maa.adb_address = "127.0.0.1:16384"
+        agent.device.adb_path = "adb"
+        agent.device.adb_address = "127.0.0.1:16384"
         with patch.object(youzu_log, "pull_log",
                           side_effect=RuntimeError("adb 炸了")):
             messages = list(run(agent, {}, None))

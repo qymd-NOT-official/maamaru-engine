@@ -114,8 +114,8 @@ class FormationContractTests(unittest.TestCase):
             KOGI, _EditorHost, _FakeMaa, _six, _slot)
         teams = {2: _six()}
         teams[2][2] = _slot(3, catalog=KOGI, name="小狐丸")
-        maa = _FakeMaa(shell="formation", pages=pages)
-        return maa, _EditorHost(maa, teams)
+        device = _FakeMaa(shell="formation", pages=pages)
+        return device, _EditorHost(device, teams)
 
     def _pool_entry(self, catalog, name, level, kiwame_date=None,
                     form_status="unknown"):
@@ -140,7 +140,7 @@ class FormationContractTests(unittest.TestCase):
     def test_pool_entry_changes_member_with_narrowed_match_fields(self):
         from tests.test_formation_editor import CHANGED, _DECIDE_X
         from tests.test_formation_editor import HASEBE, _row, _slot
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("小狐丸", 200, level=99, fatigue=100),
              _row("三日月宗近", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=80,
@@ -151,7 +151,7 @@ class FormationContractTests(unittest.TestCase):
         entry = self._pool_entry(HASEBE, "压切长谷部", 35)
         result = self._play(host, entry, match_fields=("name", "level"))
         self.assertEqual(result["result"], CHANGED, result.get("reason"))
-        self.assertIn((1197, 178), maa.clicks)  # 决定落在目标行
+        self.assertIn((1197, 178), device.clicks)  # 决定落在目标行
         ensured = [e for e in host.events
                    if e["event_type"] == "formation.member_selected"]
         self.assertEqual(ensured[-1]["payload"]["result"], CHANGED)
@@ -162,7 +162,7 @@ class FormationContractTests(unittest.TestCase):
         这就是接线必须收窄的原因。"""
         from tests.test_formation_editor import AMBIGUOUS, _DECIDE_X
         from tests.test_formation_editor import HASEBE, _row, _slot
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("小狐丸", 200, level=99, fatigue=100),
              _row("三日月宗近", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=80),
@@ -174,13 +174,13 @@ class FormationContractTests(unittest.TestCase):
         result = self._play(host, entry)
         self.assertEqual(result["result"], AMBIGUOUS)
         self.assertIn("form", result.get("missing_evidence", []))
-        self.assertFalse(any(x == _DECIDE_X for x, _y in maa.clicks))
+        self.assertFalse(any(x == _DECIDE_X for x, _y in device.clicks))
 
     def test_same_name_same_level_still_safely_refused(self):
         """窄证据链不放水：同名同等级拉不开，ambiguous，不点决定。"""
         from tests.test_formation_editor import AMBIGUOUS, _DECIDE_X
         from tests.test_formation_editor import HASEBE, _row, _slot
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("压切长谷部", 200, level=35, fatigue=80),
              _row("小狐丸", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=60),
@@ -189,12 +189,12 @@ class FormationContractTests(unittest.TestCase):
         entry = self._pool_entry(HASEBE, "压切长谷部", 35)
         result = self._play(host, entry, match_fields=("name", "level"))
         self.assertEqual(result["result"], AMBIGUOUS)
-        self.assertFalse(any(x == _DECIDE_X for x, _y in maa.clicks))
+        self.assertFalse(any(x == _DECIDE_X for x, _y in device.clicks))
 
     def test_same_name_different_level_picks_the_right_one(self):
         from tests.test_formation_editor import CHANGED
         from tests.test_formation_editor import HASEBE, _row, _slot
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("压切长谷部", 200, level=60, fatigue=80),
              _row("小狐丸", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=60,
@@ -210,7 +210,7 @@ class FormationContractTests(unittest.TestCase):
         """决定后不回读，也不把未经独立盘点的队伍写进编队档案。"""
         from tests.test_formation_editor import CHANGED
         from tests.test_formation_editor import HASEBE, _row, _slot
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("小狐丸", 200, level=99, fatigue=100),
              _row("三日月宗近", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=80,
@@ -233,8 +233,8 @@ class FormationContractTests(unittest.TestCase):
         from tests.test_formation_editor import (
             HASEBE, _EditorHost, _FakeMaa, _six)
         teams = {2: _six(catalog=HASEBE, name="压切长谷部", level=35)}
-        maa = _FakeMaa(shell="formation", pages=[])
-        host = _EditorHost(maa, teams)
+        device = _FakeMaa(shell="formation", pages=[])
+        host = _EditorHost(device, teams)
         entry = self._pool_entry(HASEBE, "压切长谷部", 35)
         host.visible_link = {"status": "linked",
                              "observation_id": entry["observation_id"]}
@@ -245,14 +245,14 @@ class FormationContractTests(unittest.TestCase):
                   if e["event_type"] == "team_roster.observed"]
         self.assertEqual(roster, [])
         # 没有换人动作：只有切队确认的标签点击，不碰替换/决定
-        self.assertFalse(any(x in (1033, _DECIDE_X) for x, _y in maa.clicks))
+        self.assertFalse(any(x in (1033, _DECIDE_X) for x, _y in device.clicks))
 
     def test_refusal_records_no_roster_observation(self):
         """ambiguous/失败不落队伍事实：存疑读数不冒充事实。"""
         from tests.test_formation_editor import AMBIGUOUS
         from tests.test_formation_editor import HASEBE, _row
         # 同名同等级拉不开 → 窄证据链下也 ambiguous，不点决定
-        maa, host = self._stage([
+        device, host = self._stage([
             [_row("压切长谷部", 200, level=35, fatigue=80),
              _row("小狐丸", 300, level=99, fatigue=100)],
             [_row("压切长谷部", 200, level=35, fatigue=60),

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """共用编队执行器（formation_editor）契约测试。
 
-假 MAA 是点击/滑动驱动的页面状态机：
+假设备 是点击/滑动驱动的页面状态机：
   - 外壳（部队编成/部队选择）只看标题 OCR，不含任何主题色信息——
     两种外壳走同一条执行器路径本测试直接钉死；
   - click(替换) 开"刀剑男士选择"列表；swipe 翻页（wrap=True 时模拟
@@ -74,7 +74,7 @@ def _row(name, y, level=None, fatigue=None, form=None, becomes=None,
 
 
 class _FakeMaa:
-    """编队执行器状态机假 MAA（无图像，全靠剧本与坐标约定）。"""
+    """编队执行器状态机假设备（无图像，全靠剧本与坐标约定）。"""
 
     def __init__(self, shell="formation", current_tab=1, pages=None,
                  wrap=False, swallow_swipes=False):
@@ -265,17 +265,17 @@ class _FakeMaa:
 
 
 class _EditorHost(FormationEditorMixin):
-    def __init__(self, maa, teams):
-        self.maa = maa
+    def __init__(self, device, teams):
+        self.device = device
         self.config = {}
         self.current_location = None
         self.events = []
         self.teams = teams                    # {team_no: [slot×6]}
-        maa.on_decide = self._apply_decide
+        device.on_decide = self._apply_decide
 
     def _apply_decide(self, slot_no, row):
         if slot_no and row.get("becomes") is not None:
-            self.teams[self.maa.current_tab][slot_no - 1] = copy.deepcopy(
+            self.teams[self.device.current_tab][slot_no - 1] = copy.deepcopy(
                 row["becomes"])
 
     def record_event(self, event_type, **payload):
@@ -283,15 +283,15 @@ class _EditorHost(FormationEditorMixin):
 
     def navigate_to_stream(self, dest):
         if dest == "编队":
-            self.maa.shell = "formation"
+            self.device.shell = "formation"
         self.current_location = dest
         yield f"nav→{dest}"
 
     def _formation_read_team(self):
-        return copy.deepcopy(self.teams[self.maa.current_tab])
+        return copy.deepcopy(self.teams[self.device.current_tab])
 
     def _formation_row_label(self, cy):
-        return self.maa.current_tab
+        return self.device.current_tab
 
     def _formation_link_visible_slot(self, slot_no, slot):
         return getattr(self, "visible_link", {"status": "linked",
@@ -299,17 +299,17 @@ class _EditorHost(FormationEditorMixin):
 
     def _scrollbar_bottom(self):
         """注入缝：剧本滑块底缘读数（生产通道=右缘滑轨像素读取）。"""
-        return self.maa.scrollbar_bottom()
+        return self.device.scrollbar_bottom()
 
     def _list_single_page_sighted(self):
         """注入缝：剧本单页到底证据（生产通道待真机标定）。"""
-        return bool(self.maa.single_page_sighted)
+        return bool(self.device.single_page_sighted)
 
     def _parse_selection_rows(self, tokens):
         """注入缝：给行补上剧本里的形态证据（未来真机形态通道的位置）。"""
         rows, bad = parse_selection_rows(tokens)
         for r in rows:
-            form = self.maa.form_map.get((r["name_raw"], r["level"]))
+            form = self.device.form_map.get((r["name_raw"], r["level"]))
             if form is not None:
                 r["form"] = form
                 r["unknown_fields"] = [f for f in r["unknown_fields"]
@@ -328,16 +328,16 @@ def _std_setup(shell="formation", pages=None, team_no=2, slot_no=3,
     """部队 team_no 的 slot_no 是小狐丸，目标是压切长谷部 Lv35 普通。"""
     teams = {team_no: _six()}
     teams[team_no][slot_no - 1] = _slot(slot_no, catalog=KOGI, name="小狐丸")
-    maa = _FakeMaa(shell=shell, pages=pages or [], wrap=wrap,
+    device = _FakeMaa(shell=shell, pages=pages or [], wrap=wrap,
                    swallow_swipes=swallow_swipes)
-    return maa, _EditorHost(maa, teams)
+    return device, _EditorHost(device, teams)
 
 
-def _assert_never_departs(tc, maa):
-    for click in maa.clicks:
+def _assert_never_departs(tc, device):
+    for click in device.clicks:
         tc.assertNotIn(click, FORBIDDEN_DEPART_CLICKS,
                        f"出发按钮被点击: {click}")
-    for tpl in maa.templates_seen:
+    for tpl in device.templates_seen:
         for word in ("即刻出阵", "继续出阵", "演练"):
             tc.assertNotIn(word, tpl)
 
@@ -364,10 +364,10 @@ class PureFunctionTests(unittest.TestCase):
         self.assertIn((MIKA, None, 80), fingerprint)
 
     def test_single_page_blank_bottom_is_independent_end_evidence(self):
-        maa, host = _std_setup(pages=[[_ok_row(y=195)]])
+        device, host = _std_setup(pages=[[_ok_row(y=195)]])
         frame = np.full((720, 1280, 3), (214, 220, 221), dtype=np.uint8)
         with patch.object(host, "_read_list_page", return_value=([{"y": 195}], 0)), \
-             patch.object(maa, "screenshot", return_value=frame):
+             patch.object(device, "screenshot", return_value=frame):
             self.assertTrue(FormationEditorMixin._list_single_page_sighted(host))
             frame[510:590, 200:1100] = (10, 20, 30)
             self.assertFalse(FormationEditorMixin._list_single_page_sighted(host))
@@ -754,8 +754,8 @@ class ExecutorFlowTests(unittest.TestCase):
         low = _row("压切长谷部", 300, level=35, fatigue=60)
         high = _row("压切长谷部", 300, level=40, fatigue=60,
                     becomes=_slot(3, catalog=HASEBE, name="压切长谷部", level=40))
-        maa, host = _std_setup(pages=[[low], [high]])
-        maa.single_page_sighted = False
+        device, host = _std_setup(pages=[[low], [high]])
+        device.single_page_sighted = False
         original_read = host._read_list_page
         def read_locked():
             rows, bad = original_read()
@@ -774,8 +774,8 @@ class ExecutorFlowTests(unittest.TestCase):
             result = _run(host, target=target)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(host.teams[2][2]["level"], 40)
-        self.assertIn((640, 500, 640, 330, 800), maa.swipes)
-        _assert_never_departs(self, maa)
+        self.assertIn((640, 500, 640, 330, 800), device.swipes)
+        _assert_never_departs(self, device)
 
 
     def test_formation_shell_change_first_page(self):
@@ -783,7 +783,7 @@ class ExecutorFlowTests(unittest.TestCase):
                   _ok_row(300),
                   _row("前田藤四郎", 450, level=80, fatigue=90)],
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["entry_shell"], "formation")
@@ -791,9 +791,9 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(len(result["team_before"]), 6)
         self.assertNotIn("after", result)
         self.assertNotIn("team_after", result)
-        self.assertIn((640, 550, 640, 200, 800), maa.swipes)
-        self.assertIn((_DECIDE_X, 300 - 22), maa.clicks)
-        self.assertEqual(maa.shell, "formation")   # 保持原入口上下文
+        self.assertIn((640, 550, 640, 200, 800), device.swipes)
+        self.assertIn((_DECIDE_X, 300 - 22), device.clicks)
+        self.assertEqual(device.shell, "formation")   # 保持原入口上下文
         ev = [e for e in host.events
               if e["event_type"] == "formation.member_selected"][-1]
         self.assertEqual(ev["payload"]["result"], CHANGED)
@@ -801,21 +801,21 @@ class ExecutorFlowTests(unittest.TestCase):
                          "formation.member_selected")
         self.assertNotIn("team_roster.observed",
                          [event["event_type"] for event in host.events])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_team_select_shell_same_path(self):
         """部队选择外壳走同一执行器：识别只看标题，没有颜色通道可依赖。"""
         pages = [[_ok_row(300)], _DECOY_PAGE]
-        maa, host = _std_setup(shell="team_select", pages=pages)
+        device, host = _std_setup(shell="team_select", pages=pages)
         result = _run(host, entry_context="team_select")
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["entry_shell"], "team_select")
-        self.assertIn((_SWAP_X, _ROW_CY[2]), maa.clicks)
-        _assert_never_departs(self, maa)
+        self.assertIn((_SWAP_X, _ROW_CY[2]), device.clicks)
+        _assert_never_departs(self, device)
 
     def test_standalone_wrapper_navigates_to_formation(self):
         pages = [[_ok_row(300)], _DECOY_PAGE]
-        maa, host = _std_setup(shell=None, pages=pages)
+        device, host = _std_setup(shell=None, pages=pages)
         with patch("touken.flows.formation_editor.time.sleep",
                    lambda *_: None):
             gen = host.ensure_team_member_from_honmaru_stream(2, 3, _target())
@@ -827,93 +827,93 @@ class ExecutorFlowTests(unittest.TestCase):
                     break
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(host.current_location, "编队")
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_already_correct_zero_swap_clicks(self):
-        maa, host = _std_setup(pages=[])
+        device, host = _std_setup(pages=[])
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35)
         result = _run(host)
         self.assertEqual(result["result"], ALREADY_CORRECT)
-        swap_clicks = [c for c in maa.clicks if c[0] == _SWAP_X]
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        swap_clicks = [c for c in device.clicks if c[0] == _SWAP_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(swap_clicks, [])
         self.assertEqual(decide_clicks, [])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_same_name_level_but_instance_ambiguous_does_not_skip(self):
-        maa, host = _std_setup(pages=[])
+        device, host = _std_setup(pages=[])
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35)
         host.visible_link = {"status": "ambiguous", "observation_id": None}
         result = _run(host)
         self.assertNotEqual(result["result"], ALREADY_CORRECT)
-        self.assertTrue(any(x == _SWAP_X for x, _y in maa.clicks))
+        self.assertTrue(any(x == _SWAP_X for x, _y in device.clicks))
 
     def test_level_up_same_unique_instance_still_skips(self):
-        maa, host = _std_setup(pages=[])
+        device, host = _std_setup(pages=[])
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=36)
         result = _run(host)  # 预设旧档案是 Lv35，实例链接仍唯一
         self.assertEqual(result["result"], ALREADY_CORRECT)
-        self.assertFalse(any(x == _SWAP_X for x, _y in maa.clicks))
+        self.assertFalse(any(x == _SWAP_X for x, _y in device.clicks))
 
     def test_level_up_without_unique_instance_does_not_skip(self):
-        maa, host = _std_setup(pages=[])
+        device, host = _std_setup(pages=[])
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=36)
         host.visible_link = {"status": "ambiguous", "observation_id": None}
         result = _run(host)
         self.assertNotEqual(result["result"], ALREADY_CORRECT)
-        self.assertTrue(any(x == _SWAP_X for x, _y in maa.clicks))
+        self.assertTrue(any(x == _SWAP_X for x, _y in device.clicks))
 
     def test_already_correct_requires_proven_form(self):
         """形态读不出且实例也未能唯一链接：不能零点击宣称正确。"""
         pages = [[_ok_row(300)], _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35, kiwame="unknown")
         host.visible_link = {"status": "insufficient", "observation_id": None}
         result = _run(host)
         self.assertNotEqual(result["result"], ALREADY_CORRECT)
-        swap_clicks = [c for c in maa.clicks if c[0] == _SWAP_X]
+        swap_clicks = [c for c in device.clicks if c[0] == _SWAP_X]
         self.assertTrue(swap_clicks)     # 开了名单，没偷懒宣称正确
 
     def test_unique_visible_instance_can_confirm_when_badge_misses(self):
-        maa, host = _std_setup(pages=[])
+        device, host = _std_setup(pages=[])
         host.teams[2][2] = _slot(3, catalog=HASEBE, name="压切长谷部",
                                  level=35, kiwame="unknown")
         result = _run(host)
         self.assertEqual(result["result"], ALREADY_CORRECT)
-        self.assertFalse(any(x == _SWAP_X for x, _y in maa.clicks))
+        self.assertFalse(any(x == _SWAP_X for x, _y in device.clicks))
 
     def test_target_on_first_page_of_three_navigates_back(self):
         """目标在首页，扫完全表后按指纹翻回首页再点决定。"""
         pages = [[_ok_row(300)],
                  [_row("三日月宗近", 200, level=99, fatigue=100)],
                  [_row("前田藤四郎", 400, level=80, fatigue=90)]]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
-        forward = [s for s in maa.swipes if s[3] < s[1]]
-        backward = [s for s in maa.swipes if s[3] > s[1]]
+        forward = [s for s in device.swipes if s[3] < s[1]]
+        backward = [s for s in device.swipes if s[3] > s[1]]
         self.assertTrue(forward)
         self.assertTrue(backward)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_scan_terminates_and_reports_not_found(self):
         """两页短名单，回翻复归证明到底 → complete，确定 not_found。"""
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100)],
                  [_row("小狐丸", 300, level=99, fatigue=50)]]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], NOT_FOUND)
         self.assertIn("隐藏", result["reason"])
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        self.assertLessEqual(len([s for s in maa.swipes]), 70)  # 有上限
-        _assert_never_departs(self, maa)
+        self.assertLessEqual(len([s for s in device.swipes]), 70)  # 有上限
+        _assert_never_departs(self, device)
 
     def test_ambiguous_same_name_never_clicks_first(self):
         pages = [[_row("压切长谷部", 200, level=35, fatigue=60,
@@ -921,24 +921,24 @@ class ExecutorFlowTests(unittest.TestCase):
                   _row("压切长谷部", 400, level=35, fatigue=80,
                        form="normal")],
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
         self.assertEqual(len(result["candidates"]), 2)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])     # 绝不点第一条
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_single_row_missing_evidence_never_clicked(self):
         """流程级反例：唯一同名行但页面给不出形态证据 → ambiguous 停住。"""
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
                        form=None)],            # 页面无形态通道
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
         self.assertIn("form", result["missing_evidence"])
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
     def test_catalog_alone_cannot_claim_unique(self):
@@ -946,31 +946,31 @@ class ExecutorFlowTests(unittest.TestCase):
         pages = [[_row("压切长谷部", 200, level=35, fatigue=60),
                   _row("压切长谷部", 400, level=99, fatigue=80)],
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         target = {"observation_id": "9:12", "sword_catalog_id": HASEBE,
                   "name": "压切长谷部"}   # form/level 都没有
         result = _run(host, target=target)
         self.assertEqual(result["result"], AMBIGUOUS)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
     def test_list_never_opens_is_screen_unrecognized(self):
-        maa, host = _std_setup(pages=[])
-        maa.list_opens = False
+        device, host = _std_setup(pages=[])
+        device.list_opens = False
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_decide_no_effect_is_unavailable(self):
         """目标被游戏禁用（决定点了列表不关闭）→ unavailable，不盲试。"""
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
                        form="normal", disabled=True)],
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], UNAVAILABLE)
         self.assertIn("不可选", result["reason"])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_decide_success_does_not_read_back_team(self):
         """决定后不再读整队；错误 OCR 不能把正常换人改判成失败。"""
@@ -978,7 +978,7 @@ class ExecutorFlowTests(unittest.TestCase):
         pages = [[_row("压切长谷部", 300, level=35, fatigue=60,
                        form="normal", becomes=wrong)],
                  _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         original = host._formation_read_team
         reads = {"count": 0}
 
@@ -991,13 +991,13 @@ class ExecutorFlowTests(unittest.TestCase):
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(reads["count"], 1)  # 只保留换前检查
         self.assertNotIn("after", result)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_shell_unrecognized_and_no_wandering(self):
-        maa, host = _std_setup(shell=None, pages=[])
+        device, host = _std_setup(shell=None, pages=[])
         result = _run(host, entry_context="team_select")
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
-        self.assertEqual(maa.clicks, [])     # 指定外壳不在场：不乱逛
+        self.assertEqual(device.clicks, [])     # 指定外壳不在场：不乱逛
         # auto 模式不在任何编队表面 → 导航去编队
         maa2, host2 = _std_setup(shell=None,
                                  pages=[[_ok_row(300)], _DECOY_PAGE])
@@ -1007,28 +1007,28 @@ class ExecutorFlowTests(unittest.TestCase):
 
     def test_tab_click_swallowed_retries(self):
         pages = [[_ok_row(300)], _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
-        maa.swallow_tabs.add(2)              # 第一次切队被吞
+        device, host = _std_setup(pages=pages)
+        device.swallow_tabs.add(2)              # 第一次切队被吞
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
-        tab_clicks = [c for c in maa.clicks if c == _TEAM_TAB[2]]
+        tab_clicks = [c for c in device.clicks if c == _TEAM_TAB[2]]
         self.assertEqual(len(tab_clicks) >= 2, True)
 
     def test_invalid_request(self):
-        maa, host = _std_setup()
+        device, host = _std_setup()
         result = _run(host, team_no=9)
         self.assertEqual(result["result"], INVALID_REQUEST)
         result = _run(host, target={"level": 35})
         self.assertEqual(result["result"], INVALID_REQUEST)
-        self.assertEqual(maa.clicks, [])
+        self.assertEqual(device.clicks, [])
 
     def test_confirm_popup_handled_after_decide(self):
         pages = [[_ok_row(300, popup=True)], _DECOY_PAGE]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
-        self.assertIn((640, 500), maa.clicks)      # 通用_确定 被点掉
-        _assert_never_departs(self, maa)
+        self.assertIn((640, 500), device.clicks)      # 通用_确定 被点掉
+        _assert_never_departs(self, device)
 
 
 # ==================== 扫描完整度契约 ====================
@@ -1054,38 +1054,38 @@ class ScanCompletenessTests(unittest.TestCase):
     def test_target_on_page_9_full_scan_finds_it(self):
         """大库存：目标在第 9 页，默认上限足够扫到底 → 正常换入。"""
         pages = self._many_pages(8)
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 9)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_second_copy_on_page_9_makes_ambiguous(self):
         """同名第二振在第 9 页：扫到底后 ambiguous，绝不点第一条。"""
         pages = self._many_pages(0, extra_target=True)
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], AMBIGUOUS)
         self.assertEqual(len(result["candidates"]), 2)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
     def test_truncated_scan_never_clicks(self):
         """安全上限 8 页而名单有 9 页：截断不裁决、不点击。"""
         pages = self._many_pages(8)
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host, max_pages=8)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "truncated")
         self.assertIn("scan_incomplete", result["reason"])
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_truncated_scan_cannot_prove_not_found(self):
         """目标不在前 8 页：截断名单连 not_found 也不许确定。"""
         pages = self._many_pages(8)
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host, max_pages=8)
         self.assertNotIn(result["result"], (NOT_FOUND, CHANGED, AMBIGUOUS))
 
@@ -1094,7 +1094,7 @@ class ScanCompletenessTests(unittest.TestCase):
         pages = [[_row("三日月宗近", 200, level=99, fatigue=100)],
                  [_ok_row(300)],
                  [_row("前田藤四郎", 400, level=80, fatigue=90)]]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
@@ -1102,11 +1102,11 @@ class ScanCompletenessTests(unittest.TestCase):
     def test_loop_is_not_reached_end(self):
         """末页后绕回首页（异常页序）：loop ≠ 到底，拒绝裁决。"""
         pages = self._many_pages(2, total=3)
-        maa, host = _std_setup(pages=pages, wrap=True)
+        device, host = _std_setup(pages=pages, wrap=True)
         result = _run(host, max_pages=10)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "loop")
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
 
@@ -1134,35 +1134,35 @@ class BottomProofTests(unittest.TestCase):
                  _row("歌仙兼定", 480, level=5, fatigue=90)]
         # 实际第 6 行被 OCR 整行漏掉（根本没出现在 tokens 里）
         pages = [page0, [_ok_row(300)]]
-        maa, host = _std_setup(pages=pages, swallow_swipes=True)
+        device, host = _std_setup(pages=pages, swallow_swipes=True)
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
         self.assertEqual(result["pages_scanned"], 1)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_swallowed_swipes_are_stalled_not_not_found(self):
         """滑动全被吞，只扫了第一页，绝不能谎称整份名单没目标。"""
         pages = [self._full_page(0), self._full_page(1),
                  self._full_page(2, rows=2)]
-        maa, host = _std_setup(pages=pages, swallow_swipes=True)
+        device, host = _std_setup(pages=pages, swallow_swipes=True)
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
         self.assertIn("吞", result["reason"])
         self.assertEqual(result["pages_scanned"], 1)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_swallowed_swipes_with_ocr_jitter_are_stalled(self):
         """真机反例：滑块没动，同一页 OCR 指纹 A/B/A 抖动，不算三页。"""
-        maa, host = _std_setup(
+        device, host = _std_setup(
             pages=[self._full_page(0), self._full_page(1)],
             swallow_swipes=True)
-        maa.in_list = True
+        device.in_list = True
         original_read = host._read_list_page
         reads = 0
         def jittering_read():
@@ -1192,12 +1192,12 @@ class BottomProofTests(unittest.TestCase):
         page2 找到目标，绝不 false not_found。"""
         pages = [self._full_page(0), self._full_page(1),
                  [_ok_row(300), _row("小狐丸", 450, level=99, fatigue=50)]]
-        maa, host = _std_setup(pages=pages)
-        maa.swallow_forward = {2, 3}         # 只吞第 2、3 次前滑
+        device, host = _std_setup(pages=pages)
+        device.swallow_forward = {2, 3}         # 只吞第 2、3 次前滑
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_probe_swipes_also_swallowed_cannot_fake_bottom(self):
         """精确回归（老大第二轮反例）：吞第 2、3、5、7 次前滑——停滞触发
@@ -1206,28 +1206,28 @@ class BottomProofTests(unittest.TestCase):
         真到底后探测滑被吞也骗不出 689——complete 并裁决 not_found。"""
         pages = [self._full_page(0), self._full_page(1),
                  self._full_page(2, rows=2)]
-        maa, host = _std_setup(pages=pages)
-        maa.swallow_forward = {2, 3, 5, 7}   # 吞停滞滑 + 探测滑
+        device, host = _std_setup(pages=pages)
+        device.swallow_forward = {2, 3, 5, 7}   # 吞停滞滑 + 探测滑
         result = _run(host)
         self.assertEqual(result["result"], NOT_FOUND)
         self.assertEqual(result["pages_scanned"], 3)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_swallowed_swipes_without_scrollbar_reading_are_stalled(self):
         """同一反例 + 滑块读数缺失：拿不出绝对位置证据，「探测没翻动」
         与真底在指纹流上不可区分——只能 stalled，绝不 not_found。"""
         pages = [self._full_page(0), self._full_page(1),
                  self._full_page(2, rows=2)]
-        maa, host = _std_setup(pages=pages)
-        maa.swallow_forward = {2, 3, 5, 7}
-        maa.scrollbar_visible = False        # 滑块读数缺失（证据不足）
+        device, host = _std_setup(pages=pages)
+        device.swallow_forward = {2, 3, 5, 7}
+        device.scrollbar_visible = False        # 滑块读数缺失（证据不足）
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
         self.assertEqual(result["pages_scanned"], 2)
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_true_bottom_with_swallowed_probes_still_completes(self):
         """反向钉死：真只有两页、目标不存在，且探测滑也被吞——独立末端
@@ -1235,44 +1235,44 @@ class BottomProofTests(unittest.TestCase):
         complete 并裁决 not_found。缺了这条，反例修复就退化成
         「永远 stalled」的过度收紧。"""
         pages = [self._full_page(0), self._full_page(1, rows=3)]
-        maa, host = _std_setup(pages=pages)
-        maa.swallow_forward = {2, 3, 5, 7}
+        device, host = _std_setup(pages=pages)
+        device.swallow_forward = {2, 3, 5, 7}
         result = _run(host)
         self.assertEqual(result["result"], NOT_FOUND)
         self.assertEqual(result["pages_scanned"], 2)
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_blind_page_is_recognition_failure(self):
         """OCR 完全失明连续空页 → 识别失败，不是 not_found。"""
-        maa, host = _std_setup(pages=[[]])
+        device, host = _std_setup(pages=[[]])
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "blind")
         self.assertIn("失明", result["reason"])
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
     def test_full_last_page_proves_bottom_by_backtrack(self):
         """满页末页：回翻一页再翻回来，指纹两步都对上 → complete 可裁决。"""
         pages = [self._full_page(0), self._full_page(1),
                  [_ok_row(660)] + self._full_page(2, rows=5)]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], CHANGED)
         self.assertEqual(result["pages_scanned"], 3)
-        backward = [s for s in maa.swipes if s[3] > s[1]]
+        backward = [s for s in device.swipes if s[3] > s[1]]
         self.assertTrue(backward)        # 确实做了回翻验证
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_single_short_page_is_honest_stalled(self):
         """单页短库存无从回翻验证：保守 stalled（honest stop，等真机
         末端视觉证据校准），不伪造 complete、不点决定。"""
         pages = [[_ok_row(300), _row("小狐丸", 450, level=99, fatigue=50)]]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
     def test_short_two_page_list_complete_via_backtrack(self):
@@ -1280,26 +1280,26 @@ class BottomProofTests(unittest.TestCase):
         pages = [[_row("三日月宗近", 150, level=99, fatigue=100),
                   _row("歌仙兼定", 300, level=90, fatigue=80)],
                  [_row("小狐丸", 300, level=99, fatigue=50)]]
-        maa, host = _std_setup(pages=pages)
+        device, host = _std_setup(pages=pages)
         result = _run(host)
         self.assertEqual(result["result"], NOT_FOUND)
 
     def test_backtrack_mismatch_is_stalled(self):
         """满页停滞且回翻被吞（指纹对不上）→ stalled，不裁决。"""
         pages = [self._full_page(0), self._full_page(1)]
-        maa, host = _std_setup(pages=pages)
-        original_swipe = maa.swipe
+        device, host = _std_setup(pages=pages)
+        original_swipe = device.swipe
 
         def flaky_swipe(x1, y1, x2, y2, duration_ms=400):
             if y2 > y1:              # 反滑被吞
-                maa.swipes.append((x1, y1, x2, y2, duration_ms))
+                device.swipes.append((x1, y1, x2, y2, duration_ms))
                 return
             original_swipe(x1, y1, x2, y2, duration_ms)
-        maa.swipe = flaky_swipe
+        device.swipe = flaky_swipe
         result = _run(host)
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
         self.assertEqual(result["scan_status"], "stalled")
-        decide_clicks = [c for c in maa.clicks if c[0] == _DECIDE_X]
+        decide_clicks = [c for c in device.clicks if c[0] == _DECIDE_X]
         self.assertEqual(decide_clicks, [])
 
 
@@ -1320,7 +1320,7 @@ class ScrollbarEndEvidenceTests(unittest.TestCase):
 
     def _sighted(self, img):
         host = FormationEditorMixin()
-        host.maa = self._ShotMaa(img)
+        host.device = self._ShotMaa(img)
         return host._list_end_sighted()
 
     @staticmethod
@@ -1378,8 +1378,8 @@ class FilterPanelTests(unittest.TestCase):
         return full, filtered
 
     def test_atagi_then_monoyoshi_resets_filter_to_wakizashi(self):
-        maa, host = _std_setup(pages=[[_row("小狐丸", 150, level=35, fatigue=60)]])
-        maa.in_list = True
+        device, host = _std_setup(pages=[[_row("小狐丸", 150, level=35, fatigue=60)]])
+        device.in_list = True
         for catalog, expected in (("touken_250_atagi_kiri", "打刀"),
                                   ("touken_067_monoyoshi_sadamune", "胁差")):
             target, err = normalize_target({"sword_catalog_id": catalog,
@@ -1387,59 +1387,59 @@ class FilterPanelTests(unittest.TestCase):
             self.assertIsNone(err)
             self.assertEqual(target["sword_type"], expected)
             list(host._apply_list_filter(target))
-        self.assertEqual(maa.filter_clicks,
+        self.assertEqual(device.filter_clicks,
                          ["取消筛选", "打刀", "极", "确定",
                           "取消筛选", "胁差", "极", "确定"])
 
     def test_filter_narrows_scan_and_clicks_in_order(self):
         full, filtered = self._kiwame_hasebe_pages()
-        maa, host = _std_setup(pages=full)
-        maa.filtered_pages = filtered
-        maa.single_page_sighted = True
+        device, host = _std_setup(pages=full)
+        device.filtered_pages = filtered
+        device.single_page_sighted = True
         result = _run(host, target=_target(form="kiwame", level=99))
 
         self.assertEqual(result["result"], CHANGED)
         # 压切长谷部=打刀；form=kiwame → 点「极」；每次先取消筛选重置
-        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
+        self.assertEqual(device.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
         # 名单换成筛选后的（全表里没有目标，换页集才找得到）
-        _assert_never_departs(self, maa)
+        _assert_never_departs(self, device)
 
     def test_filter_without_form_skips_form_buttons(self):
         """目标形态未知：只筛刀种，不点「初/极」。"""
         full, filtered = self._kiwame_hasebe_pages()
         filtered[0][0]["form"] = None       # 页面给不出形态证据
-        maa, host = _std_setup(pages=full)
-        maa.filtered_pages = filtered
-        maa.single_page_sighted = True
+        device, host = _std_setup(pages=full)
+        device.filtered_pages = filtered
+        device.single_page_sighted = True
         result = _run(host, target=_target(form=None, level=99,
                                            name="压切长谷部"))
         # form 未知 → match_fields 里 form 不参与；name+level 齐全 → 换
         self.assertEqual(result["result"], CHANGED)
-        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "确定"])
+        self.assertEqual(device.filter_clicks, ["取消筛选", "打刀", "确定"])
 
     def test_filter_panel_never_opens_stops_cleanly(self):
         """「筛选/排序」认不到：停，不翻页、不点决定、队伍不变。"""
         full, _filtered = self._kiwame_hasebe_pages()
-        maa, host = _std_setup(pages=full)
-        maa.filter_works = False
+        device, host = _std_setup(pages=full)
+        device.filter_works = False
         result = _run(host, target=_target(form="kiwame", level=99))
 
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
-        self.assertEqual(maa.filter_clicks, [])
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.filter_clicks, [])
+        self.assertEqual(device.swipes, [])
         self.assertEqual(len(host.teams[2]), 6)     # 队伍原样
 
     def test_reset_closing_panel_reopens_and_continues(self):
         """「取消筛选」顺手关了面板（游戏行为分支）：重开再选，流程不断。"""
         full, filtered = self._kiwame_hasebe_pages()
-        maa, host = _std_setup(pages=full)
-        maa.filtered_pages = filtered
-        maa.single_page_sighted = True
-        maa.reset_closes_panel = True
+        device, host = _std_setup(pages=full)
+        device.filtered_pages = filtered
+        device.single_page_sighted = True
+        device.reset_closes_panel = True
         result = _run(host, target=_target(form="kiwame", level=99))
 
         self.assertEqual(result["result"], CHANGED)
-        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
+        self.assertEqual(device.filter_clicks, ["取消筛选", "打刀", "极", "确定"])
 
     def test_tanto_target_clicks_tanto(self):
         """短刀目标点「短刀」——刀种来自 sword_db，不是写死。"""
@@ -1447,31 +1447,31 @@ class FilterPanelTests(unittest.TestCase):
         filtered = [[_row("今剑", 150, level=99, fatigue=100, form="kiwame",
                           becomes=_slot(3, catalog=IMA, name="今剑",
                                         level=99, kiwame="kiwame"))]]
-        maa, host = _std_setup(pages=full)
-        maa.filtered_pages = filtered
-        maa.single_page_sighted = True
+        device, host = _std_setup(pages=full)
+        device.filtered_pages = filtered
+        device.single_page_sighted = True
         target = {"sword_catalog_id": IMA, "name": "今剑",
                   "form": "kiwame", "level": 99}
         result = _run(host, target=target)
 
         self.assertEqual(result["result"], CHANGED)
-        self.assertEqual(maa.filter_clicks, ["取消筛选", "短刀", "极", "确定"])
+        self.assertEqual(device.filter_clicks, ["取消筛选", "短刀", "极", "确定"])
 
     def test_form_button_missing_bails_out_and_closes_panel(self):
         """「极」认不到（2026-09-22 真机：查找范围下缘切了按钮行）：
         停下，且兜底点 X 关面板——面板不在 navigator 页面地图里，
         留着会把收尾导航卡死。"""
         full, _filtered = self._kiwame_hasebe_pages()
-        maa, host = _std_setup(pages=full)
-        maa.missing_form_button = True
+        device, host = _std_setup(pages=full)
+        device.missing_form_button = True
         result = _run(host, target=_target(form="kiwame", level=99))
 
         self.assertEqual(result["result"], SCREEN_UNRECOGNIZED)
-        self.assertEqual(maa.filter_clicks, ["取消筛选", "打刀"])
-        self.assertIn((1149, 47), maa.clicks)       # X 点了
-        self.assertFalse(maa.in_filter)             # 面板关掉了
-        self.assertEqual(maa.swipes, [])            # 没翻页
-        _assert_never_departs(self, maa)
+        self.assertEqual(device.filter_clicks, ["取消筛选", "打刀"])
+        self.assertIn((1149, 47), device.clicks)       # X 点了
+        self.assertFalse(device.in_filter)             # 面板关掉了
+        self.assertEqual(device.swipes, [])            # 没翻页
+        _assert_never_departs(self, device)
 
 
 if __name__ == "__main__":

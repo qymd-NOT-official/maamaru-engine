@@ -25,7 +25,7 @@ from pathlib import Path
 
 from ..edo_route import EDOCASTLE_TOUR, decide_next, load_archive
 from ..flow_control import FlowAborted
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 
 
 class EdocastleMixin:
@@ -124,13 +124,13 @@ class EdocastleMixin:
         # ========== 2. 进入活动界面 ==========
         entered = False
         for _ in range(8):
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["ui_title"]["template"]):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["ui_title"]["template"]):
                 entered = True
                 break
-            entry = self.maa.template_match(cfg["activity_entry"]["template"])
+            entry = self.device.template_match(cfg["activity_entry"]["template"])
             if entry:
-                self.maa.click(entry)
+                self.device.click(entry)
                 time.sleep(2.0)
             else:
                 time.sleep(1.0)
@@ -434,10 +434,10 @@ class EdocastleMixin:
                 # 20 秒既没开打也没回地图。最后不点击地验一次地图：
                 # 地图活着 = 刚才那下被动画吞了点空了，原地重新决策；
                 # 地图也不在 = 认不出现场，停手留证，绝不盲撤。
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 ready = cfg["map_ready"]
                 ready_roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
-                if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+                if self.device.ocr(expected=ready["expected"], roi=ready_roi):
                     mistaps += 1
                     if mistaps >= 3:
                         yield "[江户城] 连续点空 3 次，节点坐标可能漂了，停"
@@ -495,16 +495,16 @@ class EdocastleMixin:
         ready_roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
         deadline = time.monotonic() + max(1.0, float(timeout_s))
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_mode_state(
                 allow_auto_without_title=formation_mode != "auto"
             ) is not None:
                 return "battle"
             if formation_mode == "auto" and self._formation_auto_marker_visible():
                 return "battle"
-            if self.maa.template_match("battle/ui战斗结果.png"):
+            if self.device.template_match("battle/ui战斗结果.png"):
                 return "battle_result"
-            if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+            if self.device.ocr(expected=ready["expected"], roi=ready_roi):
                 return "map"
             if skip_point:
                 self._click_point(skip_point)
@@ -521,7 +521,7 @@ class EdocastleMixin:
         读 cfg 永远拿到默认 manual（曾导致自动模式下也放行无标题判定）。"""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_mode_state(
                 allow_auto_without_title=formation_mode != "auto"
             ) is not None:
@@ -566,7 +566,7 @@ class EdocastleMixin:
         # 等阵形页消失
         for _ in range(10):
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_mode_state() is None:
                 return True
         return False
@@ -576,7 +576,7 @@ class EdocastleMixin:
         formation = self.config.get("formation", {})
         mode = formation.get("auto_mode", {})
         roi = roi_4to4(*mode.get("roi", [840, 0, 980, 68]))
-        return bool(self.maa.template_match(
+        return bool(self.device.template_match(
             mode.get("auto_template", "battle/阵形选择自动.png"),
             roi,
             threshold=float(mode.get("threshold", 0.9)),
@@ -625,7 +625,7 @@ class EdocastleMixin:
         try:
             if upscale > 1:
                 import cv2
-                img = self.maa.screenshot(force=True)
+                img = self.device.screenshot(force=True)
                 if img is None:
                     return None
                 crop = img[roi.y:roi.y + roi.h, roi.x:roi.x + roi.w]
@@ -633,10 +633,10 @@ class EdocastleMixin:
                     return None
                 up = cv2.resize(crop, None, fx=upscale, fy=upscale,
                                 interpolation=cv2.INTER_CUBIC)
-                tokens = self.maa.ocr_all(
+                tokens = self.device.ocr_all(
                     roi_4to4(0, 0, up.shape[1], up.shape[0]), image=up)
             else:
-                tokens = self.maa.ocr_all(roi)
+                tokens = self.device.ocr_all(roi)
             ordered = sorted(tokens or [], key=lambda row: getattr(row[1], "x", 0))
             digits = "".join(
                 re.sub(r"\D", "", str(text)) for text, _ in ordered
@@ -658,7 +658,7 @@ class EdocastleMixin:
         try:
             out = Path(debug_dir) if debug_dir else Path(self._root) / "debug"
             out.mkdir(parents=True, exist_ok=True)
-            self.maa.save_screenshot(
+            self.device.save_screenshot(
                 str(out / f"edo_{name}_{time.strftime('%H%M%S')}.png"))
         except Exception:
             pass
@@ -700,10 +700,10 @@ class EdocastleMixin:
             "template", "battle/ui阵形选择.png")
         deadline = time.monotonic() + max(1.0, float(timeout_s))
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=ready["expected"], roi=ready_roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=ready["expected"], roi=ready_roi):
                 return "map"
-            if self.maa.template_match(
+            if self.device.template_match(
                     formation_template, roi=formation_roi):
                 return "formation"
             # 自动标志比共同标题略早出现；这里只在刚确认出阵的窄上下文
@@ -744,18 +744,18 @@ class EdocastleMixin:
         result_seen = False
         roi = roi_4to4(*target_roi) if target_roi else None
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             target_found = bool(
                 target_template
-                and self.maa.template_match(target_template, roi=roi)
+                and self.device.template_match(target_template, roi=roi)
             )
             if not target_found and target_ocr_expected:
-                target_found = bool(self.maa.ocr(
+                target_found = bool(self.device.ocr(
                     expected=target_ocr_expected, roi=roi))
             if target_found:
                 return True
             if not result_seen:
-                result_seen = bool(self.maa.template_match("battle/ui战斗结果.png"))
+                result_seen = bool(self.device.template_match("battle/ui战斗结果.png"))
                 if not result_seen:
                     time.sleep(0.5)
                     continue
@@ -783,12 +783,12 @@ class EdocastleMixin:
         （2026-09-09 实测误判，把撤退三连点全点进了结算页）。
         必须同时看到左下角『地图点选择』才算地图真的可操作。
         """
-        self.maa.screenshot(force=True)
-        if not self.maa.template_match(cfg["map_landmark"]["template"]):
+        self.device.screenshot(force=True)
+        if not self.device.template_match(cfg["map_landmark"]["template"]):
             return False
         ready = cfg["map_ready"]
         roi = roi_4to4(*ready["roi"]) if ready.get("roi") else None
-        return bool(self.maa.ocr(expected=ready["expected"], roi=roi))
+        return bool(self.device.ocr(expected=ready["expected"], roi=roi))
 
     def _bail_out_stream(self, cfg: dict):
         """地图内主动撤退：行动选择 tab → 返回本丸 → 是 → 点掉回城结算。
@@ -808,8 +808,8 @@ class EdocastleMixin:
         menu_open = False
         for _ in range(5):
             time.sleep(0.8)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected="返回本丸"):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected="返回本丸"):
                 menu_open = True
                 break
         if not menu_open:

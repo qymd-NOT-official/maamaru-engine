@@ -9,13 +9,13 @@ import re
 import time
 from datetime import datetime
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from ..runtime_paths import STATE_DIR
 from ..team_state_reader import read_team_snapshot
 from ..team_state import injury_from_ocr_tokens, injury_reaches_threshold
 
 
-def find_deploy_button(maa, cfg: dict):
+def find_deploy_button(device, cfg: dict):
     """用右下角 OCR 找“部队选择”，返回可点击的文字中心点。
 
     不能再用“部队选择”PNG：它和“即刻出阵”按钮皮肤相近，模板
@@ -32,11 +32,11 @@ def find_deploy_button(maa, cfg: dict):
     # OCR 默认复用 MaaAdapter._last_image。页面切换后的固定 sleep 不会让
     # 缓存失效：旧图上的“部队选择”和新图上的“即刻出阵”恰好同坐标，
     # 曾造成识别完全正确、点击却落在下一页按钮上的跨帧竞态。
-    maa.screenshot(force=True)
+    device.screenshot(force=True)
     roi = roi_4to4(*ocr_cfg.get("roi", [1110, 580, 1279, 710]))
     points = []
     for word in expected:
-        point = maa.ocr(expected=word, roi=roi)
+        point = device.ocr(expected=word, roi=roi)
         if not point:
             return None
         points.append(point)
@@ -70,25 +70,25 @@ class BattleMixin:
         """安全退出“刀装未满”弹窗；返回 None 表示当前没有该弹窗。"""
         warning_cfg = cfg.get("equip_warning_button", {})
         warning_template = warning_cfg.get("template")
-        if not warning_template or not self.maa.template_match(warning_template):
+        if not warning_template or not self.device.template_match(warning_template):
             return None
 
         # 绝不点“继续出阵”。“整备刀装”会关闭警告并回到部队选择。
         prepare_cfg = cfg.get("equip_warning_prepare", {})
         prepare_template = prepare_cfg.get("template", "team/整备刀装.png")
-        prepare = self.maa.template_match(prepare_template)
+        prepare = self.device.template_match(prepare_template)
         if not prepare:
             return False
-        self.maa.click(prepare)
+        self.device.click(prepare)
         time.sleep(0.8)
 
         team_ui = cfg.get("team_ui_ocr", {})
         team_roi_raw = team_ui.get("roi")
         team_roi = roi_4to4(*team_roi_raw) if team_roi_raw else None
         for _ in range(6):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if (team_roi and team_ui.get("expected")
-                    and self.maa.ocr(team_ui["expected"], team_roi)):
+                    and self.device.ocr(team_ui["expected"], team_roi)):
                 return True
             time.sleep(0.4)
         return False
@@ -100,7 +100,7 @@ class BattleMixin:
             return None
         roi_raw = item.get("roi")
         roi = roi_4to4(*roi_raw) if roi_raw else None
-        return self.maa.template_match(
+        return self.device.template_match(
             template, roi, threshold=float(item.get("threshold", 0.7)))
 
     def _match_departure_prompt(self, cfg: dict):
@@ -111,7 +111,7 @@ class BattleMixin:
             roi_raw = ocr_cfg.get("roi")
             if not roi_raw or not ocr_cfg.get("expected"):
                 return None
-            title = self.maa.ocr(
+            title = self.device.ocr(
                 ocr_cfg["expected"], roi_4to4(*roi_raw),
                 match_mode=ocr_cfg.get("match_mode", "exact"))
             if not title:
@@ -124,11 +124,11 @@ class BattleMixin:
                                    attempts: int = 10) -> bool:
         """部队记录页同时有“进行记录”和“使用记录”，认任意一个即可。"""
         for _ in range(attempts):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             for key in ("save_confirm", "load_confirm"):
                 button = record_config.get(key, {})
                 template = button.get("template")
-                if template and self.maa.template_match(template):
+                if template and self.device.template_match(template):
                     return True
             time.sleep(0.4)
         return False
@@ -143,8 +143,8 @@ class BattleMixin:
             return False
         roi = roi_4to4(*roi_raw)
         for _ in range(attempts):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected, roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected, roi):
                 return True
             time.sleep(0.5)
         return False
@@ -173,20 +173,20 @@ class BattleMixin:
     def _confirm_team_record(self, record: dict, action: str,
                              record_no: int = 1) -> bool:
         """确认保存/使用记录；模板失败时只在验明弹窗正文后用固定按钮位。"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         yes_cfg = record.get("yes_button", {})
         yes_roi_raw = yes_cfg.get("roi", [650, 430, 920, 590])
         yes_roi = roi_4to4(*yes_roi_raw)
         template = yes_cfg.get("template", "team/是.png")
-        yes = self.maa.template_match(template, yes_roi, threshold=0.65)
+        yes = self.device.template_match(template, yes_roi, threshold=0.65)
         if yes:
-            self.maa.click(yes)
+            self.device.click(yes)
             return True
 
         # 游戏更新会微调按钮皮肤，旧模板可能失效。固定坐标只能在 OCR 同时
         # 认出弹窗标题、动作和记录一时使用，绝不能见到任意“是”就点。
         modal_roi = roi_4to4(*record.get("confirm_ocr_roi", [330, 130, 950, 590]))
-        tokens = self.maa.ocr_all(modal_roi)
+        tokens = self.device.ocr_all(modal_roi)
         text = "".join(str(token) for token, _ in tokens).replace(" ", "")
         action_text = "记录到" if action == "save" else "使用"
         record_labels = ("记录部队一", "记录部队1") if record_no == 1 else (
@@ -197,8 +197,8 @@ class BattleMixin:
         if not guarded:
             return False
 
-        ocr_yes = self.maa.ocr("是", yes_roi, match_mode="exact")
-        self.maa.click(ocr_yes or Point(784, 510))
+        ocr_yes = self.device.ocr("是", yes_roi, match_mode="exact")
+        self.device.click(ocr_yes or Point(784, 510))
         return True
 
     def _save_team_record(self, cfg: dict, record_no: int = 1) -> bool:
@@ -245,21 +245,21 @@ class BattleMixin:
         None 表示没有警告；False 表示确有警告但恢复链路失败。
         """
         warning = cfg.get("equip_warning_button", {}).get("template")
-        if not warning or not self.maa.template_match(warning):
+        if not warning or not self.device.template_match(warning):
             return None
         prepare = cfg.get("equip_warning_prepare", {}).get(
             "template", "team/整备刀装.png")
-        prepare_pt = self.maa.template_match(prepare)
+        prepare_pt = self.device.template_match(prepare)
         if not prepare_pt:
             return False
-        self.maa.click(prepare_pt)
+        self.device.click(prepare_pt)
         time.sleep(1.0)
 
         record = self.config.get("team_select", {}).get("team_record", {})
         # “整备刀装”落在部队编成页，等右侧部队记录按钮真正可点。
         opened = False
         for _ in range(12):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._click_template_config(record.get("button", {})):
                 opened = True
                 break
@@ -323,31 +323,31 @@ class BattleMixin:
         from ..game_state import begin_operation, confirm_ticket
         self._recover_ok = False
         self._ticket_refill_receipt = None
-        boundary = begin_operation(self.maa)
+        boundary = begin_operation(self.device)
         rec_cfg = cfg["ticket_recover"]
 
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         refill = self._match_template_config(rec_cfg["popup_button"])
         if not refill:
             yield f"{tag} 找不到补充按钮"
             return
-        self.maa.click(refill)
+        self.device.click(refill)
         time.sleep(1.5)
 
         recover_cfg = rec_cfg.get("recover_button", {})
         slider_style = not recover_cfg.get("template")
         if not slider_style:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             recover = self._match_template_config(recover_cfg)
             if not recover:
                 yield f"{tag} 找不到恢复1个按钮"
                 return
-            self.maa.click(recover)
+            self.device.click(recover)
             time.sleep(1.5)
 
         qty_roi_raw = rec_cfg.get("quantity_ocr", {}).get("roi")
         if qty_roi_raw:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             qty = self._ocr_refill_quantity(roi_4to4(*qty_roi_raw))
             if qty is None:
                 yield f"{tag} 补充数量没读清，停手没点确认"
@@ -360,14 +360,14 @@ class BattleMixin:
         max_clicks = 3 if slider_style else 1
         clicks = 0
         while clicks < max_clicks:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             confirm = self._match_template_config(rec_cfg["confirm_button"])
             if not confirm:
                 break
-            self.maa.click(confirm)
+            self.device.click(confirm)
             clicks += 1
             time.sleep(1.5)
-            receipt = confirm_ticket(self.maa, boundary)
+            receipt = confirm_ticket(self.device, boundary)
             if receipt is False:
                 yield f"{tag} 游戏未受理本次补充，停止点击"
                 return
@@ -377,13 +377,13 @@ class BattleMixin:
             yield f"{tag} 找不到恢复完毕的确定按钮"
             return
         if slider_style and clicks >= max_clicks:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._match_template_config(rec_cfg["confirm_button"]) and not isinstance(self._ticket_refill_receipt, dict):
                 yield f"{tag} 确认点了 {clicks} 次还在，停手防死循环"
                 return
         time.sleep(0.5)
 
-        receipt = confirm_ticket(self.maa, boundary)
+        receipt = confirm_ticket(self.device, boundary)
         if receipt is None and isinstance(self._ticket_refill_receipt, dict):
             receipt = self._ticket_refill_receipt
         if receipt is False:
@@ -400,7 +400,7 @@ class BattleMixin:
     def _ocr_refill_quantity(self, roi) -> int | None:
         """读补充页数量框里的数字；读不出返回 None，由调用方停止付款。"""
         try:
-            tokens = self.maa.ocr_all(roi)
+            tokens = self.device.ocr_all(roi)
             digits = "".join(
                 re.sub(r"\D", "", str(text)) for text, _ in tokens or [])
             return int(digits) if digits else None
@@ -438,7 +438,7 @@ class BattleMixin:
             for template in map_config.get("verify_templates", []):
                 roi_raw = map_config["verify_roi"]
                 roi = roi_4to4(roi_raw[0], roi_raw[1], roi_raw[2], roi_raw[3])
-                if self.maa.exists(template, roi):
+                if self.device.exists(template, roi):
                     print(f"[MAP] 到达活动界面")
                     return True
             return False
@@ -466,7 +466,7 @@ class BattleMixin:
     # ==================== 部队选择 ====================
 
     def _find_deploy_button(self, cfg: dict):
-        return find_deploy_button(self.maa, cfg)
+        return find_deploy_button(self.device, cfg)
 
     def _wait_for_team_select(self, cfg: dict, attempts: int = 10,
                               open_after: int = None) -> bool:
@@ -479,13 +479,13 @@ class BattleMixin:
         roi = roi_4to4(*roi_raw)
 
         for attempt in range(attempts):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=expected, roi=roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=expected, roi=roi):
                 return True
             if open_after is not None and attempt == open_after:
                 deploy = self._find_deploy_button(cfg)
                 if deploy:
-                    self.maa.click(deploy)
+                    self.device.click(deploy)
                     time.sleep(1.5)
             time.sleep(0.5)
         return False
@@ -506,10 +506,10 @@ class BattleMixin:
         """点击各玩法共用的“即刻出阵”按钮。"""
         depart_cfg = cfg.get("depart_button", {})
         template = depart_cfg.get("template")
-        depart = self.maa.template_match(template) if template else None
+        depart = self.device.template_match(template) if template else None
         if not depart:
             return False
-        self.maa.click(depart)
+        self.device.click(depart)
         time.sleep(1.5)
         return True
 
@@ -564,7 +564,7 @@ class BattleMixin:
         # AB 实测真章 cv2 0.85 擦线、无章画面噪声峰同高），文字识别没有
         # 这层校准差。模板只作 OCR 漏读（糊帧/动画）时的兜底，且只搜六行
         # 头像右缘的伤势章窄栏。
-        hit = injury_from_ocr_tokens(self.maa.ocr_all(roi))
+        hit = injury_from_ocr_tokens(self.device.ocr_all(roi))
         if hit:
             return hit
         # 三种伤势章版式几乎一样：实测中伤章能以 0.704 擦线命中重伤模板，
@@ -574,19 +574,19 @@ class BattleMixin:
             stamp_cfg = stamps.get(severity, {})
             template = stamp_cfg.get("template")
             threshold = float(stamp_cfg.get("threshold", 0.88))
-            if template and self.maa.template_match(
+            if template and self.device.template_match(
                     template, stamp_roi, threshold=threshold):
                 return severity
         if not stamps:
             legacy = cfg.get("injury_stamp", {}).get("template")
-            if legacy and self.maa.template_match(legacy, roi):
+            if legacy and self.device.template_match(legacy, roi):
                 return "重伤"
         return None
 
     def _battle_dialog_text(self):
         """只读中央弹窗正文，避免把背景按钮当作确认内容。"""
         return "".join(str(text).replace(" ", "") for text, _ in
-                       self.maa.ocr_all(roi_4to4(330, 240, 950, 440)))
+                       self.device.ocr_all(roi_4to4(330, 240, 950, 440)))
 
     @staticmethod
     def _is_heavy_injury_dialog(text):
@@ -597,7 +597,7 @@ class BattleMixin:
         # 国服两级重伤确认、返程确认都使用左右按钮；必须读到完整按钮文字。
         bounds = (650, 400, 950, 580) if label == "否" else (330, 400, 650, 580)
         roi = roi_4to4(*bounds)
-        return next((point for text, point in self.maa.ocr_all(roi)
+        return next((point for text, point in self.device.ocr_all(roi)
                      if str(text).strip() == label
                      and roi.x <= point.x < roi.x + roi.w
                      and roi.y <= point.y < roi.y + roi.h), None)
@@ -611,9 +611,9 @@ class BattleMixin:
             deny = self._battle_dialog_button("否")
             if deny is None:
                 raise FlowAborted("重伤警告的【否】未确认，已停止点击，请手动查看")
-            self.maa.click(deny)
+            self.device.click(deny)
             time.sleep(0.8)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if not self._is_heavy_injury_dialog(self._battle_dialog_text()):
                 break
         else:
@@ -679,7 +679,7 @@ class BattleMixin:
                 # 队伍继续保存记录或出阵。
                 yield f"{tag} 自动换队长未确认，停止出阵: {exc}"
                 return False, team_record_saved
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         log_cache: dict = {}
         injury, log_note = self._combined_injury_status(cfg, team_no,
                                                         log_cache)
@@ -711,7 +711,7 @@ class BattleMixin:
             if not self._click_depart(cfg):
                 yield f"{tag} 找不到即刻出阵按钮"
                 return False, team_record_saved
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 明确的出阵确认标题优先级最高。江户城二次出阵确认页的绿色
             # “确定”曾以 0.706 擦线命中绿色“补充”，若先查补票会被误判成
@@ -734,7 +734,7 @@ class BattleMixin:
                     close = self._match_template_config(
                         recover.get("close_button", {}))
                     if close:
-                        self.maa.click(close)
+                        self.device.click(close)
                         time.sleep(1.0)
                         yield f"{tag} 票用完了，不补票，已关闭弹窗，收工"
                     else:
@@ -748,7 +748,7 @@ class BattleMixin:
                     close = self._match_template_config(
                         recover.get("close_button", {}))
                     if close:
-                        self.maa.click(close)
+                        self.device.click(close)
                         time.sleep(1.0)
                         yield f"{tag} 已顺手关闭补充弹窗"
                     return False, team_record_saved
@@ -763,7 +763,7 @@ class BattleMixin:
             # 不补就点取消收工；补就点确定，然后重新点即刻出阵。
             refill = cfg.get("ticket_refill", {})
             popup_template = refill.get("popup", {}).get("template")
-            if popup_template and self.maa.template_match(popup_template):
+            if popup_template and self.device.template_match(popup_template):
                 if not auto_refill or refill_done:
                     if refill_done:
                         yield (f"{tag} 补票后仍弹补票窗，停止点击，"
@@ -771,10 +771,10 @@ class BattleMixin:
                         return False, team_record_saved
                     cancel_template = refill.get(
                         "cancel_button", {}).get("template")
-                    cancel = (self.maa.template_match(cancel_template)
+                    cancel = (self.device.template_match(cancel_template)
                               if cancel_template else None)
                     if cancel:
-                        self.maa.click(cancel)
+                        self.device.click(cancel)
                         time.sleep(1.0)
                         yield f"{tag} 票用完了，不补票，已取消出阵，收工"
                     else:
@@ -783,24 +783,24 @@ class BattleMixin:
                     return False, team_record_saved
                 confirm_template = refill.get(
                     "confirm_button", {}).get("template")
-                confirm = (self.maa.template_match(confirm_template)
+                confirm = (self.device.template_match(confirm_template)
                            if confirm_template else None)
                 if not confirm:
                     yield (f"{tag} 补票弹窗的确定按钮没认出，停止点击，"
                            "请手动看一眼")
                     return False, team_record_saved
                 from ..game_state import begin_operation, confirm_ticket
-                boundary = begin_operation(self.maa)
+                boundary = begin_operation(self.device)
                 self._ticket_refill_receipt = None
-                self.maa.click(confirm)
+                self.device.click(confirm)
                 time.sleep(1.5)
-                receipt = confirm_ticket(self.maa, boundary)
+                receipt = confirm_ticket(self.device, boundary)
                 if receipt is False:
                     yield f"{tag} 游戏未受理本次补票，停止出阵"
                     return False, team_record_saved
                 if isinstance(receipt, dict):
                     self._ticket_refill_receipt = receipt
-                elif self.maa.template_match(popup_template):
+                elif self.device.template_match(popup_template):
                     yield f"{tag} 补票结果未确认，停止点击，防止重复消费小判"
                     return False, team_record_saved
                 refill_done = True
@@ -823,7 +823,7 @@ class BattleMixin:
                 if equip_retries >= 2:
                     yield f"{tag} 恢复刀装后仍出现空缺警告，停止重试"
                     return False, team_record_saved
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 # 使用记录可能改变队员；不得复用恢复前的验伤数据。
                 log_cache.clear()
                 restored_injury, _ = self._combined_injury_status(
@@ -857,11 +857,11 @@ class BattleMixin:
         """
         prompt = cfg.get("confirm_ui", {})
         for _ in range(10):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if text_prompt is not None:
                 # 文字确认页使用已限定区域的正文作为门闩；认到才可点目标。
                 target = text_prompt.get("confirm_target")
-                if target and self.maa.ocr(
+                if target and self.device.ocr(
                         text_prompt["expected"], roi_4to4(*text_prompt["roi"])):
                     self._click_point(target)
                     time.sleep(1.5)
@@ -872,7 +872,7 @@ class BattleMixin:
                 confirm = cfg.get("confirm_button", {})
                 button = self._match_template_config(confirm)
                 if button:
-                    self.maa.click(button)
+                    self.device.click(button)
                     time.sleep(1.5)
                     return True
                 target = confirm.get("target")
@@ -903,7 +903,7 @@ class BattleMixin:
         enter = team_config["enter_button"]
         deploy = self._find_deploy_button({"deploy_button": enter})
         if deploy:
-            self.maa.click(deploy)
+            self.device.click(deploy)
         time.sleep(1.5)
 
         # 2. 选择部队
@@ -982,7 +982,7 @@ class BattleMixin:
                              check_roi_raw[2], check_roi_raw[3])
 
         # 检查是否已经在委托中
-        delegated = self.maa.exists(
+        delegated = self.device.exists(
             march_config["check_delegated"]["template"],
             check_roi
         )
@@ -1000,8 +1000,8 @@ class BattleMixin:
         pt = None
         for _ in range(10):
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            pt = self.maa.template_match(delegate_tpl)
+            self.device.screenshot(force=True)
+            pt = self.device.template_match(delegate_tpl)
             if pt:
                 break
         if not pt:
@@ -1009,82 +1009,82 @@ class BattleMixin:
             return False
 
         # 点"委托"只是选中单选框，点 X 关闭弹窗才生效
-        self.maa.click(pt)
+        self.device.click(pt)
         time.sleep(0.5)
         self._click_point(march_config["close_window"])
         time.sleep(1.0)
 
         # 验证结果
-        self.maa.screenshot(force=True)
-        ok = self.maa.exists(march_config["check_delegated"]["template"], check_roi)
+        self.device.screenshot(force=True)
+        ok = self.device.exists(march_config["check_delegated"]["template"], check_roi)
         print(f"[AUTO_MARCH] 委托{'成功' if ok else '失败（标记没出现）'}")
         return ok
 
     def _configure_auto_march_settings(self, policy) -> bool:
         from ..auto_march_settings import apply_details
         cfg = self.config["team_select"]["auto_march"]
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         if not self._click_template_config(cfg["enable_button"]):
             return False
         for _ in range(10):
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+            self.device.screenshot(force=True)
+            if self.device.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
                 break
         else:
             return False
-        detail = self.maa.ocr("详细设定", roi_4to4(450, 400, 820, 510),
+        detail = self.device.ocr("详细设定", roi_4to4(450, 400, 820, 510),
                               match_mode="exact")
         if not detail:
             return False
-        self.maa.click(detail)
+        self.device.click(detail)
         time.sleep(0.6)
-        if not apply_details(self.maa, policy):
+        if not apply_details(self.device, policy):
             return False
         # 标题已验证，此 X 只关闭详细设定。
         self._click_point([1250, 30])
         time.sleep(0.6)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
             return False
         self._click_point(cfg["close_window"])
         time.sleep(0.6)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.template_match(cfg["enable_button"]["template"]))
+        self.device.screenshot(force=True)
+        return bool(self.device.template_match(cfg["enable_button"]["template"]))
 
     def _disable_auto_march(self) -> bool:
         """清除游戏记住的委托状态；弹窗未确认时绝不盲点关闭。"""
         cfg = self.config["team_select"]["auto_march"]
         check = cfg["check_delegated"]
         roi = roi_4to4(*check["roi"])
-        self.maa.screenshot(force=True)
-        if not self.maa.exists(check["template"], roi):
+        self.device.screenshot(force=True)
+        if not self.device.exists(check["template"], roi):
             return True
         if not self._click_template_config(cfg["enable_button"]):
             return False
         opened = False
         for _ in range(10):
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+            self.device.screenshot(force=True)
+            if self.device.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
                 opened = True
                 break
         if not opened:
             return False
         # “不委托”与“委托”是两个单选项，必须命中完整文字。
-        point = self.maa.ocr("不委托", roi_4to4(200, 100, 1100, 650),
+        point = self.device.ocr("不委托", roi_4to4(200, 100, 1100, 650),
                              match_mode="exact")
         if not point:
             self._click_point(cfg["close_window"])
             return False
-        self.maa.click(point)
+        self.device.click(point)
         time.sleep(0.5)
         self._click_point(cfg["close_window"])
         time.sleep(1.0)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         # 既要回到部队选择页，也要看到委托标记消失。
-        return bool(self.maa.template_match(cfg["enable_button"]["template"])
-                    and not self.maa.exists(check["template"], roi))
+        return bool(self.device.template_match(cfg["enable_button"]["template"])
+                    and not self.device.exists(check["template"], roi))
 
     # ==================== 阵形选择 ====================
 
@@ -1110,7 +1110,7 @@ class BattleMixin:
             deadline = time.monotonic() + 5.0
             while current is None and time.monotonic() < deadline:
                 time.sleep(0.5)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 current = self._formation_mode_state(
                     allow_auto_without_title=not enable_auto)
             if current is None:
@@ -1142,14 +1142,14 @@ class BattleMixin:
             # 已经是自动、选择页却还挂着：索敌失败时敌方阵形「不明」，
             # 游戏没东西可选会卡在页面上等手动；或刚从手动拨到自动、当前
             # 这一场仍归手动处理。两种情况都先认“有利”，认不出再点兜底。
-            point = self.maa.template_match(
+            point = self.device.template_match(
                 cfg.get("advantage_template", "battle/ui有利.png"),
                 threshold=0.7,
             )
             if point:
-                self.maa.click(Point(point.x, point.y))
+                self.device.click(Point(point.x, point.y))
                 time.sleep(0.6)
-                self.maa.click(Point(point.x, point.y))
+                self.device.click(Point(point.x, point.y))
                 return "advantage"
 
         return ("fixed" if self.select_formation(
@@ -1166,7 +1166,7 @@ class BattleMixin:
         hits = 0
         attempts = max(stable_hits, int(max(0.4, timeout_s) / 0.4))
         for _ in range(attempts):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_selection_visible():
                 hits += 1
                 if hits >= stable_hits:
@@ -1185,12 +1185,12 @@ class BattleMixin:
         """
         formation = self.config.get("formation", {})
         verify = formation.get("verify", {})
-        if self.maa.template_match(
+        if self.device.template_match(
                 verify.get("template", "battle/ui阵形选择.png"),
                 roi_4to4(*verify.get("roi", [571, 5, 707, 44]))):
             return True
 
-        ocr_all = getattr(self.maa, "ocr_all", None)
+        ocr_all = getattr(self.device, "ocr_all", None)
         if not callable(ocr_all):
             return False
         try:
@@ -1216,7 +1216,7 @@ class BattleMixin:
         """拨动模式后，确认当前阵形选择页仍连续存在。"""
         hits = 0
         for _ in range(max(stable_hits, attempts)):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_selection_visible():
                 hits += 1
                 if hits >= stable_hits:
@@ -1231,7 +1231,7 @@ class BattleMixin:
         """点阵形后要求标题和阵形名连续消失，才算真正开战。"""
         misses = 0
         for _ in range(max(stable_misses, attempts)):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_selection_visible():
                 misses = 0
             else:
@@ -1254,15 +1254,15 @@ class BattleMixin:
         auto_template = mode.get("auto_template", "battle/阵形选择自动.png")
         manual_template = mode.get("manual_template", "battle/阵形选择手动.png")
         threshold = float(mode.get("threshold", 0.9))
-        title_visible = bool(self.maa.template_match(verify_template, verify_roi))
+        title_visible = bool(self.device.template_match(verify_template, verify_roi))
         # 两张图的上半截完全相同，实测整图相关度约 0.879；旧阈值 0.7 会让
         # “手动”继续命中“自动”，于是脚本在战斗中反复拨动按钮。
-        if self.maa.template_match(auto_template, roi, threshold=threshold) and (
+        if self.device.template_match(auto_template, roi, threshold=threshold) and (
                 title_visible or allow_auto_without_title):
             # 自动阵形会跳过选择页，因此切回手动时只能抓住常驻的自动状态按钮。
             # 调用方仅在“想要手动”时开启此例外；想保持自动时不会在战斗中反复处理。
             return "auto"
-        if title_visible and self.maa.template_match(
+        if title_visible and self.device.template_match(
                 manual_template, roi, threshold=threshold):
             return "manual"
         return None
@@ -1322,21 +1322,21 @@ class BattleMixin:
         """
         stop_btn = None
         for _ in range(6):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             # 弹窗会透出背景的返程按钮，先消除重伤确认，不能点穿它。
             self._deny_heavy_injury_warning(cfg)
             observer = getattr(self, "_watch_battle_frame", None)
             if callable(observer):
                 observer()  # 有行军观察器的宿主继续记录本帧。
-            stop_btn = self.maa.template_match(cfg["march_stop_button"]["template"])
+            stop_btn = self.device.template_match(cfg["march_stop_button"]["template"])
             if stop_btn:
                 break
             time.sleep(0.5)
         if not stop_btn:
             return False
-        self.maa.click(stop_btn)
+        self.device.click(stop_btn)
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         text = self._battle_dialog_text()
         if self._is_heavy_injury_dialog(text):
             self._deny_heavy_injury_warning(cfg)
@@ -1346,14 +1346,14 @@ class BattleMixin:
             yes = self._battle_dialog_button("是")
             if yes is None:
                 return False
-            self.maa.click(yes)
-        elif not self.maa.template_match(cfg["home_ui"]["template"]):
+            self.device.click(yes)
+        elif not self.device.template_match(cfg["home_ui"]["template"]):
             return False
         time.sleep(2.0)
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["home_ui"]["template"]):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["home_ui"]["template"]):
                 return True
             time.sleep(0.8)
         return False

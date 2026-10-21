@@ -1,7 +1,7 @@
 """MuMu 显存截图通道（external_renderer_ipc.dll 共享内存）。
 
 不走 ADB：直接读模拟器渲染好的帧，毫秒级一张，天然免疫裸 ADB
-screencap 流传输抽风吐半张图（image file is truncated → MAA 掉线
+screencap 流传输抽风吐半张图（image file is truncated → 旧截图链路掉线
 判死，2026-08-25/26 两次实测炸点）。
 
 dll 随 MuMuPlayer 附带，路径从 adb 路径推导：
@@ -13,7 +13,7 @@ dll 随 MuMuPlayer 附带，路径从 adb 路径推导：
     —— buffer_size=0 且 pixels=NULL 时只查询宽高
   nemu_disconnect(handle)
 
-任何一步失败都返回 None，调用方（maa_adapter）回退裸 ADB 老路。
+任何一步失败都返回 None，调用方（device_adapter）回退裸 ADB 老路。
 连续失败 3 次后本场运行停用该通道（省得每帧白试），ADB 兜底照旧。
 注意：工人进程用 os._exit(43) 自杀时不会走 disconnect，IPC 连接随
 进程陪葬，MuMu 侧自己回收——这是刻意的，不为此加钩子。
@@ -164,7 +164,7 @@ class MumuScreen:
             import numpy as np
             frame = np.frombuffer(self._buf, dtype=np.uint8).reshape(
                 (height.value, width.value, 4))
-            # RGBA → BGR（MAA 识别要 BGR），并垂直翻转（显存帧是倒的）
+            # RGBA → BGR（识别引擎要 BGR），并垂直翻转（显存帧是倒的）
             bgr = np.ascontiguousarray(frame[::-1, :, [2, 1, 0]])
             self._failures = 0
             # 冻帧检测：dll 缓冲区冻结时照样返回 rc=0 + 旧帧，表面一切正常。

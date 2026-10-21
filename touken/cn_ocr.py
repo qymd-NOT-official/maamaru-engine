@@ -2,10 +2,10 @@
 """国服画面文字读取（OCR）：numpy BGR 帧 + 像素 ROI 形态。
 
 与 jp_ocr 共用同一个懒加载引擎（仓内 PP-OCRv6 权重，引擎实例全局
-只加载一次）；区别只在输入语义：国服链路是 maa_adapter 的 numpy BGR
+只加载一次）；区别只在输入语义：国服链路是 device_adapter 的 numpy BGR
 帧 + 像素 ROI，返回坐标必须是全帧坐标（调用方拿着去点击）。
 
-本模块刻意不 import maa_adapter（它会被 maa_adapter 的引擎路由引用，
+本模块刻意不 import device_adapter（适配器的 OCR 通道会懒加载引用本模块，
 反向依赖就成环）：ROI 只要是有 x/y/w/h 属性的对象即可，坐标以裸
 整数元组进出，包成 Point 是调用方的事。
 """
@@ -63,8 +63,8 @@ def read_region(image, roi, min_score: float = 0.5) -> list:
     """读帧内一块像素区域的文字。
 
     Args:
-        image: numpy BGR 帧（maa_adapter.screenshot 的返回形态）。
-        roi: 有 x/y/w/h 属性的像素区域（如 maa_adapter.Region）。
+        image: numpy BGR 帧（device_adapter.screenshot 的返回形态）。
+        roi: 有 x/y/w/h 属性的像素区域（如 device_adapter.Region）。
         min_score: 置信度下限，低于的 token 丢弃。
 
     Returns:
@@ -100,7 +100,7 @@ _T2S = str.maketrans({'櫻': '樱'})
 
 
 def text_matches(text, expected, match_mode: str = "contains") -> bool:
-    """与 maa_adapter._ocr_text_matches 同语义；空串永远不算命中。
+    """与 device_adapter._ocr_text_matches 同语义；空串永远不算命中。
     比对前两边都过一遍繁简归一（画面印繁体、引擎可能认成简体）。"""
     text = str(text or "").strip().translate(_T2S)
     expected = str(expected or "").strip().translate(_T2S)
@@ -118,7 +118,7 @@ def find_text(image, roi, expected, match_mode: str = "contains",
     """读 ROI 并找目标文字，命中返回全帧坐标 (x, y)，否则 None。
 
     注意 contains 语义对 token 拆分敏感：目标词被引擎拆成两个 token
-    时单个 token 都含不住它（这和 MAA OCR 行为一致，调用方应像
+    时单个 token 都含不住它（这和旧引擎 OCR 行为一致，调用方应像
     find_deploy_button 那样拆词分别命中）。
     """
     for text, cx, cy, _score in read_region(image, roi, min_score):

@@ -26,7 +26,7 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _module_tmp.name}):
     from fastapi.testclient import TestClient
 
 from touken import flow_engine  # noqa: E402
-from touken.maa_adapter import Point  # noqa: E402  (假 adapter 的返回类型)
+from touken.device_adapter import Point  # noqa: E402  (假 adapter 的返回类型)
 
 
 def _step(id_, type_, params=None, on_fail=None, label=None):

@@ -7,7 +7,7 @@
 会话帧/草稿只写用户数据目录 DEBUG_DIR/template_lab/，采纳时才落 RESOURCE_DIR/image/。
 
 - 面板进程刻意不常驻游戏连接：adapter 在 capture 时才借 panel.server 的
-  _make_maa + _CONFIG_PATH 现造（lazy import，避开 server 挂 router 的循环依赖）。
+  _make_device + _CONFIG_PATH 现造（lazy import，避开 server 挂 router 的循环依赖）。
 - 帧与草稿内存里一律 BGR numpy、存盘一律 RGB PNG。cv2.imwrite 不认中文路径，
   存盘走 PIL（save_screenshot 同款），读盘走 np.fromfile + cv2.imdecode
   （match_badge_flowers 同款）。
@@ -69,8 +69,8 @@ def _is_dev() -> bool:
 
 def _create_adapter():
     """adapter 工厂钩子：默认借面板同款构造；测试 patch 本函数注入假截图源。"""
-    from .server import _CONFIG_PATH, _make_maa
-    return _make_maa(_CONFIG_PATH)
+    from .server import _CONFIG_PATH, _make_device
+    return _make_device(_CONFIG_PATH)
 
 
 def _validate_session_id(session) -> str:
@@ -350,7 +350,7 @@ def _capture_sync(count: int, interval_ms: int, memo: str = "") -> dict:
     try:
         adapter = _create_adapter()
         if not adapter.init():
-            raise RuntimeError("MAA 初始化失败，检查 ADB 连接 / 模拟器是不是关了。")
+            raise RuntimeError("设备初始化失败，检查 ADB 连接 / 模拟器是不是关了。")
     except HTTPException:
         raise
     except Exception as exc:
@@ -512,93 +512,15 @@ def _synthetic_ocr_probe_image():
 
 
 def _try_bind_offline_ocr(adapter) -> bool:
-    """照 maa_adapter.init() 复刻资源加载 + Tasker 绑定，跳过 ADB 连接等待：
-    OCR 是本地推理、帧直接喂图，用不上 controller 的截图/点击。
-    MaaFW 的 Tasker 只认「controller 已连接」的 inited（实测绑未连接的
-    AdbController 返回 inited=False，post_recognition 直接拒），所以用
-    全桩 CustomController 顶包，connected 默认 True。"""
+    """离线 OCR 通道自检：离线图是文件读入的 numpy BGR 帧，cn_ocr 本地
+    推理直接读，不需要设备连接。OCR 通道坏了不抛异常、只会安静回空表，
+    所以必须真从合成探针图上读出字才算通道可用。"""
     try:
-        import numpy as np  # noqa: F401  桩回调 screencap 的返回类型要用
-        from maa.controller import CustomController
-        from maa.resource import Resource
-        from maa.tasker import Tasker
-        from touken.maa_adapter import Region
-    except ImportError:
-        return False
-
-    class StubController(CustomController):
-        """全桩：OCR 喂图识别不碰这些回调，只为让 Tasker 的 inited 过检。"""
-
-        def connect(self):
-            return True
-
-        def request_uuid(self):
-            return "template-lab-offline-ocr"
-
-        def start_app(self, intent):
-            return False
-
-        def stop_app(self, intent):
-            return False
-
-        def screencap(self):
-            return np.zeros((0, 0, 3), dtype=np.uint8)
-
-        def click(self, x, y):
-            return False
-
-        def swipe(self, x1, y1, x2, y2, duration):
-            return False
-
-        def touch_down(self, contact, x, y, pressure):
-            return False
-
-        def touch_move(self, contact, x, y, pressure):
-            return False
-
-        def touch_up(self, contact):
-            return False
-
-        def click_key(self, keycode):
-            return False
-
-        def input_text(self, text):
-            return False
-
-        def key_down(self, keycode):
-            return False
-
-        def key_up(self, keycode):
-            return False
-
-        def scroll(self, dx, dy):
-            return False
-
-        def shell(self, cmd, timeout):
-            return None
-
-    try:
-        # 与 init() 同款：日志目录 + 资源包加载（这两步都是本地的，不碰 ADB）
-        log_dir = Path(adapter.project_root) / "debug"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        Tasker.set_log_dir(str(log_dir))
-        resource = Resource()
-        job = adapter._wait_job(resource.post_bundle(adapter.resource_dir),
-                                timeout=adapter.BUNDLE_TIMEOUT, label="资源加载")
-        if job is None or not job.succeeded:
-            return False
-        tasker = Tasker()
-        controller = StubController()
-        if not tasker.bind(resource, controller) or not tasker.inited:
-            return False
-
-        adapter.resource = resource
-        adapter.controller = controller
-        adapter.tasker = tasker
-        adapter._maa_timeouts = 0
+        from touken import cn_ocr
+        from touken.device_adapter import Region
         probe = _synthetic_ocr_probe_image()
-        found = adapter.ocr_all(Region(0, 0, probe.shape[1], probe.shape[0]),
-                                image=probe)
+        found = cn_ocr.read_region(probe,
+                                   Region(0, 0, probe.shape[1], probe.shape[0]))
         if not found:
             return False
         # 试读过了才挂牌 initialized（init() 开头拿它当「已就绪」的短路标志），
@@ -610,7 +532,7 @@ def _try_bind_offline_ocr(adapter) -> bool:
 
 
 def _create_ocr_adapter():
-    """离线 OCR 通道：优先不连 ADB 只绑 tasker；不行再回落完整 init。
+    """离线 OCR 通道：优先不连 ADB 直接自检 cn_ocr；不行再回落完整 init。
     测试 patch 本函数注入假 OCR adapter。"""
     adapter = _create_adapter()
     if _try_bind_offline_ocr(adapter):
@@ -638,7 +560,7 @@ def _ocr_test_sync(roi: dict, sessions: list) -> dict:
     except Exception as exc:
         raise HTTPException(503, f"OCR 通道起不来：{exc}") from exc
 
-    from touken.maa_adapter import Region
+    from touken.device_adapter import Region
     region = Region(roi["x"], roi["y"], roi["w"], roi["h"])
     results = []
     scanned = 0

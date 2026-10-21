@@ -142,62 +142,30 @@ def test_find_text_hit_and_miss(fake_engine):
                             '部队记录', match_mode='exact') == (25, 12)
 
 
-# ---- maa_adapter 引擎路由 ----
+# ---- device_adapter OCR 通道 ----
 
-from touken.maa_adapter import MAAAdapter, Point, Region
+from touken.device_adapter import DeviceAdapter, Point, Region
 
 
-def _adapter(monkeypatch, engine, native_tokens):
-    if engine is None:
-        monkeypatch.delenv('MAAMARU_OCR_ENGINE', raising=False)
-    else:
-        monkeypatch.setenv('MAAMARU_OCR_ENGINE', engine)
-    adapter = MAAAdapter(adb_path='x', adb_address='x', resource_dir='x')
+def _adapter(monkeypatch, native_tokens):
+    adapter = DeviceAdapter(adb_path='x', adb_address='x', resource_dir='x')
     monkeypatch.setattr(adapter, 'screenshot', lambda: frame())
     monkeypatch.setattr(cn_ocr, 'read_region',
                         lambda image, roi, min_score=0.5: native_tokens)
     return adapter
 
 
-def test_ocr_engine_defaults_to_native(monkeypatch):
+def test_ocr_hit_and_miss(monkeypatch):
     # 2026-10-20 转正：AB 双跑 3000+ 次定点查找，修完留白/检空退路后
-    # 1085 次零分歧，自研引擎毕业，MAA 退居回退口
-    adapter = _adapter(monkeypatch, None, [('目录', 1224, 38, 0.99)])
-    called = []
-    monkeypatch.setattr(adapter, '_ocr_maa',
-                        lambda *a, **k: called.append(1) or Point(1, 2))
+    # 1085 次零分歧，自研 cn_ocr 毕业，OCR 只有这一条路
+    adapter = _adapter(monkeypatch, [('目录', 1224, 38, 0.99)])
     assert adapter.ocr('目录', Region(1100, 0, 1280, 60)) == Point(1224, 38)
-    assert not called  # 默认走自研，不碰 MAA
+    assert adapter.ocr('不存在', Region(1100, 0, 1280, 60)) is None
 
 
-def test_ocr_native_engine_hit_and_miss(monkeypatch):
-    adapter = _adapter(monkeypatch, 'native', [('部队记录', 1210, 150, 0.99)])
-    assert adapter.ocr('部队记录', Region(1100, 100, 1280, 200)) == Point(1210, 150)
-    assert adapter.ocr('不存在', Region(1100, 100, 1280, 200)) is None
-
-
-def test_ocr_all_native_returns_points(monkeypatch):
-    adapter = _adapter(monkeypatch, 'native',
+def test_ocr_all_returns_points(monkeypatch):
+    adapter = _adapter(monkeypatch,
                        [('中伤', 290, 153, 0.97), ('疲劳 100/100', 500, 200, 0.99)])
     out = adapter.ocr_all(Region(0, 90, 570, 690))
     assert out == [('中伤', Point(290, 153)), ('疲劳 100/100', Point(500, 200))]
 
-
-def test_ocr_ab_mode_returns_maa_and_logs(monkeypatch, capsys):
-    adapter = _adapter(monkeypatch, 'ab', [('目录', 1224, 38, 0.99)])
-    monkeypatch.setattr(adapter, '_ocr_maa', lambda *a, **k: Point(1220, 40))
-    monkeypatch.setattr(adapter, '_ocr_all_maa',
-                        lambda *a, **k: [('目录', Point(1220, 40))])
-    assert adapter.ocr('目录', Region(1100, 0, 1280, 60)) == Point(1220, 40)
-    assert adapter.ocr_all(Region(1100, 0, 1280, 60)) == [('目录', Point(1220, 40))]
-    out = capsys.readouterr().out
-    assert '[AB文字] "目录": maa=命中(1220,40) native=命中(1224,38)' in out
-    assert '[AB文字] 全量: maa=1词 native=1词' in out
-    assert '分歧' not in out
-
-
-def test_ocr_ab_mode_flags_divergence(monkeypatch, capsys):
-    adapter = _adapter(monkeypatch, 'ab', [])  # native 读不到
-    monkeypatch.setattr(adapter, '_ocr_maa', lambda *a, **k: Point(5, 6))
-    assert adapter.ocr('目录', Region(0, 0, 100, 60)) == Point(5, 6)  # MAA 为准
-    assert '⚠分歧' in capsys.readouterr().out

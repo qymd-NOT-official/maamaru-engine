@@ -3,7 +3,7 @@
 同帧选中鱼鳞阵命中 1.000，未选中横队/雁行在 0.85 下不命中。
 """
 import time
-from .maa_adapter import roi_4to4
+from .device_adapter import roi_4to4
 
 SWITCHES = {
     'medium': ('中伤时停止', (60, 95, 260, 155), (275, 100, 400, 153)),
@@ -26,11 +26,11 @@ def march_policy(repair_threshold, injury_action, auto_equip, stop_on_fatigue, f
             'fatigue': bool(stop_on_fatigue), 'formation': formation}
 
 
-def read_switch(maa, key):
+def read_switch(device, key):
     label, label_roi, switch_roi = SWITCHES[key]
-    if not maa.ocr(label, roi_4to4(*label_roi), match_mode='exact'):
+    if not device.ocr(label, roi_4to4(*label_roi), match_mode='exact'):
         return None
-    states = {text.strip() for text, _ in maa.ocr_all(roi_4to4(*switch_roi))}
+    states = {text.strip() for text, _ in device.ocr_all(roi_4to4(*switch_roi))}
     if '开' in states and '关' not in states:
         return True
     if '关' in states and '开' not in states:
@@ -38,39 +38,39 @@ def read_switch(maa, key):
     return None
 
 
-def selected_formation(maa, name):
+def selected_formation(device, name):
     left, top, _, _ = FORMATIONS[name]
-    return bool(maa.template_match('team/auto_march_selected.png',
+    return bool(device.template_match('team/auto_march_selected.png',
                                   roi_4to4(left - 5, top - 5, left + 45, top + 40),
                                   threshold=0.85))
 
 
-def apply_details(maa, policy):
+def apply_details(device, policy):
     """仅在明确的详细设定页修改，逐项回读；无法确认就停止。"""
-    maa.screenshot(force=True)
-    if not maa.ocr('详细设定', roi_4to4(510, 20, 760, 90), match_mode='exact'):
+    device.screenshot(force=True)
+    if not device.ocr('详细设定', roi_4to4(510, 20, 760, 90), match_mode='exact'):
         return False
     for key in SWITCHES:
-        state = read_switch(maa, key)
+        state = read_switch(device, key)
         if state is None:
             return False
         if state != policy[key]:
             _, _, (left, top, right, bottom) = SWITCHES[key]
-            from .maa_adapter import Point
-            maa.click(Point((left + right) // 2, (top + bottom) // 2))
+            from .device_adapter import Point
+            device.click(Point((left + right) // 2, (top + bottom) // 2))
             time.sleep(0.5)
-            maa.screenshot(force=True)
-            if read_switch(maa, key) != policy[key]:
+            device.screenshot(force=True)
+            if read_switch(device, key) != policy[key]:
                 return False
     name = policy['formation']
-    if not selected_formation(maa, name):
-        point = maa.ocr(name, roi_4to4(*FORMATIONS[name]), match_mode='exact')
+    if not selected_formation(device, name):
+        point = device.ocr(name, roi_4to4(*FORMATIONS[name]), match_mode='exact')
         if not point:
             return False
-        maa.click(point)
+        device.click(point)
         time.sleep(0.5)
-        maa.screenshot(force=True)
-        if not selected_formation(maa, name):
+        device.screenshot(force=True)
+        if not selected_formation(device, name):
             return False
     # 修改其余项目后，再一起回读，避免后续点击意外改变前项。
-    return all(read_switch(maa, key) == policy[key] for key in SWITCHES)
+    return all(read_switch(device, key) == policy[key] for key in SWITCHES)

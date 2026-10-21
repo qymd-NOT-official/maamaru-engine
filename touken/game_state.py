@@ -333,13 +333,13 @@ def _repair_entries(body):
             and row.get("finished_at")}
 
 
-def begin_operation(maa):
+def begin_operation(device):
     """Capture the pre-click boundary; never change the game to obtain evidence."""
     events = []
     request_snapshot = False
-    if getattr(maa, "adb_address", None):
+    if getattr(device, "adb_address", None):
         try:
-            events = read_events(maa.adb_path, maa.adb_address)
+            events = read_events(device.adb_path, device.adb_address)
             request_snapshot = True
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             pass
@@ -495,13 +495,13 @@ def operation_result(events, boundary, operation, serial=None):
     return outcome
 
 
-def confirm_operation(maa, boundary, operation, serial=None, *, timeout=0.0):
-    if not getattr(maa, "adb_address", None):
+def confirm_operation(device, boundary, operation, serial=None, *, timeout=0.0):
+    if not getattr(device, "adb_address", None):
         return None
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
         try:
-            outcome = operation_result(read_events(maa.adb_path, maa.adb_address), boundary, operation, serial)
+            outcome = operation_result(read_events(device.adb_path, device.adb_address), boundary, operation, serial)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             outcome = None
         if outcome is not None:
@@ -617,12 +617,12 @@ def forge_completions(events, *, after=None):
     return out
 
 
-def available_events(maa):
+def available_events(device):
     """Missing connection evidence uses the existing screen path."""
-    if not getattr(maa, "adb_address", None):
+    if not getattr(device, "adb_address", None):
         return []
     try:
-        return read_events(maa.adb_path, maa.adb_address)
+        return read_events(device.adb_path, device.adb_address)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         return []
 
@@ -903,8 +903,8 @@ def ticket_receipt(events, boundary):
     return {"count": count, "spent": spent}
 
 
-def confirm_ticket(maa, boundary):
-    return ticket_receipt(available_events(maa), boundary)
+def confirm_ticket(device, boundary):
+    return ticket_receipt(available_events(device), boundary)
 
 
 def activity_points(events, mechanic, *, now=None, after=None):

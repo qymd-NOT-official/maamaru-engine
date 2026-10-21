@@ -25,15 +25,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from touken import MAAAdapter, ToukenAgent  # noqa: E402
-from touken.maa_adapter import roi_4to4  # noqa: E402
+from touken import DeviceAdapter, ToukenAgent  # noqa: E402
+from touken.device_adapter import roi_4to4  # noqa: E402
 
 SAMPLES = ROOT / "lab" / "samples"
 
 
 def make_agent() -> ToukenAgent:
     cfg = json.loads((ROOT / "touken_config.json").read_text(encoding="utf-8"))
-    maa = MAAAdapter(
+    device = DeviceAdapter(
         adb_path=cfg["adb_path"],
         adb_address=cfg["adb_address"],
         resource_dir=str(ROOT / "resource" / "base"),
@@ -41,9 +41,9 @@ def make_agent() -> ToukenAgent:
         manager_path=cfg.get("emulator_manager"),
         emulator_instance=int(cfg.get("emulator_instance", 0)),
     )
-    if not maa.init():
-        raise RuntimeError("MAA 初始化失败")
-    return ToukenAgent(str(ROOT / "touken_config.json"), maa)
+    if not device.init():
+        raise RuntimeError("设备初始化失败")
+    return ToukenAgent(str(ROOT / "touken_config.json"), device)
 
 
 def shot(agent, name=None):
@@ -52,7 +52,7 @@ def shot(agent, name=None):
     if not name.endswith(".png"):
         name += ".png"
     out = SAMPLES / name
-    ok = agent.maa.save_screenshot(str(out), force=True)
+    ok = agent.device.save_screenshot(str(out), force=True)
     print(f"[LAB] 抓图 {'OK' if ok else 'FAIL'}: {out.name}")
     return ok
 
@@ -61,8 +61,8 @@ def delegated_status(agent) -> bool:
     mc = agent.config["team_select"]["auto_march"]["check_delegated"]
     r = mc["roi"]
     roi = roi_4to4(r[0], r[1], r[2], r[3])
-    agent.maa.screenshot(force=True)
-    return bool(agent.maa.exists(mc["template"], roi))
+    agent.device.screenshot(force=True)
+    return bool(agent.device.exists(mc["template"], roi))
 
 
 def main():
@@ -92,10 +92,10 @@ def main():
             return
         agent._click_point(pt)
         time.sleep(0.5)
-        agent.maa.screenshot(force=True)
-        decide = agent.maa.template_match(agent.config["sortie"]["decide_button"]["template"])
+        agent.device.screenshot(force=True)
+        decide = agent.device.template_match(agent.config["sortie"]["decide_button"]["template"])
         if decide:
-            agent.maa.click(decide)
+            agent.device.click(decide)
             print(f"[LAB] 已选章节{n}并点决定")
             time.sleep(1.5)
         else:
@@ -110,8 +110,8 @@ def main():
             print(f"[LAB] 没有小图{n}的坐标")
             return
         # 先确认在小图页
-        agent.maa.screenshot(force=True)
-        if not agent.maa.template_match(agent.config["sortie"]["area_select_ui"]["template"]):
+        agent.device.screenshot(force=True)
+        if not agent.device.template_match(agent.config["sortie"]["area_select_ui"]["template"]):
             print("[LAB] 不在小图页（没看到部队选择提示），先抓图")
             shot(agent, "map_not_on_page")
             return
@@ -141,10 +141,10 @@ def main():
 
     elif cmd == "depart":
         cfg = agent.config["sortie"]
-        agent.maa.screenshot(force=True)
-        depart = agent.maa.template_match(cfg["depart_button"]["template"])
+        agent.device.screenshot(force=True)
+        depart = agent.device.template_match(cfg["depart_button"]["template"])
         if depart:
-            agent.maa.click(depart)
+            agent.device.click(depart)
             print("[LAB] 已点即刻出阵")
             time.sleep(2.0)
             shot(agent, "departed")
@@ -162,10 +162,10 @@ def main():
     elif cmd == "march":
         # 地图决策屏点"行军"继续（模板认，认不到就抓图报告）
         cfg = agent.config["sortie"]
-        agent.maa.screenshot(force=True)
-        pt = agent.maa.template_match(cfg["march_continue_button"]["template"])
+        agent.device.screenshot(force=True)
+        pt = agent.device.template_match(cfg["march_continue_button"]["template"])
         if pt:
-            agent.maa.click(pt)
+            agent.device.click(pt)
             print("[LAB] 已点行军")
             time.sleep(2.5)
             shot(agent, f"march_{time.strftime('%H%M%S')}")

@@ -22,7 +22,7 @@
 import time
 from pathlib import Path
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..silhouette import load_library, extract_observed, identify, is_confident, MIN_BLACK_PIXELS
 
 # ── 中日刀名别名映射 ──
@@ -122,13 +122,13 @@ class PumpkinMixin:
         # ========== 2. 进入活动界面 ==========
         entered = False
         for _ in range(6):
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["ui_title"]["template"]):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["ui_title"]["template"]):
                 entered = True
                 break
-            entry = self.maa.template_match(cfg["activity_entry"]["template"])
+            entry = self.device.template_match(cfg["activity_entry"]["template"])
             if entry:
-                self.maa.click(entry)
+                self.device.click(entry)
                 time.sleep(2.0)
             else:
                 time.sleep(1.0)
@@ -173,7 +173,7 @@ class PumpkinMixin:
                 yield self._abort
                 return
 
-            # 无进展看门狗：180 秒没有任何进展 → 疑似 MAA 卡死，强制停
+            # 无进展看门狗：180 秒没有任何进展 → 疑似识别卡死，强制停
             if time.time() - last_progress > 180:
                 yield f"[南瓜] ⚠️ 已 {int(time.time() - last_progress)} 秒无进展（出阵/换板/拿刀都没有），疑似卡死，强制停。你去看下模拟器画面"
                 return
@@ -190,8 +190,8 @@ class PumpkinMixin:
 
             # 3.2 板子真满了？→ 这块拿到了刀，记下是谁；预算够就更新开新局
             full_cfg = cfg["board_full_ocr"]
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=full_cfg["expected"], roi=roi_4to4(*full_cfg["roi"])):
                 yield "[南瓜] 面板全解锁，这块拿到了刀"
                 _bump_progress()
                 # 获得动画里 OCR 认一下是谁（记日志，不截图占内存）
@@ -306,7 +306,7 @@ class PumpkinMixin:
                 self.skip_safe(3, point=cfg["skip_tap"])
                 if debug_dir:
                     self._ensure_on_board(cfg)
-                    self.maa.save_screenshot(f"{debug_dir}/board_after_b{battles_total:02d}.png")
+                    self.device.save_screenshot(f"{debug_dir}/board_after_b{battles_total:02d}.png")
                 continue
 
             # 3.4 板子没满但开不了战斗 → 狐狸奖励弹窗之类的挡路，驱散再试
@@ -334,7 +334,7 @@ class PumpkinMixin:
                 return ""
             roi = roi_4to4(*ocr_cfg["roi"])
             exclude = ocr_cfg.get("exclude", [])
-            texts = self.maa.ocr_all(roi)
+            texts = self.device.ocr_all(roi)
             for text, _pt in texts:
                 t = text.strip()
                 if not t or any(x in t for x in exclude):
@@ -390,7 +390,7 @@ class PumpkinMixin:
             self._identify_decision = "keep"  # 别误烧令牌，也别再认了
             return
 
-        img = self.maa.screenshot(force=True)
+        img = self.device.screenshot(force=True)
         if img is None:
             return
         obs = extract_observed(img)
@@ -442,7 +442,7 @@ class PumpkinMixin:
         if not deploy:
             yield "[南瓜] 没找到部队选择按钮"
             return
-        self.maa.click(deploy)
+        self.device.click(deploy)
         time.sleep(1.5)
 
         ocr_cfg = cfg["team_ui_ocr"]
@@ -451,10 +451,10 @@ class PumpkinMixin:
             # 部队界面没开：可能是弹窗挡路，不代表板子满了（满没满看「已解锁」OCR）
             yield "[南瓜] 部队选择界面没打开"
             # 把拦路弹窗点掉再退出去，免得挡后面的剪影更新
-            self.maa.screenshot(force=True)
-            ok = self.maa.template_match(cfg["confirm_button"]["template"])
+            self.device.screenshot(force=True)
+            ok = self.device.template_match(cfg["confirm_button"]["template"])
             if ok:
-                self.maa.click(ok)
+                self.device.click(ok)
                 time.sleep(1.0)
             else:
                 self._click_point(cfg["skip_tap"])
@@ -469,7 +469,7 @@ class PumpkinMixin:
             yield "[南瓜] 找不到即刻出阵按钮"
             return
 
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         # 刀装未满警告 → 安全取消整备，给后续日课让路
         equip_cancelled = self._cancel_equip_warning(cfg)
@@ -481,24 +481,24 @@ class PumpkinMixin:
             return
 
         # 确认弹窗（可能有也可能直接进图）
-        if self.maa.template_match(cfg["confirm_ui"]["template"]):
+        if self.device.template_match(cfg["confirm_ui"]["template"]):
             confirm_cfg = cfg["confirm_button"]
             confirm_roi = roi_4to4(*confirm_cfg["roi"]) if "roi" in confirm_cfg else None
-            confirm = self.maa.template_match(confirm_cfg["template"], confirm_roi)
+            confirm = self.device.template_match(confirm_cfg["template"], confirm_roi)
             if confirm:
-                self.maa.click(confirm)
+                self.device.click(confirm)
                 time.sleep(2.0)
 
         # 验证真出去了：格子有编队任务，条件不满足会被游戏拒回部队选择
         # （拒的时候弹个提示窗，先点掉再看标题）
         time.sleep(2.0)
-        self.maa.screenshot(force=True)
-        reject_ok = self.maa.template_match(cfg["confirm_button"]["template"])
+        self.device.screenshot(force=True)
+        reject_ok = self.device.template_match(cfg["confirm_button"]["template"])
         if reject_ok:
-            self.maa.click(reject_ok)
+            self.device.click(reject_ok)
             time.sleep(1.0)
-            self.maa.screenshot(force=True)
-        if self.maa.ocr(expected=ocr_cfg["expected"], roi=roi):
+            self.device.screenshot(force=True)
+        if self.device.ocr(expected=ocr_cfg["expected"], roi=roi):
             self._abort = ("[南瓜] ⚠️ 即刻出阵被游戏拒了，还停在部队选择界面"
                            "——编队不满足这个格子的任务条件（左侧任务栏写着要啥），你去改下编队再来")
             return
@@ -528,28 +528,28 @@ class PumpkinMixin:
             # 先驱散可能挡路的狐狸对话（每点一下翻一页，没弹窗时点的是安全区，无害）
             self.skip_safe(2, point=cfg["skip_tap"])
 
-            self.maa.screenshot(force=True)
-            refresh = self.maa.template_match(cfg["refresh_button"]["template"])
+            self.device.screenshot(force=True)
+            refresh = self.device.template_match(cfg["refresh_button"]["template"])
             if not refresh:
                 yield "[南瓜] 找不到剪影更新按钮"
                 return
-            self.maa.click(refresh)
+            self.device.click(refresh)
             time.sleep(1.5)
 
             # 二次确认弹窗（可能被狐狸对话挡着，多等几拍）
             for _ in range(4):
-                self.maa.screenshot(force=True)
-                confirm = self.maa.template_match(cfg["refresh_confirm"]["template"])
+                self.device.screenshot(force=True)
+                confirm = self.device.template_match(cfg["refresh_confirm"]["template"])
                 if confirm:
                     break
                 recover_cfg = self.config.get("raid", {}).get("ticket_recover", {})
                 popup_template = recover_cfg.get("popup_button", {}).get("template")
-                if popup_template and self.maa.template_match(popup_template):
+                if popup_template and self.device.template_match(popup_template):
                     if not auto_refill:
                         close_template = recover_cfg.get("close_button", {}).get("template")
-                        close = self.maa.template_match(close_template) if close_template else None
+                        close = self.device.template_match(close_template) if close_template else None
                         if close:
-                            self.maa.click(close)
+                            self.device.click(close)
                         yield "[南瓜] 手形不足；自动补充已关闭，不消耗小判，收工"
                         return
                     yield "[南瓜] 手形不足，按设置使用小判自动补充..."
@@ -576,7 +576,7 @@ class PumpkinMixin:
             yield "[南瓜] 剪影更新的确认弹窗一直没出来（令牌烧完了，或者弹窗没驱散掉）"
             return
 
-        self.maa.click(confirm)
+        self.device.click(confirm)
         time.sleep(2.0)
 
         # 可能有"新剪影出现了"之类的动画，点掉
@@ -586,7 +586,7 @@ class PumpkinMixin:
         if not self._ensure_on_board(cfg):
             yield "[南瓜] 更新完回不到活动界面"
             return
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         if self._find_deploy_button(cfg):
             self._refresh_ok = True
             yield "[南瓜] 剪影更新完成，新板子就位"

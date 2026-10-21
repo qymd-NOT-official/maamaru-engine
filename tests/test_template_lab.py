@@ -27,7 +27,7 @@ with patch.dict("os.environ", {"MAAMARU_DATA_DIR": _module_tmp.name}):
     from fastapi.testclient import TestClient
 
 from touken import roi_overrides  # noqa: E402
-from touken.maa_adapter import Point, Region  # noqa: E402  (假 OCR 的返回类型)
+from touken.device_adapter import Point, Region  # noqa: E402  (假 OCR 的返回类型)
 from touken.roi_registry import ROI_REGISTRY  # noqa: E402
 
 
@@ -602,7 +602,7 @@ class OcrTestTests(TemplateLabTestBase):
 
     def test_ocr_channel_failure_is_503(self):
         with patch.object(template_lab, "_create_ocr_adapter",
-                          side_effect=RuntimeError("maa 炸了")):
+                          side_effect=RuntimeError("device 炸了")):
             response = self.client.post("/api/template-lab/ocr-test", json={
                 "name": "生存栏", "sessions": ["20250101-010203"]})
         self.assertEqual(response.status_code, 503, response.text)

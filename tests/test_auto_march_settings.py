@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 from touken.auto_march_settings import march_policy, read_switch, apply_details
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class MarchPolicyTests(unittest.TestCase):
@@ -16,30 +16,30 @@ class MarchPolicyTests(unittest.TestCase):
         self.assertFalse(march_policy('heavy', 'continue', True, False, '鱼鳞阵')['fatigue'])
 
     def test_unknown_reading_is_not_assumed_off(self):
-        maa = Mock()
-        maa.ocr.return_value = Point(1, 1)
+        device = Mock()
+        device.ocr.return_value = Point(1, 1)
         for tokens in ([], [('开', Point(1, 1)), ('关', Point(2, 2))]):
-            maa.ocr_all.return_value = tokens
-            self.assertIsNone(read_switch(maa, 'medium'))
+            device.ocr_all.return_value = tokens
+            self.assertIsNone(read_switch(device, 'medium'))
 
     @patch('touken.auto_march_settings.time.sleep')
     def test_matching_policy_never_toggles_and_missing_title_never_clicks(self, sleep):
-        maa = Mock()
+        device = Mock()
         policy = march_policy('heavy', 'continue', True, True, '横队阵')
         with patch('touken.auto_march_settings.read_switch', side_effect=lambda m, k: policy[k]), patch('touken.auto_march_settings.selected_formation', return_value=True):
-            self.assertTrue(apply_details(maa, policy))
-            maa.click.assert_not_called()
-        maa.ocr.return_value = None
-        self.assertFalse(apply_details(maa, policy))
-        maa.click.assert_not_called()
+            self.assertTrue(apply_details(device, policy))
+            device.click.assert_not_called()
+        device.ocr.return_value = None
+        self.assertFalse(apply_details(device, policy))
+        device.click.assert_not_called()
 
     @patch('touken.auto_march_settings.time.sleep')
     def test_toggle_must_be_confirmed_before_next_item(self, sleep):
-        maa = Mock()
+        device = Mock()
         policy = march_policy('heavy', 'continue', True, True, '横队阵')
         with patch('touken.auto_march_settings.read_switch', return_value=True):
-            self.assertFalse(apply_details(maa, policy))
-        maa.click.assert_called_once()
+            self.assertFalse(apply_details(device, policy))
+        device.click.assert_called_once()
 
     def test_old_and_explicit_fatigue_values_reach_daily_plan(self):
         from panel.server import _daily_plan_inputs

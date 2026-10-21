@@ -18,7 +18,7 @@
 
 import time
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from .. import sword_db
 from .smith import DISMANTLE_WHITELIST
 
@@ -26,7 +26,7 @@ _ROW_CY = [166, 268, 369, 470, 572, 666]
 
 
 class SynthesizeMixin:
-    """合成。依赖宿主类的 navigate_to_stream、maa。"""
+    """合成。依赖宿主类的 navigate_to_stream、device。"""
 
     def synthesize_stream(self, dry_run: bool = False):
         """
@@ -44,28 +44,28 @@ class SynthesizeMixin:
         time.sleep(1.5)
 
         # ---- 选本体：第一把带选择按钮的 ----
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         base_pt = None
         for cy in _ROW_CY:
-            base_pt = self.maa.template_match(
+            base_pt = self.device.template_match(
                 "选择png.png", roi_4to4(1150, cy - 45, 1275, cy + 45), threshold=0.75)
             if base_pt:
                 break
         if not base_pt:
             yield "[合成] 没找到能选的本体，放弃"
             return
-        self.maa.click(base_pt)
+        self.device.click(base_pt)
         time.sleep(2.0)
 
         # ---- 素材界面：取消勾选"显示保护中的刀剑男士" ----
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("一键选择", roi_4to4(1130, 400, 1275, 470)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("一键选择", roi_4to4(1130, 400, 1275, 470)):
             yield "[合成] 没进到素材选择界面，放弃"
             return
         if self._protect_filter_on():
-            self.maa.click(Point(140, 100))
+            self.device.click(Point(140, 100))
             time.sleep(1.5)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
         # ---- 找一把白名单素材 ----
         whitelist_ids = set()
@@ -76,14 +76,14 @@ class SynthesizeMixin:
 
         hit = None
         for cy in _ROW_CY:
-            tokens = self.maa.ocr_all(roi_4to4(420, cy + 10, 540, cy + 55))
+            tokens = self.device.ocr_all(roi_4to4(420, cy + 10, 540, cy + 55))
             raw = max((t for t, _ in tokens), key=len, default="")
             if len(raw) < 2:
                 continue
             found = sword_db.find_by_name(raw)
             if not found or found[0] not in whitelist_ids:
                 continue
-            btn = self.maa.template_match(
+            btn = self.device.template_match(
                 "选择png.png", roi_4to4(1000, cy - 50, 1180, cy + 50), threshold=0.75)
             if btn:
                 hit = (found[1].get("name_zh") or found[1]["name"], btn)
@@ -97,35 +97,35 @@ class SynthesizeMixin:
             yield "[合成] （演习模式：不点合成）"
             return
 
-        self.maa.click(btn)
+        self.device.click(btn)
         time.sleep(1.5)
 
         # ---- 点合成（灰色配不上模板，天然防呆）----
-        self.maa.screenshot(force=True)
-        go = self.maa.template_match(
+        self.device.screenshot(force=True)
+        go = self.device.template_match(
             "合成.png", roi_4to4(1130, 560, 1275, 700), threshold=0.7)
         if not go:
             yield "[合成] 合成按钮没亮（本体属性可能满了），放弃"
             return
-        self.maa.click(go)
+        self.device.click(go)
         time.sleep(2.0)
 
         # ---- 二次确认 ----
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
             yield "[合成] 确认弹窗没出现，放弃"
             return
         from ..game_state import begin_operation, confirm_operation
-        boundary = begin_operation(self.maa)
-        self.maa.click(Point(785, 630))
+        boundary = begin_operation(self.device)
+        self.device.click(Point(785, 630))
 
         # ---- 等动画自己演完，回到素材界面（认一键选择按钮，跟炼糖同款判据）----
         for _ in range(15):
             time.sleep(2.0)
-            self.maa.screenshot(force=True)
-            if self.maa.template_match("一键选择.png", threshold=0.75):
+            self.device.screenshot(force=True)
+            if self.device.template_match("一键选择.png", threshold=0.75):
                 break
-        outcome = confirm_operation(self.maa, boundary, "compose")
+        outcome = confirm_operation(self.device, boundary, "compose")
         if outcome is True:
             yield f"[合成] 合成完成: {name} 已喂"
         elif outcome is False:
@@ -135,7 +135,7 @@ class SynthesizeMixin:
 
     def _protect_filter_on(self) -> bool:
         """检测"显示保护中的刀剑男士"是否勾着（红✓）"""
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         if img is None:
             return False
         region = img[85:110, 110:135]  # BGR

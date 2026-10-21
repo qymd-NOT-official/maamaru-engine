@@ -13,7 +13,7 @@
   - 出阵走 BattleMixin 通用安全出阵链（_safe_depart_stream）+
     _confirm_departure 二次确认。确认弹窗是活动专用（「出阵会消耗通行令牌，
     是否确认？」），标准 team/ui出阵确认.png 打不上它（离线实测 0.445），
-    用花札自己的模板 花札/ui出阵确认.png（取自 MAAAdapter 运行帧）
+    用花札自己的模板 花札/ui出阵确认.png（取自 DeviceAdapter 运行帧）
   - 虚拟伤害活动不碎刀，默认只拦重伤（repair_threshold=heavy），中伤照跑
   - 图内脚本只盯异常，绝不碰选牌/行军：
       * 狐之助教学/提示气泡是唯一会卡死委托的东西（实测挂 25 秒+不动），
@@ -29,7 +29,7 @@ import re
 import time
 from pathlib import Path
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 
 _DIFFICULTY_LABELS = {1: "易", 2: "普", 3: "难", 4: "超难"}
 
@@ -107,13 +107,13 @@ class HanafudaMixin:
         # ========== 2. 进入活动界面 ==========
         entered = False
         for _ in range(8):
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["ui_title"]["template"]):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["ui_title"]["template"]):
                 entered = True
                 break
-            entry = self.maa.template_match(cfg["activity_entry"]["template"])
+            entry = self.device.template_match(cfg["activity_entry"]["template"])
             if entry:
-                self.maa.click(entry)
+                self.device.click(entry)
                 time.sleep(2.0)
             else:
                 time.sleep(1.0)
@@ -261,7 +261,7 @@ class HanafudaMixin:
         last_heartbeat = time.monotonic()
         bubbles = 0
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 重伤行军警告：永远点否。活动不碎刀，但警告一出说明局面
             # 超出脚本该管的范围，停手让人看
@@ -281,7 +281,7 @@ class HanafudaMixin:
                 return False
 
             if not armed:
-                if hud_roi and self.maa.ocr(expected=hud["expected"], roi=hud_roi):
+                if hud_roi and self.device.ocr(expected=hud["expected"], roi=hud_roi):
                     armed = True
                     yield "[花札] 进图了，委托跑图我盯着"
                 elif time.monotonic() > entry_deadline:
@@ -293,15 +293,15 @@ class HanafudaMixin:
                 continue
 
             # 圈结束：行动次数耗尽/首领打完回活动主界面（横幅+部队选择双保险）
-            if self.maa.template_match(cfg["ui_title"]["template"]) \
+            if self.device.template_match(cfg["ui_title"]["template"]) \
                     and self._find_deploy_button(cfg):
                 return True
 
             # 狐之助气泡：唯一会卡死委托的东西。已上膛=地图 HUD 刚出现过；
             # 战斗/结算页 HUD 不在，自然不会误判
-            if hud_roi and bubble_roi and self.maa.ocr(
+            if hud_roi and bubble_roi and self.device.ocr(
                     expected=hud["expected"], roi=hud_roi):
-                if self.maa.ocr_all(bubble_roi):
+                if self.device.ocr_all(bubble_roi):
                     bubbles += 1
                     if bubbles > 40:
                         self._save_hanafuda_shot(debug_dir, "bubble_stuck")
@@ -330,7 +330,7 @@ class HanafudaMixin:
     def _read_tama_total(self, cfg: dict) -> int | None:
         """读活动主界面的玉累计数（记账用，读不出不挡路）。"""
         from ..game_state import available_events, activity_points
-        points = activity_points(available_events(self.maa), "hanafuda", after=getattr(self, "_hanafuda_points_after", None))
+        points = activity_points(available_events(self.device), "hanafuda", after=getattr(self, "_hanafuda_points_after", None))
         if points is not None:
             return points
         ocr_cfg = cfg.get("tama_total_ocr", {})
@@ -353,7 +353,7 @@ class HanafudaMixin:
         try:
             if upscale > 1:
                 import cv2
-                img = self.maa.screenshot(force=True)
+                img = self.device.screenshot(force=True)
                 if img is None:
                     return None
                 crop = img[roi.y:roi.y + roi.h, roi.x:roi.x + roi.w]
@@ -361,10 +361,10 @@ class HanafudaMixin:
                     return None
                 up = cv2.resize(crop, None, fx=upscale, fy=upscale,
                                 interpolation=cv2.INTER_CUBIC)
-                tokens = self.maa.ocr_all(
+                tokens = self.device.ocr_all(
                     roi_4to4(0, 0, up.shape[1], up.shape[0]), image=up)
             else:
-                tokens = self.maa.ocr_all(roi)
+                tokens = self.device.ocr_all(roi)
             digits = "".join(
                 re.sub(r"\D", "", str(text)) for text, _ in tokens or []
             )
@@ -377,7 +377,7 @@ class HanafudaMixin:
         try:
             out = Path(debug_dir) if debug_dir else Path(self._root) / "debug"
             out.mkdir(parents=True, exist_ok=True)
-            self.maa.save_screenshot(
+            self.device.save_screenshot(
                 str(out / f"hanafuda_{name}_{time.strftime('%H%M%S')}.png"))
         except Exception:
             pass

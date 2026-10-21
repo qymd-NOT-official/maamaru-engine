@@ -25,7 +25,7 @@ from pathlib import Path
 
 from ..runtime_paths import STATUS_DIR
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..game_state import available_events, resource_facts, fresh_resources, RESOURCE_NAMES, forge_capacity, furnace_facts
 
 _STATUS_DIR = STATUS_DIR
@@ -56,7 +56,7 @@ def _parse_furnace_remain(text: str):
 
 
 class SnapshotMixin:
-    """库存快照。依赖宿主类的 navigate_to_stream、maa。"""
+    """库存快照。依赖宿主类的 navigate_to_stream、device。"""
 
     def status_snapshot_stream(self, phase=None):
         """
@@ -65,7 +65,7 @@ class SnapshotMixin:
         Yields:
             str: 执行状态消息
         """
-        events = available_events(self.maa)
+        events = available_events(self.device)
         resources = fresh_resources(resource_facts(events))
         if RESOURCE_NAMES.issubset(resources):
             capacity = forge_capacity(events)
@@ -80,9 +80,9 @@ class SnapshotMixin:
             deadline = time.monotonic() + 90.0
             last_notice = time.monotonic()
             while time.monotonic() < deadline:
-                self.maa.screenshot(force=True)
-                if (self.maa.exists("menu/ui目录.png")
-                        or self.maa.exists("目录.png", threshold=0.7)):
+                self.device.screenshot(force=True)
+                if (self.device.exists("menu/ui目录.png")
+                        or self.device.exists("目录.png", threshold=0.7)):
                     ready = True
                     break
                 if time.monotonic() - last_notice >= 15.0:
@@ -107,7 +107,7 @@ class SnapshotMixin:
         家底拍摄核心：人已经站在锻刀页面上时直接调（零导航）。
         锻刀步骤收工时被顺手调用，免了专程跑一趟（7-27 日课超时两次的教训）。
         """
-        events = available_events(self.maa)
+        events = available_events(self.device)
         resources = fresh_resources(resource_facts(events))
         if RESOURCE_NAMES.issubset(resources):
             capacity = forge_capacity(events)
@@ -115,10 +115,10 @@ class SnapshotMixin:
                                             furnace_facts(events) or [], phase)
             return
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         # ---- 顶栏五资源：整条 OCR，数字按 x 升序对应 木炭/玉钢/冷却材/砥石/甲州金 ----
-        tokens = [] if set(_RES_NAMES).issubset(resources) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+        tokens = [] if set(_RES_NAMES).issubset(resources) else self.device.ocr_all(roi_4to4(400, 5, 1100, 52))
         nums = sorted(
             ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
             key=lambda p: p[1])
@@ -130,7 +130,7 @@ class SnapshotMixin:
 
         # ---- 右栏：委托符/加速符/所持 ----
         def first_number(roi):
-            ts = self.maa.ocr_all(roi_4to4(*roi))
+            ts = self.device.ocr_all(roi_4to4(*roi))
             for t, _ in ts:
                 v = _to_int(t)
                 if v is not None:
@@ -144,7 +144,7 @@ class SnapshotMixin:
 
         capacity = forge_capacity(events)
         doko = f"{capacity[0]}/{capacity[1]}" if capacity else None
-        ts = [] if doko is not None else self.maa.ocr_all(roi_4to4(840, 45, 1080, 85))
+        ts = [] if doko is not None else self.device.ocr_all(roi_4to4(840, 45, 1080, 85))
         # OCR 会在数字间吃出杂物（"200./200"），允许斜杠两边夹非数字
         m = re.search(r"(\d+)\D{0,3}/\D{0,2}(\d+)", "".join(t for t, _ in ts))
         if m and doko is None:
@@ -154,7 +154,7 @@ class SnapshotMixin:
         furnaces = []
         game_furnaces = furnace_facts(events)
         for i, cy in (() if game_furnaces is not None else enumerate(_SLOT_CY, 1)):
-            ts = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            ts = self.device.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             text = "".join(t for t, _ in ts)
             if "完成" in text:
                 furnaces.append({"slot": i, "state": "完成", "remain": None})
@@ -197,7 +197,7 @@ class SnapshotMixin:
 
     def _read_koban(self):
         """目录→所持道具→右上 OCR 所持小判。失败返回 None，绝不抛异常。"""
-        known = fresh_resources(resource_facts(available_events(self.maa))).get("小判")
+        known = fresh_resources(resource_facts(available_events(self.device))).get("小判")
         if known is not None:
             return known
         opened_items = False
@@ -206,18 +206,18 @@ class SnapshotMixin:
             if not self._open_menu():
                 return None
             time.sleep(1.0)
-            self.maa.screenshot(force=True)
-            pt = self.maa.template_match("menu/目录_所持道具.png")
+            self.device.screenshot(force=True)
+            pt = self.device.template_match("menu/目录_所持道具.png")
             if not pt:
                 return None
             opened_items = True
-            self.maa.click(pt)
+            self.device.click(pt)
             time.sleep(2.5)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             # 右上「所持小判 672,416 枚」：取最长数字串
             # 页面模板偶尔会因活动背景变化漏掉；小判栏本身的限定 OCR 才是
             # 真正的数据门闩。无论最终读没读到，finally 都负责退出该页面。
-            tokens = self.maa.ocr_all(roi_4to4(940, 20, 1210, 80))
+            tokens = self.device.ocr_all(roi_4to4(940, 20, 1210, 80))
             best = None
             for t, _ in tokens:
                 v = _to_int(t)
@@ -232,8 +232,8 @@ class SnapshotMixin:
                 # 进过所持道具就必须退出来。旧逻辑在 ui所持.png 漏识别时直接
                 # return，把整张所持页面留给后续刀解/合成/出阵，造成连环翻车。
                 try:
-                    from ..maa_adapter import Point
-                    self.maa.click(Point(1248, 35))
+                    from ..device_adapter import Point
+                    self.device.click(Point(1248, 35))
                     time.sleep(0.8)
                 except Exception as cleanup_error:  # noqa: BLE001
                     print(f"[快照] 退出所持道具异常: {cleanup_error}")
@@ -261,8 +261,8 @@ class SnapshotMixin:
             now = time.monotonic()
             if not force and now - getattr(self, "_last_peek", 0.0) < self.PEEK_INTERVAL_S:
                 return False
-            known = fresh_resources(resource_facts(available_events(self.maa)))
-            tokens = [] if data_only or set(_RES_NAMES).issubset(known) else self.maa.ocr_all(roi_4to4(400, 5, 1100, 52))
+            known = fresh_resources(resource_facts(available_events(self.device)))
+            tokens = [] if data_only or set(_RES_NAMES).issubset(known) else self.device.ocr_all(roi_4to4(400, 5, 1100, 52))
             nums = sorted(
                 ((t, pt.x) for t, pt in tokens if re.fullmatch(r"[\d,]+", t)),
                 key=lambda p: p[1])

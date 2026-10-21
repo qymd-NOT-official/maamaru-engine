@@ -9,13 +9,13 @@
 import time
 from typing import Optional
 
-from .maa_adapter import Point, Region, roi_4to4
+from .device_adapter import Point, Region, roi_4to4
 
 
 class NavigationMixin:
     """
     通用识别 + 导航 + 弹窗处理
-    依赖宿主类提供：self.config、self.maa、self.current_location
+    依赖宿主类提供：self.config、self.device、self.current_location
     """
 
     # ==================== 通用识别方法 ====================
@@ -43,7 +43,7 @@ class NavigationMixin:
             roi = None
 
         if method_type == "OCR":
-            return self.maa.ocr(
+            return self.device.ocr(
                 expected=method_config["expected"],
                 roi=roi,
                 match_mode=method_config.get("match_mode", "contains")
@@ -56,7 +56,7 @@ class NavigationMixin:
                 tm_roi = roi
             else:
                 tm_roi = None  # 全屏
-            return self.maa.template_match(
+            return self.device.template_match(
                 template=method_config["template"],
                 roi=tm_roi,
                 threshold=threshold
@@ -82,7 +82,7 @@ class NavigationMixin:
     def _click_point(self, target: list) -> bool:
         """点击坐标点 [x, y]"""
         point = Point(target[0], target[1])
-        return self.maa.click(point)
+        return self.device.click(point)
 
     # ==================== 安全区跳过（公共层） ====================
     # 所有"点安全区跳动画/对话"都走这里，别在流程里自己写 for 循环了。
@@ -95,7 +95,7 @@ class NavigationMixin:
 
     def _is_loading(self) -> bool:
         """是否在黑屏转花加载中。旧版 FakeMaa 没这个能力时当作不在加载。"""
-        probe = getattr(self.maa, "looks_like_loading", None)
+        probe = getattr(self.device, "looks_like_loading", None)
         return bool(probe and probe())
 
     def _skip_point(self, point=None) -> tuple:
@@ -132,12 +132,12 @@ class NavigationMixin:
         hits = 0
         need = max(1, int(stable_hits))
         while time.monotonic() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             found = False
-            if template and self.maa.template_match(template, roi=roi):
+            if template and self.device.template_match(template, roi=roi):
                 found = True
             if not found and ocr_expected \
-                    and self.maa.ocr(expected=ocr_expected, roi=roi):
+                    and self.device.ocr(expected=ocr_expected, roi=roi):
                 found = True
             if found:
                 hits += 1
@@ -162,9 +162,9 @@ class NavigationMixin:
                 roi = roi_4to4(roi_raw[0], roi_raw[1], roi_raw[2], roi_raw[3])
             else:
                 roi = None
-            result = self.maa.template_match(config["template"], roi)
+            result = self.device.template_match(config["template"], roi)
             if result:
-                return self.maa.click(result)
+                return self.device.click(result)
             return False
         return False
 
@@ -201,7 +201,7 @@ class NavigationMixin:
             print(f"[NAV] 尝试打开目录 (第{attempt}次)")
 
             # 强制刷新截图
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 黑屏转花 = 游戏在加载（断网/切场景），点屏幕没意义，等它转完；
             # 加载不占尝试次数，但转太久就是断网/炸服了，别死等
@@ -217,7 +217,7 @@ class NavigationMixin:
             loading_waits = 0
 
             # 检测菜单是否已展开：检测 ui目录.png
-            if self.maa.exists("menu/ui目录.png"):
+            if self.device.exists("menu/ui目录.png"):
                 print("[NAV] 目录已展开")
                 self.current_location = "通用入口"
                 return True
@@ -225,7 +225,7 @@ class NavigationMixin:
             # 菜单没展开：
             # 1) 可能在演结算动画/对话（连目录按钮都看不见），点跳过点把动画往前推
             # 2) 也可能被收件箱这种全屏界面压住（15:00 实测卡死元凶）——先关 X
-            if self.maa.exists("目录.png", threshold=0.7):
+            if self.device.exists("目录.png", threshold=0.7):
                 self._click_template_config(common_config)
             else:
                 # 远征结算屏会盖住目录按钮：归来收益先照实记账再点过，
@@ -237,14 +237,14 @@ class NavigationMixin:
                 if obs is not None:
                     if obs.get("new"):
                         print("[NAV] 远征结算屏挡路，照实记账后点过")
-                    self.maa.click(Point(993, 690))
+                    self.device.click(Point(993, 690))
                 else:
-                    close_pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
+                    close_pt = self.device.template_match("通用_关闭.png", threshold=0.7)
                     if close_pt:
                         print("[NAV] 发现全屏界面/弹窗，点关闭")
-                        self.maa.click(close_pt)
+                        self.device.click(close_pt)
                     else:
-                        self.maa.click(Point(993, 690))
+                        self.device.click(Point(993, 690))
             time.sleep(0.8)
 
         print("[NAV] 目录始终未展开")
@@ -287,13 +287,13 @@ class NavigationMixin:
         # 2. 尝试进入目标界面
         # 给界面一点稳定时间，并强制刷新截图
         time.sleep(0.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         for attempt in range(max_retries):
             print(f"[NAV] 尝试进入 {target} (第{attempt+1}次)")
 
             result = self._try_with_fallback(target_config)
             if result:
-                self.maa.click(result)
+                self.device.click(result)
 
                 # ===== 关键：等待界面切换完成 =====
                 if "verify" in target_config:
@@ -304,7 +304,7 @@ class NavigationMixin:
                     while time.time() - verify_start < verify_timeout:
                         time.sleep(0.8)
                         # 强制刷新截图，确保识别的是最新画面
-                        self.maa.screenshot(force=True)
+                        self.device.screenshot(force=True)
                         verify_result = self._recognize(target_config["verify"])
                         if verify_result:
                             self.current_location = target
@@ -373,14 +373,14 @@ class NavigationMixin:
         # 2. 尝试进入目标界面
         yield f"[NAV] 给界面一点稳定时间..."
         time.sleep(0.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         for attempt in range(max_retries):
             yield f"[NAV] 尝试进入 {target} (第{attempt+1}次)..."
 
             result = self._try_with_fallback(target_config)
             if result:
-                self.maa.click(result)
+                self.device.click(result)
 
                 # 验证循环
                 if "verify" in target_config:
@@ -391,7 +391,7 @@ class NavigationMixin:
                     max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 0.8))
                     while time.time() - verify_start < verify_timeout:
                         time.sleep(0.8)
-                        self.maa.screenshot(force=True)
+                        self.device.screenshot(force=True)
                         verify_result = self._recognize(target_config["verify"])
                         if verify_result:
                             self.current_location = target
@@ -415,13 +415,13 @@ class NavigationMixin:
 
                     # 救援：可能是弹窗/余波动画挡路（15:00 实测锻刀导航卡循环的教训）。
                     # 有关闭按钮就点掉，没有就点跳过点推一把，再进下一轮重试。
-                    self.maa.screenshot(force=True)
-                    close_pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
+                    self.device.screenshot(force=True)
+                    close_pt = self.device.template_match("通用_关闭.png", threshold=0.7)
                     if close_pt:
                         yield "[NAV] 救援：发现弹窗，点关闭"
-                        self.maa.click(close_pt)
+                        self.device.click(close_pt)
                         time.sleep(1.0)
-                    elif not self.maa.exists("menu/ui目录.png"):
+                    elif not self.device.exists("menu/ui目录.png"):
                         # 菜单都不见了：多半被动画/结算顶走了。远征结算屏先记账
                         # 再推，seen 传给 _open_menu 防止同一屏记两次
                         rescue_seen = []
@@ -431,7 +431,7 @@ class NavigationMixin:
                             if obs is not None and obs.get("new"):
                                 yield "[NAV] 救援：远征结算屏挡路，照实记账后点过"
                         yield "[NAV] 救援：界面被顶走，点跳过点推一把"
-                        self.maa.click(Point(993, 690))
+                        self.device.click(Point(993, 690))
                         time.sleep(1.0)
                         self.current_location = None
                         if not self._open_menu(settle_seen=rescue_seen):
@@ -475,7 +475,7 @@ class NavigationMixin:
             check_roi_raw = triple["check_roi"]
             check_roi = roi_4to4(check_roi_raw[0], check_roi_raw[1],
                                  check_roi_raw[2], check_roi_raw[3])
-            if not self.maa.exists(popup_config["check_template"], check_roi):
+            if not self.device.exists(popup_config["check_template"], check_roi):
                 print("[POPUP] 三倍枡可能已用完")
 
         # 点击确定

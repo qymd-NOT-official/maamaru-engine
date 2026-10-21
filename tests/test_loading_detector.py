@@ -5,12 +5,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from touken.maa_adapter import MAAAdapter
+from touken.device_adapter import DeviceAdapter
 from touken.navigator import NavigationMixin
 
 
 def _make_adapter_with_image(image):
-    adapter = MAAAdapter.__new__(MAAAdapter)
+    adapter = DeviceAdapter.__new__(DeviceAdapter)
     adapter._last_image = None
     adapter._initialized = True
     adapter.screenshot = lambda force=False: image
@@ -52,8 +52,8 @@ class LoadingDetectorTests(unittest.TestCase):
 
 
 class _NavFlow(NavigationMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {"navigation": {
             "本丸": {
                 "from": "通用入口",
@@ -71,7 +71,7 @@ class _NavFlow(NavigationMixin):
 
 
 class _NavMaa:
-    """导航假 MAA：目录模板直接命中（跳过开目录），目标页地标按剧本出现。"""
+    """导航假设备：目录模板直接命中（跳过开目录），目标页地标按剧本出现。"""
 
     def __init__(self, loading_seq=(), verify_after=1):
         self.loading_seq = list(loading_seq)
@@ -103,8 +103,8 @@ class _NavMaa:
 class NavLoadingTests(unittest.TestCase):
     def test_loading_waits_instead_of_failing(self):
         """转樱花时不报超时，加载结束后正常到达。"""
-        maa = _NavMaa(loading_seq=[True, True], verify_after=3)
-        flow = _NavFlow(maa)
+        device = _NavMaa(loading_seq=[True, True], verify_after=3)
+        flow = _NavFlow(device)
         flow.current_location = "通用入口"  # 跳过开目录，专验导航等待
         with patch("touken.navigator.time.sleep"):
             messages = list(flow.navigate_to_stream("本丸"))
@@ -113,8 +113,8 @@ class NavLoadingTests(unittest.TestCase):
 
     def test_loading_forever_reports_failure_honestly(self):
         """转圈超过耐心上限：如实报失败（断网/炸服），不傻等不误点。"""
-        maa = _NavMaa(loading_seq=[True] * 200, verify_after=10**9)
-        flow = _NavFlow(maa)
+        device = _NavMaa(loading_seq=[True] * 200, verify_after=10**9)
+        flow = _NavFlow(device)
         flow.current_location = "通用入口"
         with patch("touken.navigator.time.sleep"), \
                 patch.object(NavigationMixin, "LOADING_PATIENCE_S", 0.0):
@@ -124,19 +124,19 @@ class NavLoadingTests(unittest.TestCase):
 
     def test_open_menu_waits_out_loading_without_burning_attempts(self):
         """开目录撞上加载：不占尝试次数，转完照常打开。"""
-        maa = _NavMaa(loading_seq=[True, True, True])
-        flow = _NavFlow(maa)
+        device = _NavMaa(loading_seq=[True, True, True])
+        flow = _NavFlow(device)
         with patch("touken.navigator.time.sleep"):
             self.assertTrue(flow._open_menu())
 
     def test_open_menu_gives_up_when_loading_outlasts_patience(self):
-        maa = _NavMaa(loading_seq=[True] * 400)
-        flow = _NavFlow(maa)
+        device = _NavMaa(loading_seq=[True] * 400)
+        flow = _NavFlow(device)
         with patch("touken.navigator.time.sleep"), \
                 patch.object(NavigationMixin, "LOADING_PATIENCE_S", 0.0):
             self.assertFalse(flow._open_menu())
         # 耐心上限挡着，前两轮就该放弃，不会真把 400 轮剧本耗完
-        self.assertTrue(len(maa.loading_seq) > 300)
+        self.assertTrue(len(device.loading_seq) > 300)
 
 
 if __name__ == "__main__":

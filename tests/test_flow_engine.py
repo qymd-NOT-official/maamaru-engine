@@ -7,7 +7,7 @@ retry、jump_if 分支、wait_landmark 超时与命中、失败消息进翻车�
 执行步数上限（死循环保险）、内置积木（安全出阵链/弹窗扫地/回本丸）、
 存储备份式写入与坏文件恢复。
 
-FakeAgent 只实现引擎会碰的接口（maa / config / navigate_to_stream /
+FakeAgent 只实现引擎会碰的接口（device / config / navigate_to_stream /
 skip_safe / _popup_sweep / _safe_depart_stream / _confirm_departure），
 与 tests/test_workflow.py 的 _FakeAgent 同款思路。
 """
@@ -21,11 +21,11 @@ from unittest.mock import patch
 from touken import flow_engine
 from touken.flow_engine import FlowError
 from touken.flows.report_judge import _is_fail
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class FakeMaa:
-    """按剧本回应识别的假 MAAAdapter。"""
+    """按剧本回应识别的假 DeviceAdapter。"""
 
     def __init__(self, templates=None, ocrs=None):
         self.templates = templates or {}  # template -> Point | None
@@ -54,8 +54,8 @@ class FakeMaa:
 
 
 class FakeAgent:
-    def __init__(self, maa=None, config=None):
-        self.maa = maa or FakeMaa()
+    def __init__(self, device=None, config=None):
+        self.device = device or FakeMaa()
         self.config = config or {}
         self.current_location = None
         self.calls = []
@@ -69,7 +69,7 @@ class FakeAgent:
     def skip_safe(self, times=3, interval=0.8, point=None):
         self.calls.append(("skip_safe", times, interval))
         for _ in range(times):
-            self.maa.click(Point(775, 695))
+            self.device.click(Point(775, 695))
 
     def navigate_to_stream(self, target):
         self.calls.append(("navigate_to_stream", target))
@@ -209,7 +209,7 @@ class LinearExecutionTests(unittest.TestCase):
             _step("s3", "skip_safe", {"times": 2, "interval_s": 0.1}),
         ])
         messages, agent = self._run(flow)
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual(clicks[0][1].to_tuple(), (100, 200))
         # 顺序：点公告 → 睡 → 安全区 2 下
         self.assertEqual(clicks[1][1].to_tuple(), (775, 695))
@@ -230,7 +230,7 @@ class LinearExecutionTests(unittest.TestCase):
             _step("s2", "click_point", {"x": 1, "y": 1}),
         ])
         messages, agent = self._run(flow)
-        ran = [c for c in agent.maa.calls if c[0] == "click"]
+        ran = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual(ran, [])  # 模板没认到，什么都没点
         self.assertTrue(any("剩余 1 步不跑" in m for m in messages))
         self.assertTrue(any("点坐标" in m and "⏭" in m for m in messages))
@@ -244,7 +244,7 @@ class LinearExecutionTests(unittest.TestCase):
             _step("s2", "click_point", {"x": 5, "y": 6}),
         ])
         messages, agent = self._run(flow)
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual(clicks[0][1].to_tuple(), (5, 6))
         self.assertTrue(any("按设定跳过继续" in m for m in messages))
         self.assertTrue(any("有翻车项" in m for m in messages))
@@ -256,12 +256,12 @@ class LinearExecutionTests(unittest.TestCase):
             _step("s2", "click_point", {"x": 5, "y": 6}),
         ])
         messages, agent = self._run(flow)
-        matches = [c for c in agent.maa.calls if c[0] == "template_match"]
+        matches = [c for c in agent.device.calls if c[0] == "template_match"]
         self.assertEqual(len(matches), 3)  # 1 初跑 + 2 重试
         self.assertTrue(any("第 1/2 次" in m for m in messages))
         self.assertTrue(any("第 2/2 次" in m for m in messages))
         # retry 用尽 = 翻车即停，后面不跑
-        self.assertFalse(any(c[0] == "click" for c in agent.maa.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
 
     def test_retry_recovers_on_second_attempt(self):
         attempts = {"n": 0}
@@ -276,7 +276,7 @@ class LinearExecutionTests(unittest.TestCase):
                   on_fail="retry", retry_times=2, retry_interval_s=0),
         ])
         messages, agent = self._run(flow, FakeAgent(FlakyMaa()))
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual(clicks[0][1].to_tuple(), (50, 60))
         self.assertTrue(any("全部跑完，全绿" in m for m in messages))
 
@@ -298,9 +298,9 @@ class JumpIfTests(unittest.TestCase):
             _step("s3", "click_point", {"x": 1, "y": 1}, label="被跳过的步"),
             _step("s4", "click_point", {"x": 9, "y": 9}, label="落地步"),
         ])
-        maa = FakeMaa(templates={"a/入口.png": Point(30, 40)})
-        messages, agent = self._run(flow, FakeAgent(maa))
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        device = FakeMaa(templates={"a/入口.png": Point(30, 40)})
+        messages, agent = self._run(flow, FakeAgent(device))
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual([c[1].to_tuple() for c in clicks], [(9, 9)])
         self.assertTrue(any("条件成立" in m for m in messages))
 
@@ -312,7 +312,7 @@ class JumpIfTests(unittest.TestCase):
             _step("s4", "click_point", {"x": 9, "y": 9}),
         ])
         messages, agent = self._run(flow, FakeAgent(FakeMaa()))
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual([c[1].to_tuple() for c in clicks], [(1, 1), (9, 9)])
         self.assertTrue(any("条件不成立" in m for m in messages))
 
@@ -324,7 +324,7 @@ class JumpIfTests(unittest.TestCase):
             _step("s4", "click_point", {"x": 9, "y": 9}),
         ])
         messages, agent = self._run(flow, FakeAgent(FakeMaa()))
-        clicks = [c for c in agent.maa.calls if c[0] == "click"]
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual([c[1].to_tuple() for c in clicks], [(9, 9)])
 
     def test_jump_without_check_fails(self):
@@ -333,7 +333,7 @@ class JumpIfTests(unittest.TestCase):
             _step("s2", "click_point", {"x": 1, "y": 1}),
         ])
         messages, agent = self._run(flow)
-        self.assertFalse(any(c[0] == "click" for c in agent.maa.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
         self.assertTrue(any("有翻车项" in m for m in messages))
         fail_lines = [m for m in messages if m.lstrip().startswith("✗")]
         self.assertTrue(fail_lines)
@@ -391,8 +391,8 @@ class WaitLandmarkTests(unittest.TestCase):
             _step("s1", "wait_landmark",
                   {"ocr_expected": "决定", "timeout_s": 30}),
         ])
-        maa = FakeMaa(ocrs={"决定": Point(640, 360)})
-        messages = list(flow_engine.run_flow(FakeAgent(maa), flow))
+        device = FakeMaa(ocrs={"决定": Point(640, 360)})
+        messages = list(flow_engine.run_flow(FakeAgent(device), flow))
         self.assertTrue(any("地标已就绪" in m for m in messages))
 
 

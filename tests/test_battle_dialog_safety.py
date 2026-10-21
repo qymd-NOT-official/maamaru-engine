@@ -6,7 +6,7 @@ import pytest
 from touken.flow_control import FlowAborted
 from touken.flows.battle import BattleMixin
 from touken.flows.sortie import SortieMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from test_battle_components import FakeMaa
 from test_osaka_flow import OsakaFlow
 from test_game_state import team_events, battle_result
@@ -25,8 +25,8 @@ def tokens(text, point=Point(600, 320)):
 
 
 class ReturnFlow(SortieMixin, BattleMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self._watch_battle_frame = Mock()
 
 
@@ -37,46 +37,46 @@ RETURN_CFG = {"march_stop_button": {"template": "return"},
 
 @pytest.mark.parametrize("warning", WARNINGS)
 def test_warning_cancellation_never_uses_background_yes_or_return(warning):
-    maa = FakeMaa(templates={"return": HOME, "yes": YES},
+    device = FakeMaa(templates={"return": HOME, "yes": YES},
                   ocr_tokens=[tokens(warning), tokens("否", NO), []])
-    flow = ReturnFlow(maa)
+    flow = ReturnFlow(device)
     with patch("touken.flows.battle.time.sleep"):
         assert flow._deny_heavy_injury_warning({})
-    assert maa.clicks == [NO]
+    assert device.clicks == [NO]
 
 
 @pytest.mark.parametrize("button", [[], tokens("是", YES), tokens("否", YES)])
 def test_unreadable_or_wrong_side_cancel_stops_without_clicking(button):
-    maa = FakeMaa(templates={"yes": YES}, ocr_tokens=[tokens(WARNINGS[1]), button])
+    device = FakeMaa(templates={"yes": YES}, ocr_tokens=[tokens(WARNINGS[1]), button])
     with pytest.raises(FlowAborted, match="停止点击"):
-        ReturnFlow(maa)._deny_heavy_injury_warning({})
-    assert maa.clicks == []
+        ReturnFlow(device)._deny_heavy_injury_warning({})
+    assert device.clicks == []
 
 
 def test_warning_that_does_not_close_has_bounded_cancel_attempts():
-    maa = FakeMaa(ocr_tokens=[tokens(WARNINGS[0])] +
+    device = FakeMaa(ocr_tokens=[tokens(WARNINGS[0])] +
                   [part for _ in range(3) for part in (tokens("否", NO), tokens(WARNINGS[1]))])
     with patch("touken.flows.battle.time.sleep"), pytest.raises(FlowAborted):
-        ReturnFlow(maa)._deny_heavy_injury_warning({})
-    assert maa.clicks == [NO] * 3
+        ReturnFlow(device)._deny_heavy_injury_warning({})
+    assert device.clicks == [NO] * 3
 
 
 def test_return_home_cancels_warning_before_touching_background_button():
-    maa = FakeMaa(templates={"return": HOME, "yes": YES, "home": Point(10, 10)},
+    device = FakeMaa(templates={"return": HOME, "yes": YES, "home": Point(10, 10)},
                   ocr_tokens=[tokens(WARNINGS[1]), tokens("否", NO), [],
                               tokens("是否返回本丸？"), tokens("是", YES)])
     with patch("touken.flows.sortie.time.sleep"):
-        assert ReturnFlow(maa)._return_home_from_march(RETURN_CFG)
-    assert maa.clicks == [NO, HOME, YES]
+        assert ReturnFlow(device)._return_home_from_march(RETURN_CFG)
+    assert device.clicks == [NO, HOME, YES]
 
 
 @pytest.mark.parametrize("text", ["", "是否使用资源？", WARNINGS[0], WARNINGS[1]])
 def test_return_home_never_confirms_a_different_or_unknown_dialog(text):
-    maa = FakeMaa(templates={"return": HOME, "yes": YES},
+    device = FakeMaa(templates={"return": HOME, "yes": YES},
                   ocr_tokens=[[], tokens(text), tokens(text), tokens("否", NO), []])
     with patch("touken.flows.sortie.time.sleep"):
-        assert not ReturnFlow(maa)._return_home_from_march(RETURN_CFG)
-    assert YES not in maa.clicks
+        assert not ReturnFlow(device)._return_home_from_march(RETURN_CFG)
+    assert YES not in device.clicks
 
 
 @pytest.mark.parametrize("tokens_list,expected", [
@@ -107,7 +107,7 @@ def test_osaka_uses_current_battle_heavy_status_when_screen_misses_it(at_floor_e
          patch("touken.injury_recovery.current_team_injury", return_value=(True, "重伤")):
         list(flow._osaka_stream_impl(max_floors=3, injury_action="stop"))
     flow._return_home_from_march.assert_called_once()
-    assert flow.maa.clicks == 0
+    assert flow.device.clicks == 0
 
 
 def test_osaka_each_decision_gets_a_new_observation_cache():
@@ -136,7 +136,7 @@ def test_osaka_rechecks_after_waiting_and_before_repeated_floor_click(repeated_f
     with patch("touken.flows.osaka.time.sleep"), patch(
             "touken.injury_recovery.current_team_injury", return_value=(True, "重伤")):
         list(flow._osaka_stream_impl(max_floors=3, injury_action="stop"))
-    assert flow.maa.clicks == int(repeated_floor)
+    assert flow.device.clicks == int(repeated_floor)
     flow._return_home_from_march.assert_called_once()
     assert len([e for e in flow.events if e["event_type"] == "osaka.floor_completed"]) == 1
 
@@ -149,5 +149,5 @@ def test_osaka_intercepted_warning_is_never_reported_as_complete(before_march):
     flow.find_march_seq = [MARCH]
     with patch("touken.flows.osaka.time.sleep"), pytest.raises(FlowAborted, match="剩余 3 层未完成"):
         list(flow._osaka_stream_impl(max_floors=3))
-    assert flow.maa.clicks == 0
+    assert flow.device.clicks == 0
     flow._return_home_from_march.assert_called_once()

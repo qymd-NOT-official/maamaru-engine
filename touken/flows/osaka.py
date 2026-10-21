@@ -5,7 +5,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..game_state import available_events, successful_body, _request_key
 from ..team_state_reader import read_team_snapshot
 from ..team_state import maintenance_reasons
@@ -86,7 +86,7 @@ class OsakaMixin:
         outermost = not getattr(self, "_osaka_koban_open", False)
         if outermost:
             self._osaka_koban_open = True
-        baseline = available_events(self.maa) if outermost else []
+        baseline = available_events(self.device) if outermost else []
         known_requests = {_request_key(event) for event in baseline if event.get("direction") == "C->S"}
         if outermost:
             self._osaka_floors_total = 0
@@ -113,7 +113,7 @@ class OsakaMixin:
             if outermost:
                 self._osaka_koban_open = False
             if outermost and baseline:
-                events = available_events(self.maa)
+                events = available_events(self.device)
                 summary = koban_reward_summary(events, known_requests)
                 floors_done = getattr(self, "_osaka_floors_total", 0)
                 if summary is not None and summary["bosses"] >= floors_done:
@@ -167,7 +167,7 @@ class OsakaMixin:
             return
 
         # 任务启动时也可能正好停在更新框（例如上一次任务已被更新中断）。
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         startup_update = yield from self.recover_game_update_stream()
         if startup_update is None:
             return
@@ -302,13 +302,13 @@ class OsakaMixin:
         floor_credited = False  # 层末结算页去重：同一画面只记一圈，离场后才放行
         floor_end_stuck = 0     # 结算页赖着不走的计数，超时才算真卡死
         while idle_checks < 300:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 伤势章/OCR 理论上会在点击行军前拦住重伤；这里再兜游戏自己
             # 弹出的“重伤仍要行军吗”。永远点否，然后返回本丸。
             if self._deny_heavy_injury_warning(cfg):
                 yield "[挖地] 🛑 出现重伤行军警告，已点【否】，不再前进"
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if self._return_home_from_march(cfg):
                     self.current_location = "本丸"
                     yield "[挖地] ✓ 已从重伤警告处安全返回本丸"
@@ -400,7 +400,7 @@ class OsakaMixin:
                 if march:
                     if (yield from stop_before_march(_completed_floors + floors)):
                         return
-                    self.maa.click(march)
+                    self.device.click(march)
                     time.sleep(1.2)
                 else:
                     time.sleep(1.0)
@@ -487,7 +487,7 @@ class OsakaMixin:
                     continue
                 if (yield from stop_before_march(total_completed)):
                     return
-                self.maa.click(march)
+                self.device.click(march)
                 time.sleep(1.2)
                 continue
 
@@ -509,7 +509,7 @@ class OsakaMixin:
                 # （出阵循环已实测过这个坑；挖地 8-23 整夜每场战斗选两遍阵）。
                 for _ in range(8):
                     time.sleep(0.4)
-                    self.maa.screenshot(force=True)
+                    self.device.screenshot(force=True)
                     if self._formation_mode_state(
                             allow_auto_without_title=formation_mode != "auto") is None:
                         break
@@ -523,7 +523,7 @@ class OsakaMixin:
                 if (yield from stop_before_march(_completed_floors + floors)):
                     return
                 yield "[挖地] 行军，继续向下挖"
-                self.maa.click(march)
+                self.device.click(march)
                 time.sleep(1.0)
                 continue
 
@@ -580,23 +580,23 @@ class OsakaMixin:
                 return False
             target = None
             for _ in range(4):
-                target = self.maa.template_match(template)
+                target = self.device.template_match(template)
                 if target:
                     break
                 time.sleep(1.0)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
             if not target:
                 return False
-            self.maa.click(target)
+            self.device.click(target)
             time.sleep(1.5)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
         return True
 
     def _read_osaka_floor(self, cfg: dict):
         """读取活动页标题中的层数；不用滚轮数字，避免两个 OCR 结果错序。"""
         title = cfg.get("floor_title_ocr", {})
         roi = roi_4to4(*title.get("roi", [75, 155, 555, 225]))
-        tokens = self.maa.ocr_all(roi)
+        tokens = self.device.ocr_all(roi)
         text = "".join(str(token[0]) for token in tokens)
         text = re.sub(r"\s+", "", text)
         match = re.search(r"大阪城地下(\d{1,2})层", text)
@@ -629,7 +629,7 @@ class OsakaMixin:
                 key = "ones_up" if target_ones > current_ones else "ones_down"
             self._click_point(points[key])
             time.sleep(0.45)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             updated = self._read_osaka_floor(cfg)
             if updated is None or updated == current:
                 # 灰色（不可用）箭头的表现就是标题层数没有变化。
@@ -641,23 +641,23 @@ class OsakaMixin:
         """只用层末专有文字判断；故意不查看三个道中常驻按钮。"""
         marker = cfg.get("floor_end_ocr", {})
         roi = roi_4to4(*marker.get("roi", [825, 270, 1280, 355]))
-        if not self.maa.ocr(marker.get("expected", "当前层数"), roi):
+        if not self.device.ocr(marker.get("expected", "当前层数"), roi):
             return False
         witness = cfg.get("floor_end_witness_ocr", {})
         witness_roi = roi_4to4(*witness.get("roi", [825, 85, 1280, 285]))
-        return bool(self.maa.ocr(
+        return bool(self.device.ocr(
             witness.get("expected", "传送凭证"), witness_roi))
 
     def _find_osaka_march(self, cfg: dict):
         march = cfg.get("march_button", {})
         roi = roi_4to4(*march.get("roi", [1030, 500, 1280, 720]))
-        return self.maa.template_match(
+        return self.device.template_match(
             march.get("template", "battle/行军.png"), roi)
 
     def _wait_for_osaka_march(self, cfg: dict, attempts: int = 8):
         """层末文字通常先于按钮出现；等按钮动画落稳，不因单帧抢跑停机。"""
         for _ in range(attempts):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             march = self._find_osaka_march(cfg)
             if march:
                 return march

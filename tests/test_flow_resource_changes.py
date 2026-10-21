@@ -8,7 +8,7 @@ from touken.agent import ToukenAgent
 from touken.flows.repair import RepairMixin
 from touken.flows.rewards import RewardsMixin
 from touken.flows.smith import SmithMixin
-from touken.maa_adapter import Point, roi_4to4
+from touken.device_adapter import Point, roi_4to4
 from touken.telemetry import TelemetryStore
 
 _REPAIR_CFG = {
@@ -32,7 +32,7 @@ class _Host(SmithMixin, RepairMixin, RewardsMixin):
         self.config = config
         self.store = store
         self.events = []
-        self.maa = None
+        self.device = None
 
     def record_event(self, event_type, **payload):
         self.events.append((event_type, payload))
@@ -199,7 +199,7 @@ class DismantleResourceChangeTests(unittest.TestCase):
         values = {tuple(roi_4to4(*roi).to_list()): value
                   for roi, value in zip(self.ROIS, ("4", "4", "i", "4"))}
         host = _Host({})
-        host.maa = _DismantlePreviewFakeMaa(values)
+        host.device = _DismantlePreviewFakeMaa(values)
 
         preview = host._read_dismantle_resources()
 
@@ -227,7 +227,7 @@ class DismantleResourceChangeTests(unittest.TestCase):
 class RepairResourceChangeTests(unittest.TestCase):
     def _run_repair_one(self, cost_tokens, need_speed=False):
         host = _Host({"repair": _REPAIR_CFG})
-        host.maa = _RepairFakeMaa(cost_tokens)
+        host.device = _RepairFakeMaa(cost_tokens)
         messages = list(host._repair_one(_REPAIR_CFG, name_y=200,
                                          need_speed=need_speed))
         return host, messages
@@ -277,7 +277,7 @@ class RepairResourceChangeTests(unittest.TestCase):
         # 不静默漏账；need_speed 的加速符 -1 照发（确定事实）
         cfg = {k: v for k, v in _REPAIR_CFG.items() if k != "cost_rois"}
         host = _Host({"repair": cfg})
-        host.maa = _RepairFakeMaa({})
+        host.device = _RepairFakeMaa({})
         messages = list(host._repair_one(cfg, name_y=200, need_speed=True))
         self.assertIn("[手入] 已开工", messages)
         changes = [p for t, p in host.events if t == "resource.change"]
@@ -292,8 +292,8 @@ class RepairResourceChangeTests(unittest.TestCase):
 
     def test_start_button_missing_no_bookkeeping(self):
         host = _Host({"repair": _REPAIR_CFG})
-        host.maa = _RepairFakeMaa({})
-        host.maa.template_match = lambda *a, **k: None
+        host.device = _RepairFakeMaa({})
+        host.device.template_match = lambda *a, **k: None
         messages = list(host._repair_one(_REPAIR_CFG, name_y=200,
                                          need_speed=False))
         self.assertNotIn("[手入] 已开工", messages)
@@ -309,7 +309,7 @@ class RewardPopupTests(unittest.TestCase):
             # 第 3 格起什么都没有 → 扫描停止
         }
         host = _Host({})
-        host.maa = _RewardFakeMaa(cells)
+        host.device = _RewardFakeMaa(cells)
 
         items, notes = host._read_reward_popup()
 
@@ -317,8 +317,8 @@ class RewardPopupTests(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("图标不认识", notes[0])
         self.assertIn("已留取同源运行截图", notes[0])
-        self.assertEqual(len(host.maa.saved), 1)
-        self.assertFalse(host.maa.saved[0][1])
+        self.assertEqual(len(host.device.saved), 1)
+        self.assertFalse(host.device.saved[0][1])
 
     def test_duplicate_resource_match_is_ambiguous_and_captures_frame(self):
         cells = {
@@ -326,13 +326,13 @@ class RewardPopupTests(unittest.TestCase):
             1: ("资源/icon委托符.png", "3"),
         }
         host = _Host({})
-        host.maa = _RewardFakeMaa(cells)
+        host.device = _RewardFakeMaa(cells)
 
         items, notes = host._read_reward_popup()
 
         self.assertEqual(items, [])
         self.assertTrue(any("模板撞车" in note for note in notes), notes)
-        self.assertEqual(len(host.maa.saved), 1)
+        self.assertEqual(len(host.device.saved), 1)
 
     def test_unknown_icon_with_nonnumeric_ocr_captures_frame(self):
         cells = {
@@ -340,18 +340,18 @@ class RewardPopupTests(unittest.TestCase):
             1: (None, "a"),  # 实机：加速符格的数量 1 被 OCR 成字母 a
         }
         host = _Host({})
-        host.maa = _RewardFakeMaa(cells)
+        host.device = _RewardFakeMaa(cells)
 
         items, notes = host._read_reward_popup()
 
         self.assertEqual(items, [("木炭", 500)])
         self.assertTrue(any("OCR 未读成数字" in note for note in notes), notes)
-        self.assertEqual(len(host.maa.saved), 1)
-        self.assertFalse(host.maa.saved[0][1])
+        self.assertEqual(len(host.device.saved), 1)
+        self.assertFalse(host.device.saved[0][1])
 
     def test_popup_absent_returns_none(self):
         host = _Host({})
-        host.maa = _RewardFakeMaa({}, title_found=False)
+        host.device = _RewardFakeMaa({}, title_found=False)
         self.assertIsNone(host._read_reward_popup())
 
     def test_emit_changes_link_claimed_event(self):
@@ -392,7 +392,7 @@ class LedgerAggregationTests(unittest.TestCase):
                   for roi, text in zip(_REPAIR_CFG["cost_rois"],
                                        ("264", "429", "429", "198"))}
         host.config = {"repair": _REPAIR_CFG}
-        host.maa = _RepairFakeMaa(tokens)
+        host.device = _RepairFakeMaa(tokens)
         list(host._repair_one(_REPAIR_CFG, name_y=200, need_speed=True))
 
         claimed_id = self.store.record_event("task_rewards.claimed",
@@ -562,7 +562,7 @@ class _FlowHost(RepairMixin):
 
     def __init__(self, names, prefixes):
         self.config = {"repair": dict(_FLOW_REPAIR_CFG)}
-        self.maa = _ScanFakeMaa(names, prefixes)
+        self.device = _ScanFakeMaa(names, prefixes)
         self.current_location = "修复"
         self.speed_calls = []
         self.events = []
@@ -634,7 +634,7 @@ class SpeedupDecisionTests(unittest.TestCase):
 
 
 class _ClaimFakeMaa:
-    """一键领取全流程假 maa：首点被「任务信息已失效」吞掉，补点后才真领到"""
+    """一键领取全流程假 device：首点被「任务信息已失效」吞掉，补点后才真领到"""
 
     def __init__(self):
         self.claim_clicks = 0
@@ -734,12 +734,12 @@ class _GrayClaimButtonFakeMaa(_ClaimFakeMaa):
 class _RewardsHost(RewardsMixin):
     """claim_task_rewards_stream 最小宿主"""
 
-    def __init__(self, maa):
+    def __init__(self, device):
         self.config = {"task_reward": {
             "tabs": {"日常": [48, 204]},
             "claim_button": {"template": "一键领取.png"},
             "popup_close": {"template": "通用_关闭.png"}}}
-        self.maa = maa
+        self.device = device
         self.current_location = "任务"
         self.events = []
 
@@ -751,7 +751,7 @@ class _RewardsHost(RewardsMixin):
         pass
 
     def _click_template_config(self, cfg):
-        self.maa.popup_closed = True
+        self.device.popup_closed = True
 
     def record_event(self, event_type, **payload):
         self.events.append((event_type, payload))
@@ -762,11 +762,11 @@ class StalePopupRetryTests(unittest.TestCase):
     """「任务信息已失效」吞掉领取点击：确认后必须补点，补点后的弹窗照记账"""
 
     def test_stale_popup_then_retry_claim(self):
-        maa = _ClaimFakeMaa()
-        host = _RewardsHost(maa)
+        device = _ClaimFakeMaa()
+        host = _RewardsHost(device)
         messages = list(host.claim_task_rewards_stream())
 
-        self.assertEqual(maa.claim_clicks, 2)  # 首点被吞 + 补点
+        self.assertEqual(device.claim_clicks, 2)  # 首点被吞 + 补点
         self.assertTrue(any("任务信息已失效" in m for m in messages))
         self.assertTrue(any("补点一键领取" in m for m in messages))
         claimed = [p for t, p in host.events if t == "task_rewards.claimed"]
@@ -782,24 +782,24 @@ class StalePopupRetryTests(unittest.TestCase):
         self.assertEqual(changes[0]["source_event_id"], 1)
 
     def test_stale_popup_waits_for_claim_button_after_refresh(self):
-        maa = _DelayedRefreshClaimFakeMaa()
-        host = _RewardsHost(maa)
+        device = _DelayedRefreshClaimFakeMaa()
+        host = _RewardsHost(device)
 
         messages = list(host.claim_task_rewards_stream())
 
-        self.assertGreaterEqual(maa.refresh_frames, 3)
-        self.assertEqual(maa.claim_clicks, 2)
+        self.assertGreaterEqual(device.refresh_frames, 3)
+        self.assertEqual(device.claim_clicks, 2)
         self.assertTrue(any("补点一键领取" in message for message in messages))
         self.assertTrue(any(event == "task_rewards.claimed"
                             for event, _ in host.events))
 
     def test_gray_claim_button_wins_over_blue_template_crosstalk(self):
-        maa = _GrayClaimButtonFakeMaa()
-        host = _RewardsHost(maa)
+        device = _GrayClaimButtonFakeMaa()
+        host = _RewardsHost(device)
 
         messages = list(host.claim_task_rewards_stream())
 
-        self.assertEqual(maa.claim_clicks, 0)
+        self.assertEqual(device.claim_clicks, 0)
         self.assertTrue(any("已确认没有可领奖励" in message
                             for message in messages))
         self.assertTrue(any(event == "task_rewards.none"
@@ -808,8 +808,8 @@ class StalePopupRetryTests(unittest.TestCase):
                              for event, _ in host.events))
 
     def test_missing_activity_tab_is_skipped_instead_of_clicking_main_tab(self):
-        maa = _GrayClaimButtonFakeMaa()
-        host = _RewardsHost(maa)
+        device = _GrayClaimButtonFakeMaa()
+        host = _RewardsHost(device)
         host.config["task_reward"]["tabs"] = {"活动": [52, 615]}
 
         messages = list(host.claim_task_rewards_stream())
@@ -817,12 +817,12 @@ class StalePopupRetryTests(unittest.TestCase):
         self.assertTrue(any("当前没有活动任务标签" in message
                             for message in messages))
         self.assertTrue(any("不领取主线" in message for message in messages))
-        self.assertEqual(maa.claim_clicks, 0)
+        self.assertEqual(device.claim_clicks, 0)
         self.assertEqual(host.events, [])
 
     def test_activity_tab_is_still_processed_when_it_returns(self):
-        maa = _GrayClaimButtonFakeMaa(activity_available=True)
-        host = _RewardsHost(maa)
+        device = _GrayClaimButtonFakeMaa(activity_available=True)
+        host = _RewardsHost(device)
         host.config["task_reward"]["tabs"] = {"活动": [52, 615]}
 
         messages = list(host.claim_task_rewards_stream())
@@ -841,5 +841,5 @@ if __name__ == "__main__":
 @pytest.fixture(autouse=True)
 def confirmed_operations_for_accounting_tests(monkeypatch):
     """Accounting tests assume a confirmed operation; outcome gates are tested separately."""
-    monkeypatch.setattr("touken.game_state.begin_operation", lambda maa: {})
+    monkeypatch.setattr("touken.game_state.begin_operation", lambda device: {})
     monkeypatch.setattr("touken.game_state.confirm_operation", lambda *args: True)

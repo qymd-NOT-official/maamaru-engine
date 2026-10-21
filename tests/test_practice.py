@@ -13,7 +13,7 @@ class _Maa:
 
 class _Flow(PracticeMixin):
     def __init__(self, rows):
-        self.maa = _Maa(rows)
+        self.device = _Maa(rows)
 
 
 class PracticeResultTests(unittest.TestCase):

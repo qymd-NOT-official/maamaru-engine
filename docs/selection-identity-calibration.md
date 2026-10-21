@@ -1,6 +1,6 @@
 # 选人页实例识别校准（2026-10-04）
 
-从 `MAAAdapter.screenshot(force=True)` 的 MuMu 显存通道取得1280×720 BGR帧。
+从 `DeviceAdapter.screenshot(force=True)` 的 MuMu 显存通道取得1280×720 BGR帧。
 现场证据只放用户数据目录 `debug/selection-*.png`，不提交截图或客户端日志。
 
 用既有名字行位置 `y` 定位数值，而非六行固定坐标：

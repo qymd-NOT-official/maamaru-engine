@@ -91,10 +91,10 @@ def test_confirm_operation_waits_for_late_response_without_clicking(monkeypatch)
     reader = Mock(side_effect=[[request], [request, response]])
     monkeypatch.setattr(game_state, "read_events", reader)
     monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
-    maa = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
-    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is True
+    device = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
+    assert game_state.confirm_operation(device, boundary(), "union", timeout=8) is True
     assert reader.call_count == 2
-    maa.click.assert_not_called()
+    device.click.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [0, 1])
@@ -103,8 +103,8 @@ def test_confirm_operation_stops_waiting_after_definite_result(monkeypatch, stat
     response = event("/composition/union", "S->C", {"status": status})
     reader = Mock(return_value=[request, response])
     monkeypatch.setattr(game_state, "read_events", reader)
-    maa = SimpleNamespace(adb_path="adb", adb_address="addr")
-    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is (status == 0)
+    device = SimpleNamespace(adb_path="adb", adb_address="addr")
+    assert game_state.confirm_operation(device, boundary(), "union", timeout=8) is (status == 0)
     assert reader.call_count == 1
 
 
@@ -113,22 +113,22 @@ def test_confirm_operation_timeout_stays_unknown(monkeypatch):
     monkeypatch.setattr(game_state, "read_events", reader)
     monkeypatch.setattr(game_state.time, "monotonic", Mock(side_effect=[0, 1, 9]))
     monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
-    maa = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
-    assert game_state.confirm_operation(maa, boundary(), "union", timeout=8) is None
+    device = SimpleNamespace(adb_path="adb", adb_address="addr", click=Mock())
+    assert game_state.confirm_operation(device, boundary(), "union", timeout=8) is None
     assert reader.call_count == 2
-    maa.click.assert_not_called()
+    device.click.assert_not_called()
 
 
 def test_sugar_continues_multiple_feeds_with_real_confirmation_and_skewed_clock(monkeypatch):
     from test_sugar_flow import Flow
     flow = Flow()
-    flow.maa.adb_path = "adb"
-    flow.maa.adb_address = "addr"
+    flow.device.adb_path = "adb"
+    flow.device.adb_address = "addr"
     monkeypatch.setattr(game_state.time, "sleep", lambda _: None)
     monkeypatch.setattr(game_state.time, "time", lambda: 1000)
     def read_events(*args):
         events = []
-        for index in range(flow.maa.feeds):
+        for index in range(flow.device.feeds):
             request = {"ts": "1970-01-01 08:16:39", "direction": "C->S", "endpoint": "/composition/union",
                        "payload": {"base_serial_id": "111", "material_serial_id": str(222 + index)}}
             response = event("/composition/union", "S->C", {"status": 0}, at=1002)
@@ -136,7 +136,7 @@ def test_sugar_continues_multiple_feeds_with_real_confirmation_and_skewed_clock(
         return events
     monkeypatch.setattr(game_state, "read_events", read_events)
     messages = list(flow._shugo_loop_stream(False))
-    assert flow.maa.feeds == 3
+    assert flow.device.feeds == 3
     assert sum("完成第" in message for message in messages) == 3
     assert "炼了 3 轮" in messages[-1]
 
@@ -185,7 +185,7 @@ def test_repair_does_not_claim_start_or_record_cost_on_unknown_result(monkeypatc
     monkeypatch.setattr(game_state, "begin_operation", Mock(return_value=boundary()))
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=outcome))
     host = _Host({"repair": _REPAIR_CFG})
-    host.maa = _RepairFakeMaa({})
+    host.device = _RepairFakeMaa({})
     messages = list(host._repair_one(_REPAIR_CFG, 200, False))
     assert not any("已开工" in message for message in messages)
     assert host.events == []
@@ -202,14 +202,14 @@ def test_union_returning_to_materials_does_not_claim_success_without_receipt(mon
     messages = []
     with pytest.raises(FlowAborted, match="停止操作"):
         messages.extend(flow._shugo_loop_stream(False))
-    assert flow.maa.feeds == 1
+    assert flow.device.feeds == 1
     assert not any("完成第" in message for message in messages)
 
 
 @pytest.mark.parametrize("outcome", [None, False, True])
 def test_dismantle_marks_daily_completion_only_with_receipt(monkeypatch, outcome):
     from touken.flows.smith import SmithMixin
-    from touken.maa_adapter import Point
+    from touken.device_adapter import Point
     monkeypatch.setattr("touken.flows.smith.time.sleep", lambda _: None)
     monkeypatch.setattr(game_state, "begin_operation", Mock(return_value=boundary()))
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=outcome))
@@ -217,8 +217,8 @@ def test_dismantle_marks_daily_completion_only_with_receipt(monkeypatch, outcome
     monkeypatch.setattr("touken.flows.smith._mark_dismantled_today", mark)
     host = SmithMixin()
     host.config = {}
-    host.maa = Mock()
-    host.maa.ocr.return_value = Point(1, 1)
+    host.device = Mock()
+    host.device.ocr.return_value = Point(1, 1)
     host._scan_whitelist_row = Mock(return_value=("五虎退", 200))
     host._read_dismantle_resources = Mock(return_value={})
     host.record_event = Mock()
@@ -244,22 +244,22 @@ def test_dismantled_today_in_log_covers_manual_player_action(monkeypatch):
     yesterday = _dismantle_event(day_offset=-1)
     monkeypatch.setattr(game_state, "read_events",
                         lambda *a: [yesterday, today])
-    maa = SimpleNamespace(adb_path="adb", adb_address="addr")
-    assert smith.dismantled_today_in_log(maa) is True
+    device = SimpleNamespace(adb_path="adb", adb_address="addr")
+    assert smith.dismantled_today_in_log(device) is True
     monkeypatch.setattr(game_state, "read_events", lambda *a: [yesterday])
-    assert smith.dismantled_today_in_log(maa) is False
+    assert smith.dismantled_today_in_log(device) is False
     monkeypatch.setattr(game_state, "read_events", lambda *a: [])
-    assert smith.dismantled_today_in_log(maa) is None
+    assert smith.dismantled_today_in_log(device) is None
     # 只有请求没有成功响应不算数
     req = _dismantle_event(direction='C->S')
     monkeypatch.setattr(game_state, "read_events", lambda *a: [req])
-    assert smith.dismantled_today_in_log(maa) is False
+    assert smith.dismantled_today_in_log(device) is False
 
 
 def test_daily_dismantle_step_skips_when_log_shows_player_dismantled(monkeypatch):
     from touken.flows import daily, smith
     monkeypatch.setattr(smith, "dismantled_today", lambda: False)
-    host = SimpleNamespace(maa=SimpleNamespace())
+    host = SimpleNamespace(device=SimpleNamespace())
     calls = []
 
     def dismantle_stream(**kw):
@@ -267,10 +267,10 @@ def test_daily_dismantle_step_skips_when_log_shows_player_dismantled(monkeypatch
         yield "dismantled"
 
     host.dismantle_stream = dismantle_stream
-    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda maa: True)
+    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda device: True)
     messages = list(daily.DailyMixin._dismantle_step(host))
     assert calls == []
     assert any("游戏记录显示今天已经刀解过了" in m for m in messages)
-    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda maa: None)
+    monkeypatch.setattr(smith, "dismantled_today_in_log", lambda device: None)
     messages = list(daily.DailyMixin._dismantle_step(host))
     assert calls == [{"max_dismantle": 1}]

@@ -136,9 +136,9 @@ def _on_script_message(payload: dict):
 
 # ── 注册脚本 ──
 
-def _make_maa(config_path):
-    """创建 MAAAdapter（优先读配置，fallback 到 test_daily.py 里的硬编码路径）"""
-    from touken import MAAAdapter
+def _make_device(config_path):
+    """创建 DeviceAdapter（优先读配置，fallback 到 test_daily.py 里的硬编码路径）"""
+    from touken import DeviceAdapter
     path = Path(config_path)
     cfg = json.loads(path.read_text(encoding="utf-8"))
     # 面板把地址留空表示恢复自动探测。真正到下一次任务启动时再探测，
@@ -147,7 +147,7 @@ def _make_maa(config_path):
         from touken.emulator_discovery import auto_configure_emulator
         auto_configure_emulator(path)
         cfg = json.loads(path.read_text(encoding="utf-8"))
-    return MAAAdapter(
+    return DeviceAdapter(
         adb_path=cfg.get("adb_path", _DEFAULT_ADB_PATH),
         adb_address=cfg.get("adb_address", _DEFAULT_ADB_ADDR),
         resource_dir=str(RESOURCE_DIR),
@@ -159,10 +159,10 @@ def _make_maa(config_path):
 
 def _make_agent(config_path):
     from touken import ToukenAgent
-    maa = _make_maa(config_path)
-    if not maa.init():
-        raise RuntimeError("MAA 初始化失败，检查 ADB 连接 / 模拟器是不是关了")
-    return ToukenAgent(str(config_path), maa)
+    device = _make_device(config_path)
+    if not device.init():
+        raise RuntimeError("设备连接失败，检查 ADB 连接 / 模拟器是不是关了")
+    return ToukenAgent(str(config_path), device)
 
 
 def _i(params, key, default):
@@ -374,7 +374,7 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
                 try:
                     from touken.game_state import read_events
                     from touken.sword_receipts import sync_receipts
-                    result = sync_receipts(read_events(agent.maa.adb_path, agent.maa.adb_address))
+                    result = sync_receipts(read_events(agent.device.adb_path, agent.device.adb_address))
                     if result["written"] or result["reconciled"]:
                         yield f"[{tag}] 锻刀和掉落记录已同步到账房"
                 except Exception:
@@ -528,7 +528,7 @@ def _build_daily_standalone(config_path, params):
     一次，与 inventory 开关无关；收尾失败不拖垮任务结果。
     例外：after 安排了退出游戏/关模拟器/休眠时跳过收尾——游戏都关了
     还导航回本丸只会撞死在离线设备上（9-04 凌晨翻车冤案：日课全绿，
-    收尾对着已关的模拟器抢救 25 分钟，MAA 自裁，整轮被记成 failed）。
+    收尾对着已关的模拟器抢救 25 分钟，识别通道自裁，整轮被记成 failed）。
     """
     agent = _make_agent(config_path)
     after = params.get("after") or "none"
@@ -796,8 +796,8 @@ def _build_dispatch(agent, config_path, params):
         yield f"[远征] 不知道图 {code} 是哪张，没派"
         return
     if scheduled:
-        agent.maa.screenshot(force=True)
-        if not agent.maa.exists("目录.png", threshold=0.7):
+        agent.device.screenshot(force=True)
+        if not agent.device.exists("目录.png", threshold=0.7):
             detail = "画面不在本丸，像主人在手动玩"
             _write_dispatch_result(slot_key, "refused", detail)
             yield f"[远征] {detail}，这班交回排班"
@@ -1329,7 +1329,7 @@ register_script("formation", "编队换人",
 
 
 # ── 日服 ──
-# 浏览器画面识别 + 点击的出阵：走 jp_sally 状态机，与国服 MAA 链路完全分离。
+# 浏览器画面识别 + 点击的出阵：走 jp_sally 状态机，与国服设备链路完全分离。
 def _build_jp_sally(config_path, params):
     from touken import jp_sally
     return jp_sally.run_script(config_path, params)
@@ -1611,7 +1611,7 @@ def _migrate_task_parameters():
 
 async def _startup():
     if _ledger_mode():
-        # 账房模式必须能在模拟器、ADB、MAA 全都没开的情况下独立使用。
+        # 账房模式必须能在模拟器、ADB 全都没开的情况下独立使用。
         # 广播、远征调度和机器人都可能间接触发自动化或额外网络连接，
         # 因此这里不初始化；账本、规划与手动录入 API 仍照常可用。
         return

@@ -2,7 +2,7 @@
 """每圈出阵事实记录（sortie.loop_started / completed / interrupted /
 retreated_before_boss 的扩展 payload）与旧数据兼容的测试。
 
-帧驱动假 MAA：screenshot(force=True) 推进一帧，帧是画面标记集合
+帧驱动假设备：screenshot(force=True) 推进一帧，帧是画面标记集合
 （"formation" 阵形页、"result" 战斗结算页、"march" 行军按钮、
 "home" 本丸、"march_stop" 自动行军停止横幅、"drop" 掉刀获得画面）。
 """
@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from touken.flows.sortie import SortieMixin
 from touken.flows.battle import BattleMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.telemetry import TelemetryStore
 
 
@@ -77,7 +77,7 @@ class _LoopHost(SortieMixin, BattleMixin):
             "team_select": {"teams": {"3": [30, 30]}},
         }
         self.current_location = "出阵"
-        self.maa = _FrameMaa(frames)
+        self.device = _FrameMaa(frames)
         self.events = []
         self._drop_id = drop_id
         self._injuries = list(injuries)
@@ -133,18 +133,18 @@ class _LoopHost(SortieMixin, BattleMixin):
         return False
 
     def _formation_mode_state(self, allow_auto_without_title=False):
-        return "manual" if "formation" in self.maa.frame else None
+        return "manual" if "formation" in self.device.frame else None
 
     def choose_formation(self, formation_name="鱼鳞阵", enable_auto=False):
         return "fixed"
 
     def _find_march_continue(self, cfg):
-        return Point(1100, 600) if "march" in self.maa.frame else None
+        return Point(1100, 600) if "march" in self.device.frame else None
 
     def _read_drop_sword(self):
         if self._production_drop_reader:
             return super()._read_drop_sword()
-        if self._drop_id is not None and "drop" in self.maa.frame:
+        if self._drop_id is not None and "drop" in self.device.frame:
             return {"status": "recognized",
                     "sword": {"sword_id": self._drop_id,
                               "name": "厚藤四郎", "name_jp": "厚藤四郎"}}
@@ -461,7 +461,7 @@ class DropHonestyTests(unittest.TestCase):
         host = _LoopHost(
             PRE + [{"result", "march"}, {}] + [{"plate"}] * 9 + [{"home"}],
             production_drop_reader=True)
-        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        host.device.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
         _run(host, auto_march=False, max_loops=1)
         payload = self._completed(host)
         self.assertEqual(payload["drop_observation"], "not_observed")
@@ -475,7 +475,7 @@ class DropHonestyTests(unittest.TestCase):
             PRE + [{"result", "march"}, {}]
             + [{"plate"}] * 3 + [{"plate_ok"}] * 3 + [{"home"}],
             production_drop_reader=True)
-        host.maa.plate_tokens_by_marker = {
+        host.device.plate_tokens_by_marker = {
             "plate": ("太刀", "乱码丼"),
             "plate_ok": ("打刀", "大和守安定"),
         }
@@ -494,7 +494,7 @@ class DropHonestyTests(unittest.TestCase):
             PRE + [{"result", "march"}, {}]
             + [{"plate_ok"}] * 3 + [{"banner"}] * 9 + [{"home"}],
             production_drop_reader=True)
-        host.maa.plate_tokens_by_marker = {
+        host.device.plate_tokens_by_marker = {
             "plate_ok": ("打刀", "大和守安定"),
         }
         _run(host, auto_march=False, max_loops=1)
@@ -516,7 +516,7 @@ class DropHonestyTests(unittest.TestCase):
         host = _LoopHost(
             PRE + [{"result", "march"}, {}] + [{"plate"}] * 9 + [{"home"}],
             production_drop_reader=True)
-        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        host.device.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
         host.config["yosari"] = host.config["sortie"]
         host.config["map_select"]["异去"] = {"chapters": {"1": [10, 10]},
                                              "maps": {"4": [20, 20]}}
@@ -535,7 +535,7 @@ class DropHonestyTests(unittest.TestCase):
         host = _LoopHost(
             PRE + [{"result", "march"}, {}, {"plate"}, {"home"}],
             production_drop_reader=True)
-        host.maa.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
+        host.device.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
         with patch("touken.flows.sortie.sword_db.find_by_name",
                    side_effect=RuntimeError("recognizer boom")):
             _run(host, auto_march=False, max_loops=1)

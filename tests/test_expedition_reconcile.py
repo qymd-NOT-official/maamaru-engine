@@ -96,22 +96,22 @@ class TestReconcileRecords:
     def test_residual_record_confirmed_home_is_cleared(self, monkeypatch):
         now = time.time()
         store = self._patch_store(monkeypatch, {"2": active_record(now)})
-        maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+        device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
         monkeypatch.setattr(game_state, "read_events",
                             lambda p, a: [party_event(2, 1, now)])
 
-        assert expedition_flow.reconcile_records_with_game(maa) == [2]
+        assert expedition_flow.reconcile_records_with_game(device) == [2]
         assert store.records == {}
 
     def test_team_confirmed_away_is_kept(self, monkeypatch):
         now = time.time()
         record = active_record(now)
         store = self._patch_store(monkeypatch, {"2": record})
-        maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+        device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
         monkeypatch.setattr(game_state, "read_events",
                             lambda p, a: [party_event(2, 2, now)])
 
-        assert expedition_flow.reconcile_records_with_game(maa) == []
+        assert expedition_flow.reconcile_records_with_game(device) == []
         assert store.records == {"2": record}
 
     def test_no_events_keeps_old_behavior(self, monkeypatch):
@@ -123,11 +123,11 @@ class TestReconcileRecords:
 
     def test_corrupt_records_do_not_crash(self, monkeypatch):
         store = self._patch_store(monkeypatch, ["not", "a", "dict"])
-        maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+        device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
         monkeypatch.setattr(game_state, "read_events",
                             lambda p, a: [party_event(2, 1, time.time())])
 
-        assert expedition_flow.reconcile_records_with_game(maa) == []
+        assert expedition_flow.reconcile_records_with_game(device) == []
         assert store.records == ["not", "a", "dict"]
 
     def test_expired_record_is_not_reconciled(self, monkeypatch):
@@ -135,11 +135,11 @@ class TestReconcileRecords:
         now = time.time()
         expired = active_record(now, minutes=0)
         store = self._patch_store(monkeypatch, {"2": expired})
-        maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+        device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
         monkeypatch.setattr(game_state, "read_events",
                             lambda p, a: [party_event(2, 1, now)])
 
-        assert expedition_flow.reconcile_records_with_game(maa) == []
+        assert expedition_flow.reconcile_records_with_game(device) == []
         assert store.records == {"2": expired}
 
 
@@ -206,7 +206,7 @@ def test_daily_step_reconciles_residual_and_dispatches(monkeypatch):
     store = _RecordStore({"2": active_record(now)})
     _patch_records(monkeypatch, store)
     flow, dispatched = _daily_host()
-    flow.maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+    flow.device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
     monkeypatch.setattr(game_state, "read_events",
                         lambda p, a: [party_event(2, 1, now)])
 
@@ -224,7 +224,7 @@ def test_daily_step_keeps_skip_when_game_confirms_away(monkeypatch):
     store = _RecordStore({"2": record})
     _patch_records(monkeypatch, store)
     flow, dispatched = _daily_host()
-    flow.maa = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
+    flow.device = type("Maa", (), {"adb_path": "adb", "adb_address": "addr"})()
     monkeypatch.setattr(game_state, "read_events",
                         lambda p, a: [party_event(2, 2, now)])
 
@@ -240,7 +240,7 @@ def test_daily_step_without_data_falls_back_to_old_skip(monkeypatch):
     store = _RecordStore({"2": record})
     _patch_records(monkeypatch, store)
     flow, dispatched = _daily_host()
-    flow.maa = _NoMaa()  # 数据通道不在：回退旧行为
+    flow.device = _NoMaa()  # 数据通道不在：回退旧行为
 
     messages = list(flow._daily_expedition_step(list(ROUTES)))
 

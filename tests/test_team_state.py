@@ -33,7 +33,7 @@ class Host(BattleMixin, SakuraMixin, OsakaMixin):
 
     def __init__(self, reader):
         self.team_state_reader = reader
-        self.maa = SimpleNamespace()
+        self.device = SimpleNamespace()
 
 
 def test_all_gameplay_consumers_use_the_injected_observation_without_client_reads():
@@ -49,11 +49,11 @@ def test_all_gameplay_consumers_use_the_injected_observation_without_client_read
         assert host._osaka_maintenance_facts(3)["equipment"]["1"] == (True, False, False)
 
 
-def test_custom_reader_needs_no_maa_adapter_and_missing_connection_is_unknown():
+def test_custom_reader_needs_no_device_adapter_and_missing_connection_is_unknown():
     host = SimpleNamespace(team_state_reader=lambda *args, **kwargs: snapshot())
     assert read_team_snapshot(host, 3, now=1001).max_injury == "重伤"
     assert read_team_snapshot(SimpleNamespace(), 3, now=1001) is None
-    assert read_team_snapshot(SimpleNamespace(maa=SimpleNamespace(adb_address="fake")), 3, now=1001) is None
+    assert read_team_snapshot(SimpleNamespace(device=SimpleNamespace(adb_address="fake")), 3, now=1001) is None
 
 
 @pytest.mark.parametrize("failure", [None, {}, snapshot(2), RuntimeError("data unavailable")])
@@ -66,7 +66,7 @@ def test_other_reader_failure_or_wrong_team_never_falls_through_to_the_default_c
 
 def test_default_client_adapter_and_common_views_agree_on_current_battle_facts():
     from touken import game_state
-    host = SimpleNamespace(maa=SimpleNamespace())
+    host = SimpleNamespace(device=SimpleNamespace())
     events = battle_facts()
     with patch.object(game_state, "available_events", return_value=events) as read:
         state = read_team_snapshot(host, 3, now=2001)
@@ -187,13 +187,13 @@ def test_injury_ocr_vertical_split_chars_join_in_same_column():
 @pytest.mark.parametrize("observe", [False, True])
 def test_shared_return_home_works_without_inheriting_the_sortie_flow(observe):
     host = BattleMixin()
-    host.maa = FakeMaa(templates={"return": HOME, "home": YES},
+    host.device = FakeMaa(templates={"return": HOME, "home": YES},
                        ocr_tokens=[[], tokens("是否返回本丸？"), tokens("是", YES)])
     if observe:
         host._watch_battle_frame = Mock()
     with patch("touken.flows.battle.time.sleep"):
         assert host._return_home_from_march(RETURN_CFG)
-    assert host.maa.clicks == [HOME, YES]
+    assert host.device.clicks == [HOME, YES]
     if observe:
         host._watch_battle_frame.assert_called_once()
 

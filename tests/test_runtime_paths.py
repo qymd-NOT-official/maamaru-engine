@@ -271,7 +271,7 @@ class RuntimePathsTests(unittest.TestCase):
                 "status/inventory.json": '{"木炭":12345}'.encode(),
                 "status/session_state.json": b'{"messages":[]}',
                 "status/maamaru_logs.db": b"SQLite format 3\x00test-db",
-                "debug/maa.log": b"debug-log",
+                "debug/device.log": b"debug-log",
                 "debug/last-screen.png": b"fake-png",
                 "profiles/custom_head.png": b"custom-profile",
             }
@@ -293,7 +293,7 @@ class RuntimePathsTests(unittest.TestCase):
                 "status/inventory.json": "state/inventory.json",
                 "status/session_state.json": "state/session_state.json",
                 "status/maamaru_logs.db": "logs/maamaru_logs.db",
-                "debug/maa.log": "debug/maa.log",
+                "debug/device.log": "debug/device.log",
                 "debug/last-screen.png": "debug/last-screen.png",
                 "profiles/custom_head.png": "profiles/overrides/custom_head.png",
             }

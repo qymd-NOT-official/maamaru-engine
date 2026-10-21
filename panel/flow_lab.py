@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse
 
 from touken import flow_engine
 from touken.flow_engine import FlowError
-from touken.maa_adapter import Region
+from touken.device_adapter import Region
 from touken.runtime_paths import RESOURCE_DIR
 
 from . import template_lab as _template_lab
@@ -53,8 +53,8 @@ def _ensure_capture_available() -> None:
 
 def _create_adapter():
     """adapter 工厂钩子：默认借面板同款构造；测试 patch 本函数注入假截图源。"""
-    from .server import _CONFIG_PATH, _make_maa
-    return _make_maa(_CONFIG_PATH)
+    from .server import _CONFIG_PATH, _make_device
+    return _make_device(_CONFIG_PATH)
 
 
 async def _json_body(request: Request) -> dict:
@@ -140,7 +140,7 @@ def _test_step_sync(step) -> dict:
     try:
         adapter = _create_adapter()
         if not adapter.init():
-            raise RuntimeError("MAA 初始化失败，检查 ADB 连接 / 模拟器是不是关了。")
+            raise RuntimeError("设备初始化失败，检查 ADB 连接 / 模拟器是不是关了。")
     except HTTPException:
         raise
     except Exception as exc:

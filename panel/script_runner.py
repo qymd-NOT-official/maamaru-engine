@@ -2,7 +2,7 @@
 """
 脚本执行器 —— 子进程版（2026-08-05 重写，恶性卡死修复）
 
-旧版在本进程线程里跑 generator：MAA 的 wait() 硬阻塞一旦卡死，
+旧版在本进程线程里跑 generator：识别引擎的 wait() 硬阻塞一旦卡死，
 线程永久死锁，面板除了整体重启没救，日志戛然而止还找不到凶手。
 
 现在每个脚本都是独立子进程（panel/worker.py）：
@@ -10,7 +10,7 @@
   - 沉默看门狗：子进程 300 秒一行输出都没有 = 判定卡死，直接 kill，
     面板/调度器/机器人毫发无损（战斗循环心跳 ~10-20s 一条，300s 很宽）
   - 紧急停止 = 真杀进程，立刻停，不用等 generator 下次 yield
-  - 看门狗线程只数秒数、只杀进程，绝不碰 MAA（§14.1 血泪红线）
+  - 看门狗线程只数秒数、只杀进程，绝不碰识别引擎（§14.1 血泪红线）
 """
 
 import json
@@ -40,9 +40,9 @@ SILENCE_TIMEOUT_SEC = 300
 # （电脑睡着时工人和看门狗一起被冻，醒来墙上时钟跳一大截，不是工人卡死）
 SUSPEND_GAP_SEC = 60
 
-# 工人进程约定退出码：玩法安全中止 / MAA 连续识别超时后自我了断
+# 工人进程约定退出码：玩法安全中止 / 识别引擎连续超时后自我了断
 EXIT_FLOW_ABORTED = 42
-EXIT_MAA_DEAD = 43
+EXIT_ENGINE_DEAD = 43
 
 
 def register_script(name: str, label: str, desc: str,
@@ -196,7 +196,7 @@ class ScriptRunner:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"        # 输出不缓冲，看门狗才数得准
         env["PYTHONIOENCODING"] = "utf-8"    # 日文/emoji 不许被 GBK 掐死
-        env["MAAMARU_WORKER"] = "1"          # 告诉 maa_adapter：可以自我了断
+        env["MAAMARU_WORKER"] = "1"          # 告诉 device_adapter：可以自我了断
         env["MAAMARU_WORKER_PARAMS"] = json.dumps(params, ensure_ascii=False)
         env["MAAMARU_RUN_ID"] = run_id        # 结构化观测数据关联本轮任务
         env["MAAMARU_SCRIPT"] = script_name
@@ -275,8 +275,8 @@ class ScriptRunner:
             final = f"[脚本] 等待指定时间，其他任务可以开工 — run {run_id}"
         elif rc == EXIT_FLOW_ABORTED:
             final = f"[脚本] 玩法遇到异常，已安全停止且未计作完成 — run {run_id}"
-        elif rc == EXIT_MAA_DEAD:
-            final = (f"[脚本] MAA 连续超时，工人进程自我了断 — run {run_id}。"
+        elif rc == EXIT_ENGINE_DEAD:
+            final = (f"[脚本] 识别引擎连续超时，工人进程自我了断 — run {run_id}。"
                      "建议重启模拟器后再跑")
         else:
             final = f"[脚本] 工人进程异常退出（代码 {rc}）— run {run_id}"
@@ -339,7 +339,7 @@ class ScriptRunner:
     # ---------- 内部：沉默看门狗 ----------
 
     def _watchdog(self, proc: subprocess.Popen, run_id: str, script_name: str):
-        """只数秒数 + 杀进程，绝不碰 MAA（碰 MAA 的线程看门狗已经咬死过人）"""
+        """只数秒数 + 杀进程，绝不碰识别引擎（碰引擎的线程看门狗已经咬死过人）"""
         last_tick = time.time()
         while True:
             time.sleep(5)

@@ -9,7 +9,7 @@ from touken import game_state
 from touken.flows.daily import DailyMixin
 from touken.flows.expedition import ExpeditionMixin
 from touken.flows.report_judge import _is_fail
-from touken.maa_adapter import Point, roi_4to4
+from touken.device_adapter import Point, roi_4to4
 from touken.navigator import NavigationMixin
 
 
@@ -29,7 +29,7 @@ class ExpeditionRewardTests(unittest.TestCase):
                 return next(self.responses)
 
         flow = ExpeditionMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         rewards, status, result = flow._read_settlement_rewards({})
 
         self.assertEqual(rewards, {"木炭": 15, "玉钢": 22})
@@ -51,7 +51,7 @@ class ExpeditionRewardTests(unittest.TestCase):
                 return next(self.responses)
 
         flow = ExpeditionMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         rewards, status, result = flow._read_settlement_rewards({})
 
         self.assertEqual(rewards, {"木炭": 15, "冷却材": 8})
@@ -73,7 +73,7 @@ class ExpeditionRewardTests(unittest.TestCase):
                 return next(self.responses)
 
         flow = ExpeditionMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         _rewards, _status, result = flow._read_settlement_rewards({})
         self.assertEqual(result, "unknown")
 
@@ -92,7 +92,7 @@ class ExpeditionRewardTests(unittest.TestCase):
                 return next(self.responses)
 
         flow = ExpeditionMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         _rewards, _status, result = flow._read_settlement_rewards({})
         self.assertEqual(result, "失败")
 
@@ -143,12 +143,12 @@ class DispatchVerifyTests(unittest.TestCase):
         "team_select": {"teams": {"2": [274, 91]}},
     }
 
-    def _flow(self, maa):
+    def _flow(self, device):
         config = dict(self.CONFIG)
 
         class Flow(ExpeditionMixin):
             def __init__(self):
-                self.maa = maa
+                self.device = device
                 self.config = config
                 self.current_location = "远征"
                 self.point_clicks = []
@@ -166,35 +166,35 @@ class DispatchVerifyTests(unittest.TestCase):
 
     def test_wrong_map_selection_is_blocked(self):
         # 选完图全屏对不上名字：重选一次仍对不上 → 停，绝不点远征开始
-        maa = self.Maa(map_visible=False)
-        flow = self._flow(maa)
+        device = self.Maa(map_visible=False)
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"):
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
 
         fails = [m for m in logs if "怕派错队伍" in m]
         self.assertTrue(fails)
         self.assertTrue(_is_fail(fails[-1]))
-        self.assertEqual(maa.ocr_clicks, [(1, 1), (1, 1)])  # 只有两次点小图名
+        self.assertEqual(device.ocr_clicks, [(1, 1), (1, 1)])  # 只有两次点小图名
 
     def test_confirmed_map_dispatches_normally(self):
         # 图名对得上 → 一路走到"已出发"
-        maa = self.Maa(map_visible=True)
-        flow = self._flow(maa)
+        device = self.Maa(map_visible=True)
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"):
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
 
         self.assertTrue(any("已出发" in m for m in logs))
-        self.assertIn(("远征开始", "exact"), maa.ocr_modes)
+        self.assertIn(("远征开始", "exact"), device.ocr_modes)
 
     def test_game_success_needs_no_running_text(self):
-        maa = self.Maa()
-        flow = self._flow(maa)
+        device = self.Maa()
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"), \
                 patch.object(flow, "_dispatch_game_result", return_value={"payload": {"status": 0}}), \
                 patch.object(flow, "_record_dispatch") as save:
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2, map_slot=1))
         self.assertTrue(any("已出发" in m for m in logs))
-        self.assertNotIn(("远征中", "contains"), maa.ocr_modes)
+        self.assertNotIn(("远征中", "contains"), device.ocr_modes)
         save.assert_called_once()
 
     def test_mismatching_game_result_cannot_be_made_green_by_ocr(self):
@@ -241,12 +241,12 @@ class DispatchJsonInjuryTests(unittest.TestCase):
     安全约束优先——两条路判出重伤都拒派。"""
     CONFIG = DispatchVerifyTests.CONFIG
 
-    def _flow(self, maa):
-        return DispatchVerifyTests._flow(self, maa)
+    def _flow(self, device):
+        return DispatchVerifyTests._flow(self, device)
 
     def test_json_heavy_injury_blocks_before_any_template(self):
-        maa = _InjuryMaa()
-        flow = self._flow(maa)
+        device = _InjuryMaa()
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"), \
                 patch.object(game_state, "read_events",
                              return_value=_team_hp_events(hp="5")), \
@@ -256,12 +256,12 @@ class DispatchJsonInjuryTests(unittest.TestCase):
         self.assertTrue(any("日志验伤" in m for m in logs))
         self.assertTrue(_is_fail(refusal))  # 拒派必须成绩单见红，不许假绿
         self.assertFalse(any("已出发" in m for m in logs))
-        self.assertEqual(maa.tpl_calls, [])  # 数据作准，画面章看都不看
+        self.assertEqual(device.tpl_calls, [])  # 数据作准，画面章看都不看
         save.assert_not_called()
 
     def test_json_healthy_team_skips_stamp_and_dispatches(self):
-        maa = _InjuryMaa()
-        flow = self._flow(maa)
+        device = _InjuryMaa()
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"), \
                 patch.object(game_state, "read_events",
                              return_value=_team_hp_events(hp="45")), \
@@ -271,12 +271,12 @@ class DispatchJsonInjuryTests(unittest.TestCase):
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
         self.assertTrue(any("全员满血" in m for m in logs))
         self.assertTrue(any("已出发" in m for m in logs))
-        self.assertNotIn("重伤.png", maa.tpl_calls)  # 满血数据在账，不猜画面
+        self.assertNotIn("重伤.png", device.tpl_calls)  # 满血数据在账，不猜画面
         save.assert_called_once()
 
     def test_stale_json_falls_back_to_stamp(self):
-        maa = _InjuryMaa()
-        flow = self._flow(maa)
+        device = _InjuryMaa()
+        flow = self._flow(device)
         stale = _team_hp_events(hp="45", at=time.time() - 700)
         with patch("touken.flows.expedition.time.sleep"), \
                 patch.object(game_state, "read_events", return_value=stale), \
@@ -284,13 +284,13 @@ class DispatchJsonInjuryTests(unittest.TestCase):
                              return_value={"payload": {"status": 0}}), \
                 patch.object(flow, "_record_dispatch") as save:
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
-        self.assertIn("重伤.png", maa.tpl_calls)  # 数据过旧，回退画面兜底
+        self.assertIn("重伤.png", device.tpl_calls)  # 数据过旧，回退画面兜底
         self.assertTrue(any("已出发" in m for m in logs))
         save.assert_called_once()
 
     def test_json_unavailable_falls_back_and_stamp_still_blocks(self):
-        maa = _InjuryMaa(stamp_hit=True)
-        flow = self._flow(maa)
+        device = _InjuryMaa(stamp_hit=True)
+        flow = self._flow(device)
         with patch("touken.flows.expedition.time.sleep"), \
                 patch.object(game_state, "read_events",
                              side_effect=OSError("adb 不在")), \
@@ -298,7 +298,7 @@ class DispatchJsonInjuryTests(unittest.TestCase):
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
         self.assertTrue(any("检测到重伤标记" in m for m in logs))
         self.assertFalse(any("已出发" in m for m in logs))
-        self.assertNotIn(("远征开始", "exact"), maa.ocr_modes)  # 没走到出发按钮
+        self.assertNotIn(("远征开始", "exact"), device.ocr_modes)  # 没走到出发按钮
         save.assert_not_called()
 
     def test_report_helper_respects_config_switch_and_missing_adb(self):
@@ -409,8 +409,8 @@ class _SettleMaa:
 
 
 class _SettleFlow(ExpeditionMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = SETTLE_CFG
         self.events = []
 
@@ -429,9 +429,9 @@ def _observe(flow, seen, sequence=1):
 
 class SettlementObserverTests(unittest.TestCase):
     def test_settlement_event_is_honest_and_complete(self):
-        maa = _SettleMaa(_bright_frame(),
+        device = _SettleMaa(_bright_frame(),
                          _settle_texts(result_tokens=[("大成功", Point(700, 60))]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])
 
         self.assertTrue(obs["new"])
@@ -449,9 +449,9 @@ class SettlementObserverTests(unittest.TestCase):
         self.assertTrue(all(c["via"] == "collect" for c in changes))
 
     def test_unknown_result_and_row_never_default_to_success_or_zero(self):
-        maa = _SettleMaa(_bright_frame(), _settle_texts(
+        device = _SettleMaa(_bright_frame(), _settle_texts(
             result_tokens=[], unreadable_rows=[(875, 570, 920, 625)]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])
 
         self.assertEqual(obs["result"], "unknown")
@@ -463,9 +463,9 @@ class SettlementObserverTests(unittest.TestCase):
 
     def test_same_screen_is_never_recorded_twice(self):
         """转场慢半拍同一屏赖着不走：指纹相同，只记一次账。"""
-        maa = _SettleMaa(_bright_frame(),
+        device = _SettleMaa(_bright_frame(),
                          _settle_texts(result_tokens=[("成功", Point(700, 60))]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         seen = []
         first = _observe(flow, seen)
         second = _observe(flow, seen, sequence=2)
@@ -479,12 +479,12 @@ class SettlementObserverTests(unittest.TestCase):
         """换了队伍的结算屏：「第X部队」字样像素必然不同，OCR 全灭也分得开。"""
         frame2 = _bright_frame()
         frame2[30:60, 30:100] = 50  # 队号标签变了
-        maa = _SettleMaa(_bright_frame(),
+        device = _SettleMaa(_bright_frame(),
                          _settle_texts(result_tokens=[("成功", Point(700, 60))]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         seen = []
         _observe(flow, seen)
-        maa.frame = frame2
+        device.frame = frame2
         second = _observe(flow, seen, sequence=2)
 
         self.assertTrue(second["new"])
@@ -495,8 +495,8 @@ class SettlementObserverTests(unittest.TestCase):
         """道具栏有东西但模板没校准：记 unknown + 墨水量，绝不默认成没给。"""
         frame = _bright_frame()
         frame[480:680, 950:1080] = 40  # 栏里躺着道具图标 + 数量文字
-        maa = _SettleMaa(frame, _settle_texts())
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(frame, _settle_texts())
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])
 
         self.assertEqual(obs["special_status"], "unknown")
@@ -514,9 +514,9 @@ class SettlementObserverTests(unittest.TestCase):
             {"小判": "远征/道具_小判.png"}
         texts = _settle_texts()
         texts[_K(940, 455, 1095, 705)] = [("×200", Point(1020, 500))]
-        maa = _SettleMaa(_bright_frame(), texts,
+        device = _SettleMaa(_bright_frame(), texts,
                          tpl_points={"远征/道具_小判.png": Point(975, 500)})
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         flow.config = cfg
         obs = _observe(flow, seen=[])
 
@@ -529,8 +529,8 @@ class SettlementObserverTests(unittest.TestCase):
         self.assertEqual(koban[0]["evidence"], "settlement_special_ocr")
 
     def test_not_a_settlement_screen_returns_none(self):
-        maa = _SettleMaa(_bright_frame(), {})
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(_bright_frame(), {})
+        flow = _SettleFlow(device)
         self.assertIsNone(_observe(flow, seen=[]))
         self.assertEqual(flow.events, [])
 
@@ -552,9 +552,9 @@ class SettlementArbitrationTests(unittest.TestCase):
                             "receipt_key": "arbitration-test"}}
 
     def _observe_with_receipt(self, receipt):
-        maa = _SettleMaa(_bright_frame(),
+        device = _SettleMaa(_bright_frame(),
                          _settle_texts(result_tokens=[("大成功", Point(700, 60))]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         flow._settlement_receipt_for = lambda obs: receipt
         with patch("builtins.print") as printer:
             obs = _observe(flow, seen=[])
@@ -584,9 +584,9 @@ class SettlementArbitrationTests(unittest.TestCase):
         self.assertIn("账本以游戏数据为准", printed)
 
     def test_no_receipt_keeps_visual_booking(self):
-        maa = _SettleMaa(_bright_frame(),
+        device = _SettleMaa(_bright_frame(),
                          _settle_texts(result_tokens=[("成功", Point(700, 60))]))
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         flow._settlement_receipt_for = lambda obs: None
         obs = _observe(flow, seen=[])
         self.assertTrue(obs["new"])
@@ -602,10 +602,10 @@ class SettlementArbitrationTests(unittest.TestCase):
                             "party_no": team, "field_id": field, "reward": []}}
 
     def _flow_with_adb(self):
-        maa = _SettleMaa(_bright_frame(), _settle_texts())
-        maa.adb_path = "adb"
-        maa.adb_address = "addr"
-        return _SettleFlow(maa)
+        device = _SettleMaa(_bright_frame(), _settle_texts())
+        device.adb_path = "adb"
+        device.adb_address = "addr"
+        return _SettleFlow(device)
 
     def test_receipt_lookup_matches_fresh_same_team_map(self):
         flow = self._flow_with_adb()
@@ -653,13 +653,13 @@ class SpecialUnknownSampleTests(unittest.TestCase):
         return frame
 
     def test_unknown_saves_one_sample(self):
-        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])
         self.assertEqual(obs["special_status"], "unknown")
         self.assertTrue(obs["special_sample_saved"])
-        self.assertEqual(len(maa.saved), 1)
-        path, force = maa.saved[0]
+        self.assertEqual(len(device.saved), 1)
+        path, force = device.saved[0]
         self.assertIn("expedition", path)
         self.assertFalse(force)  # 用缓存稳定帧，不另截图
         # 事件里带着留样事实
@@ -667,44 +667,44 @@ class SpecialUnknownSampleTests(unittest.TestCase):
         self.assertTrue(settled["special_sample_saved"])
 
     def test_empty_column_saves_nothing(self):
-        maa = _SettleMaa(_bright_frame(), _settle_texts())
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(_bright_frame(), _settle_texts())
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])
         self.assertEqual(obs["special_status"], "none")
         self.assertFalse(obs["special_sample_saved"])
-        self.assertEqual(maa.saved, [])
+        self.assertEqual(device.saved, [])
 
     def test_sticky_screen_does_not_save_twice(self):
-        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(device)
         seen = []
         _observe(flow, seen)
         second = _observe(flow, seen, sequence=2)  # 同一屏没翻动
         self.assertEqual(second, {"new": False})
-        self.assertEqual(len(maa.saved), 1)
+        self.assertEqual(len(device.saved), 1)
 
     def test_same_second_same_via_different_screens_never_collide(self):
         """冻结在同一秒 + via 相同 + sequence=None：两张不同的新结算屏
         必须拿到不同保存路径，谁也不覆盖谁。"""
         frame2 = self._unknown_frame()
         frame2[30:60, 30:100] = 50  # 换了一队的另一张结算屏
-        maa = _SettleMaa(self._unknown_frame(), _settle_texts())
-        flow = _SettleFlow(maa)
+        device = _SettleMaa(self._unknown_frame(), _settle_texts())
+        flow = _SettleFlow(device)
         seen = []
         with patch("touken.flows.expedition.time.strftime",
                    return_value="20260912-120000"), patch(
                        "touken.flows.expedition.time.time", return_value=1234567890.0):
             _observe(flow, seen, sequence=None)
-            maa.frame = frame2
+            device.frame = frame2
             _observe(flow, seen, sequence=None)
-        paths = [p for p, _f in maa.saved]
+        paths = [p for p, _f in device.saved]
         self.assertEqual(len(paths), 2)
         self.assertEqual(len(set(paths)), 2)
 
     def test_save_failure_does_not_break_observation(self):
-        maa = _SettleMaa(self._unknown_frame(), _settle_texts(),
+        device = _SettleMaa(self._unknown_frame(), _settle_texts(),
                          save_ok=False)
-        flow = _SettleFlow(maa)
+        flow = _SettleFlow(device)
         obs = _observe(flow, seen=[])  # 存盘抛异常也不许炸流程
         self.assertEqual(obs["special_status"], "unknown")
         self.assertFalse(obs["special_sample_saved"])
@@ -755,8 +755,8 @@ class _SweepSettleMaa(_SettleMaa):
 
 
 class _SweepSettleFlow(DailyMixin, ExpeditionMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = SETTLE_CFG
         self.events = []
 
@@ -772,18 +772,18 @@ class _SweepSettleFlow(DailyMixin, ExpeditionMixin):
         return []
 
     def _probe_nav_ready(self):
-        return self.maa.stage == "home"
+        return self.device.stage == "home"
 
 
 class SweepSettlementTests(unittest.TestCase):
     """通用进本丸路径：扫地撞见远征结算屏，必须先记账再点过。"""
 
     def _run_sweep(self, settle_taps):
-        maa = _SweepSettleMaa(
+        device = _SweepSettleMaa(
             _bright_frame(),
             _settle_texts(result_tokens=[("大成功", Point(700, 60))]),
             settle_taps=settle_taps)
-        flow = _SweepSettleFlow(maa)
+        flow = _SweepSettleFlow(device)
         with patch("touken.flows.daily.time.sleep"), \
                 patch("touken.flows.expedition.time.sleep"), \
                 patch("touken.flows.expedition._load_exp_record",
@@ -843,8 +843,8 @@ class _OpenMenuMaa(_SettleMaa):
 
 
 class _OpenMenuFlow(NavigationMixin, ExpeditionMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {**SETTLE_CFG,
                        "navigation": {"通用入口": {"target": [775, 695]}}}
         self.current_location = None
@@ -857,16 +857,16 @@ class _OpenMenuFlow(NavigationMixin, ExpeditionMixin):
     def _click_point(self, target):
         # 目录按钮点完菜单展开
         if tuple(target) == (775, 695):
-            self.maa.stage = "menu"
+            self.device.stage = "menu"
         return True
 
 
 class OpenMenuSettlementTests(unittest.TestCase):
     def test_open_menu_records_settlement_before_skipping(self):
-        maa = _OpenMenuMaa(
+        device = _OpenMenuMaa(
             _bright_frame(),
             _settle_texts(result_tokens=[("成功", Point(700, 60))]))
-        flow = _OpenMenuFlow(maa)
+        flow = _OpenMenuFlow(device)
         with patch("touken.navigator.time.sleep"), \
                 patch("touken.flows.expedition.time.sleep"), \
                 patch("touken.flows.expedition._load_exp_record",

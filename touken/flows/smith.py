@@ -36,7 +36,7 @@ from pathlib import Path
 
 from ..runtime_paths import STATUS_DIR
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from .. import sword_db
 
 _SLOT_CY = [205, 345, 475]
@@ -56,7 +56,7 @@ _FLAGS_PATH = _STATUS_DIR / "daily_flags.json"
 _FORGE_RES = ("木炭", "玉钢", "冷却材", "砥石")
 _DEFAULT_RECIPE = [700, 700, 700, 700]
 # 选中一把刀后，首行切成四资源收益预览；这些 ROI 来自
-# MAAAdapter.screenshot(force=True) 的 1280×720 MuMu 同源运行帧。
+# DeviceAdapter.screenshot(force=True) 的 1280×720 MuMu 同源运行帧。
 _DISMANTLE_RESOURCE_ROIS = (
     (590, 196, 635, 235),
     (730, 196, 775, 235),
@@ -85,7 +85,7 @@ def dismantled_today() -> bool:
         return False
 
 
-def dismantled_today_in_log(maa):
+def dismantled_today_in_log(device):
     """今天的游戏记录里有没有刀解成功响应——玩家手动刀解也走
     /sword/dismantle_many，所以这个信号覆盖脚本没经手的场景。
 
@@ -94,7 +94,7 @@ def dismantled_today_in_log(maa):
     """
     from ..game_state import available_events, successful_body
     from ..youzu_log import _event_epoch
-    events = available_events(maa)
+    events = available_events(device)
     if not events:
         return None
     today = time.strftime("%Y-%m-%d")
@@ -128,7 +128,7 @@ def _dur_to_sec(s):
 
 
 class SmithMixin:
-    """锻刀+刀解。依赖宿主类的 navigate_to_stream、maa。"""
+    """锻刀+刀解。依赖宿主类的 navigate_to_stream、device。"""
 
     # ==================== 锻刀 ====================
 
@@ -164,7 +164,7 @@ class SmithMixin:
         for attempt in range(times * 2 + 4):
             if forged >= times:
                 break
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             action = self._scan_slots()
             if action is None:
                 break
@@ -249,7 +249,7 @@ class SmithMixin:
         框要罩住整行：完成/空闲的字在左，锻造中显示剩余时间"""
         idle = None
         for cy in _SLOT_CY:
-            tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            tokens = self.device.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             text = "".join(t for t, _ in tokens)
             if "完成" in text:
                 return ("完成", cy)
@@ -267,22 +267,22 @@ class SmithMixin:
         响应直接带 sword_id，数据走 JSON 不养笨蛋眼珠子。"""
         slot_no = _SLOT_CY.index(cy) + 1
         clicked_at = time.time()
-        self.maa.click(Point(265, cy))
+        self.device.click(Point(265, cy))
         time.sleep(2.5)
         for _ in range(10):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             # 刀位满的氪金弹窗特征（先查它，弹窗后面还露着状况标题）
-            tokens = self.maa.ocr_all(roi_4to4(200, 150, 1080, 550))
+            tokens = self.device.ocr_all(roi_4to4(200, 150, 1080, 550))
             text = "".join(t for t, _ in tokens)
             if "刀位" in text or "所持数" in text or "购买详情" in text:
-                pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
-                self.maa.click(pt if pt else Point(1062, 70))
+                pt = self.device.template_match("通用_关闭.png", threshold=0.7)
+                self.device.click(pt if pt else Point(1062, 70))
                 time.sleep(1.5)
                 return (False, None)
-            if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
+            if self.device.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 return (True, self._sword_from_forge_log(slot_no, clicked_at))
             # 安全点：点穿获得动画；回到状况界面这点是空地，点不坏
-            self.maa.click(Point(290, 600))
+            self.device.click(Point(290, 600))
             time.sleep(1.5)
         return (True, self._sword_from_forge_log(slot_no, clicked_at))  # 超时也当收了，别卡死
 
@@ -313,39 +313,39 @@ class SmithMixin:
 
     def _start_forge(self, cy: int, recipe: list | None = None) -> bool:
         """给空闲炉点火：进配比界面 → 设配方 → 点锻刀 → 等回到状况界面"""
-        self.maa.click(Point(850, cy))  # 该行锻刀按钮
+        self.device.click(Point(850, cy))  # 该行锻刀按钮
         time.sleep(2.5)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
             return False
         # 点火前把配比设成配置配方；游戏会记住上次值，一致时自动跳过
         if not self._apply_recipe(recipe):
             return False
         from ..game_state import begin_operation, confirm_operation
-        boundary = begin_operation(self.maa)
+        boundary = begin_operation(self.device)
         boundary.update(forge_slot=_SLOT_CY.index(cy) + 1,
                         forge_recipe=self._forge_recipe(recipe))
-        self.maa.click(Point(1146, 608))  # 锻刀（不勾加速符）
+        self.device.click(Point(1146, 608))  # 锻刀（不勾加速符）
         # 过场与确认弹窗按原流程处理，随后统一核对游戏结果
         returned = False
         for _ in range(12):
             time.sleep(1.5)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
+            self.device.screenshot(force=True)
+            if self.device.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 returned = True
                 break
             # 限锻期间拦一道确认窗：「当前的资源数无法增加显现积分。
             # 是否进行锻刀？」（issue#7 用户现场）。窗不关，状况页回不来，
             # 后面的刀解/合成也全被它挡死——认出就点【是】继续锻。
             # 「今日不再提醒」勾选框不动，那是用户自己的偏好。
-            if self.maa.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
-                yes = self.maa.ocr("是", roi_4to4(400, 300, 880, 620),
+            if self.device.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
+                yes = self.device.ocr("是", roi_4to4(400, 300, 880, 620),
                                    match_mode="exact")
                 if yes:
-                    self.maa.click(yes)
+                    self.device.click(yes)
                     time.sleep(1.0)
                     continue
-        outcome = confirm_operation(self.maa, boundary, "forge", timeout=5.0)
+        outcome = confirm_operation(self.device, boundary, "forge", timeout=5.0)
         if outcome is not None:
             return outcome
         # Returning to the page alone is not proof; the chosen furnace must be running.
@@ -377,29 +377,29 @@ class SmithMixin:
     def _read_recipe_row(self, name: str):
         """OCR 读配比页某行的当前三位数；读不出返回 None（宁可重设也不猜）"""
         y = self._RECIPE_ROW_Y[name]
-        tokens = self.maa.ocr_all(roi_4to4(690, y - 45, 910, y + 45))
+        tokens = self.device.ocr_all(roi_4to4(690, y - 45, 910, y + 45))
         m = re.search(r"\d{1,3}", "".join(str(t) for t, _ in tokens))
         return int(m.group()) if m else None
 
     def _set_forge_row(self, name: str, value: int) -> bool:
         """点开某行的数字键盘，三位全敲后确认。任何一步对不上都算失败。"""
-        self.maa.click(Point(700, self._RECIPE_ROW_Y[name]))
+        self.device.click(Point(700, self._RECIPE_ROW_Y[name]))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr(name, roi_4to4(400, 150, 900, 240)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr(name, roi_4to4(400, 150, 900, 240)):
             return False  # 键盘没开 / 开错行，别乱敲
         for d in f"{value:03d}":
-            self.maa.click(Point(*self._KEYPAD[d]))
+            self.device.click(Point(*self._KEYPAD[d]))
             time.sleep(0.6)
-        self.maa.click(Point(*self._KEYPAD_CONFIRM))
+        self.device.click(Point(*self._KEYPAD_CONFIRM))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
 
     def _apply_recipe(self, override: list | None = None) -> bool:
         """点火前把配比页四项设成目标配方；OCR 读出来已一致的行跳过"""
         target = self._forge_recipe(override)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         for name, value in zip(_FORGE_RES, target):
             if self._read_recipe_row(name) == value:
                 continue
@@ -436,8 +436,8 @@ class SmithMixin:
         因此把点着的炉误判成点火失败），冒号正则落空时按纯数字串
         从右往左切 秒/分/时。"""
         try:
-            self.maa.screenshot(force=True)
-            tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            self.device.screenshot(force=True)
+            tokens = self.device.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             text = "".join(t for t, _ in tokens)
             m = re.search(r"(\d{1,2})\s*[:：]\s*(\d{1,2})\s*[:：]\s*(\d{1,2})", text)
             if m:
@@ -541,7 +541,7 @@ class SmithMixin:
         for batch in range(batches):
             # 刀位是不可省略的点火门闩：读不出来就停，绝不能把 OCR 失败
             # 当作“空间足够”。每发都从状况页重新读取，上一发的旧值不复用。
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             cap = self._read_capacity()
             if cap is None:
                 yield "[限锻] ✗ 刀位数量读不出来，不敢点火，收摊"
@@ -576,7 +576,7 @@ class SmithMixin:
                         yield "[限锻] ✗ 习合后回不到锻刀状况，收摊"
                         break
                     time.sleep(1.0)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 cap = self._read_capacity()
                 if cap is None:
                     yield "[限锻] ✗ 处理后仍读不出刀位，不敢点火，收摊"
@@ -603,10 +603,10 @@ class SmithMixin:
             out = {"ok": False, "swords": [], "board_seen": False,
                    "uncertain": False}
             from ..game_state import begin_operation, confirm_operation
-            boundary = begin_operation(self.maa)
+            boundary = begin_operation(self.device)
             for msg in self._tenren_batch(cap, out):
                 yield msg
-            outcome = confirm_operation(self.maa, boundary, "forge_ten")
+            outcome = confirm_operation(self.device, boundary, "forge_ten")
             if outcome is not None:
                 out["ok"] = outcome
                 out["uncertain"] = False
@@ -620,7 +620,7 @@ class SmithMixin:
                     yield "[限锻] 点火结果暂时看不清，退出揭榜确认；不会重复点火"
                     left_status = yield from self._leave_tenren(
                         1, batch_swords, recovery)
-                    self.maa.screenshot(force=True)
+                    self.device.screenshot(force=True)
                     cap_after = self._read_capacity() if left_status else None
                     out["ok"] = bool(
                         recovery["boards_seen"] > 0
@@ -693,11 +693,11 @@ class SmithMixin:
                 or sword.get("name_jp") in watch_raw)
 
     def _forge_events(self):
-        if not getattr(self.maa, "adb_address", None):
+        if not getattr(self.device, "adb_address", None):
             return []
         from ..game_state import read_events
         try:
-            return read_events(self.maa.adb_path, self.maa.adb_address)
+            return read_events(self.device.adb_path, self.device.adb_address)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return []
 
@@ -707,7 +707,7 @@ class SmithMixin:
         capacity = forge_capacity(self._forge_events())
         if capacity is not None:
             return capacity
-        tokens = self.maa.ocr_all(roi_4to4(*self._CAPACITY_ROI))
+        tokens = self.device.ocr_all(roi_4to4(*self._CAPACITY_ROI))
         m = re.search(r"(\d+)\s*/\s*(\d+)", "".join(str(t) for t, _ in tokens))
         return (int(m.group(1)), int(m.group(2))) if m else None
 
@@ -719,8 +719,8 @@ class SmithMixin:
         for name, roi in self._SIDE_COUNT_ROIS:
             if counts[name] is not None:
                 continue
-            self.maa.screenshot(force=True)
-            tokens = self.maa.ocr_all(roi_4to4(*roi))
+            self.device.screenshot(force=True)
+            tokens = self.device.ocr_all(roi_4to4(*roi))
             m = re.search(r"\d+", "".join(str(t) for t, _ in tokens))
             counts[name] = int(m.group()) if m else None
         return counts
@@ -729,47 +729,47 @@ class SmithMixin:
         """状况页找空闲炉点「十连锻刀」进十连配比页。
         十连模式的身份证是委托符预览上的「节省1枚！」标签（十连优惠）——
         按钮本身的「十连锻刀」是竖排四字，OCR 实机会读成「十整刀」，不可靠"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         for cy in _SLOT_CY:
-            tokens = self.maa.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
+            tokens = self.device.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
             if "空闲" not in "".join(str(t) for t, _ in tokens):
                 continue
-            self.maa.click(Point(self._TENREN_ROW_BTN_X, cy))
+            self.device.click(Point(self._TENREN_ROW_BTN_X, cy))
             time.sleep(2.5)
-            self.maa.screenshot(force=True)
-            if (self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110))
-                    and self.maa.ocr("节省", roi_4to4(1140, 200, 1278, 280))):
+            self.device.screenshot(force=True)
+            if (self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110))
+                    and self.device.ocr("节省", roi_4to4(1140, 200, 1278, 280))):
                 return True
         return False
 
     def _speedup_checked(self) -> bool:
         """加速符勾没勾：预览框勾了是两个数（现值▼扣后），没勾只有一个。
         按「纯数字 token」数，不 join 后再数——join 会把两个数黏成一个"""
-        tokens = self.maa.ocr_all(roi_4to4(*self._SPEEDUP_PREVIEW_ROI))
+        tokens = self.device.ocr_all(roi_4to4(*self._SPEEDUP_PREVIEW_ROI))
         nums = [t for t, _ in tokens if re.fullmatch(r"\d+", str(t).strip())]
         return len(nums) >= 2
 
     def _ensure_speedup(self) -> bool:
         """确保「使用加速符」勾上；勾不上返回 False"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         if self._speedup_checked():
             return True
-        self.maa.click(Point(*self._SPEEDUP_BOX))
+        self.device.click(Point(*self._SPEEDUP_BOX))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         return self._speedup_checked()
 
     def _board_visible(self) -> bool:
         """金色结算榜：右下「显现积分」在，且没有配比页标题（配比页右侧也有积分区）"""
-        return (bool(self.maa.ocr("显现积分", roi_4to4(*self._BOARD_MARK_ROI)))
-                and not self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
+        return (bool(self.device.ocr("显现积分", roi_4to4(*self._BOARD_MARK_ROI)))
+                and not self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)))
 
     def _read_tenren_board(self):
         """十连结算榜认人：整版 OCR + 名册严格匹配（竖排刀名实测 10/10）。
         重复出货保留重复（抽到几把算几把），认不出的不硬猜。"""
         swords = []
         try:
-            for text, _pt in self.maa.ocr_all(roi_4to4(*self._BOARD_NAME_ROI)):
+            for text, _pt in self.device.ocr_all(roi_4to4(*self._BOARD_NAME_ROI)):
                 found = sword_db.find_by_name(text, fuzzy=False)
                 if found:
                     sid, info = found
@@ -782,32 +782,32 @@ class SmithMixin:
 
     def _dismiss_popup(self):
         """关锻刀弹窗（刀位满氪金窗/素材不足窗同款关法）"""
-        pt = self.maa.template_match("通用_关闭.png", threshold=0.7)
-        self.maa.click(pt if pt else Point(1062, 70))
+        pt = self.device.template_match("通用_关闭.png", threshold=0.7)
+        self.device.click(pt if pt else Point(1062, 70))
         time.sleep(1.5)
 
     def _tenren_batch(self, cap_before, out):
         """打一发十连的状态机：点火 → 快进动画 → 读榜 → 回配比页确认刀位 +10。
         out 填 ok/swords。结果不明时只回报 uncertain，由上层退出揭榜确认；
         加速符不可再生，这里绝不重复点火。"""
-        self.maa.click(Point(*self._TENREN_FIRE))
+        self.device.click(Point(*self._TENREN_FIRE))
         time.sleep(1.0)
         stale = 0
         swords = None
         for _ in range(40):  # 约 60 秒上限
             time.sleep(1.2)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             # 限锻确认窗（issue#7 同款）：认出就点【是】继续
-            if self.maa.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
-                yes = self.maa.ocr("是", roi_4to4(400, 300, 880, 620),
+            if self.device.ocr("是否进行锻刀", roi_4to4(300, 200, 980, 500)):
+                yes = self.device.ocr("是", roi_4to4(400, 300, 880, 620),
                                    match_mode="exact")
                 if yes:
-                    self.maa.click(yes)
+                    self.device.click(yes)
                     time.sleep(1.0)
                 continue
             # 刀位满氪金窗：腾不出位置，这发算没点成
             mid = "".join(str(t) for t, _ in
-                          self.maa.ocr_all(roi_4to4(200, 150, 1080, 550)))
+                          self.device.ocr_all(roi_4to4(200, 150, 1080, 550)))
             if "刀位" in mid or "所持数" in mid or "购买详情" in mid:
                 yield "[限锻] 刀位满了，弹窗关掉落跑"
                 self._dismiss_popup()
@@ -825,10 +825,10 @@ class SmithMixin:
                            + "、".join(f"【{s['name']}】" for s in swords))
                 else:
                     yield "[限锻] 揭榜（一个名字都没认出来，照记十把）"
-                self.maa.click(Point(*self._BOARD_TAP))
+                self.device.click(Point(*self._BOARD_TAP))
                 time.sleep(1.5)
                 continue
-            if self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
+            if self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
                 cap = self._read_capacity()
                 if cap_before and cap and cap[0] == cap_before[0] + 10:
                     out["ok"] = True
@@ -845,22 +845,22 @@ class SmithMixin:
                     return
                 continue
             # 动画/过场：快进
-            self.maa.click(Point(*self._REVEAL_SKIP))
+            self.device.click(Point(*self._REVEAL_SKIP))
 
     def _back_to_status(self) -> bool:
         """刀解页点回锻刀状况标签"""
-        self.maa.click(Point(26, 175))  # 左栏「锻刀」标签
+        self.device.click(Point(26, 175))  # 左栏「锻刀」标签
         time.sleep(2.5)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)))
 
     def _leave_tenren(self, pending_boards, got, result=None):
         """退出十连：攒着的揭示动画一路快进，补读没见过的榜，直到回状况页"""
         result = result if isinstance(result, dict) else {}
         result.setdefault("boards_seen", 0)
         for _ in range(10 + pending_boards * 6):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
+            self.device.screenshot(force=True)
+            if self.device.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
                 return True
             if self._board_visible():
                 result["boards_seen"] += 1
@@ -871,14 +871,14 @@ class SmithMixin:
                         got.extend(swords)
                         yield ("[限锻] 补读揭榜："
                                + "、".join(f"【{s['name']}】" for s in swords))
-                self.maa.click(Point(*self._BOARD_TAP))
+                self.device.click(Point(*self._BOARD_TAP))
                 time.sleep(1.5)
                 continue
-            if self.maa.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
-                self.maa.click(Point(*self._BACK_BTN))
+            if self.device.ocr("锻刀资源投入", roi_4to4(400, 45, 880, 110)):
+                self.device.click(Point(*self._BACK_BTN))
                 time.sleep(1.5)
                 continue
-            self.maa.click(Point(*self._REVEAL_SKIP))
+            self.device.click(Point(*self._REVEAL_SKIP))
             time.sleep(1.2)
         yield "[限锻] ⚠ 退出时动画没播完，直接回状况页超时了"
         return False
@@ -937,21 +937,21 @@ class SmithMixin:
             time.sleep(1.0)
 
         # 切到刀解标签
-        self.maa.click(Point(26, 345))
+        self.device.click(Point(26, 345))
         time.sleep(2.5)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("刀解选择", roi_4to4(450, 45, 830, 110)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("刀解选择", roi_4to4(450, 45, 830, 110)):
             yield "[刀解] 没进到刀解选择界面，放弃"
             return
 
         dismantled = 0
         for page in range(8):  # 翻页安全上限
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             hit = self._scan_whitelist_row(whitelist_ids)
             if hit is None:
                 # 本页没有白名单，往下翻
                 yield f"[刀解] 第{page + 1}页没有白名单，翻页"
-                self.maa.swipe(640, 550, 640, 250, 800)
+                self.device.swipe(640, 550, 640, 250, 800)
                 time.sleep(2.0)
                 continue
 
@@ -961,20 +961,20 @@ class SmithMixin:
                 yield "[刀解] （演习模式：不点确认）"
                 return
 
-            self.maa.click(Point(1046, cy))  # 该行选择
+            self.device.click(Point(1046, cy))  # 该行选择
             time.sleep(1.5)
             resource_preview = self._read_dismantle_resources()
-            self.maa.click(Point(1200, 615))  # 大刀解（选中后灰变蓝）
+            self.device.click(Point(1200, 615))  # 大刀解（选中后灰变蓝）
             time.sleep(2.0)
-            self.maa.screenshot(force=True)
-            if not self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
+            self.device.screenshot(force=True)
+            if not self.device.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
                 yield "[刀解] 确认弹窗没出现，放弃"
                 return
             from ..game_state import begin_operation, confirm_operation
-            boundary = begin_operation(self.maa)
-            self.maa.click(Point(785, 630))  # 确认
+            boundary = begin_operation(self.device)
+            self.device.click(Point(785, 630))  # 确认
             time.sleep(2.5)
-            outcome = confirm_operation(self.maa, boundary, "dismantle")
+            outcome = confirm_operation(self.device, boundary, "dismantle")
             if outcome is not True:
                 yield "[刀解] 未确认刀解结果，本次停止，不再重复消耗刀剑" if outcome is None else "[刀解] 游戏拒绝本次刀解，本次停止"
                 return
@@ -995,11 +995,11 @@ class SmithMixin:
 
     def _read_dismantle_resources(self):
         """读取选中刀后首行的四资源收益预览；读不出的位置保留 None。"""
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         result = {}
         for resource, raw_roi in zip(_FORGE_RES, _DISMANTLE_RESOURCE_ROIS):
             try:
-                tokens = self.maa.ocr_all(roi_4to4(*raw_roi))
+                tokens = self.device.ocr_all(roi_4to4(*raw_roi))
                 raw = "".join(str(text).strip() for text, _ in tokens)
                 # 该窄字体的数字 1 在冷却材格实机会稳定读成 i；只在整个
                 # 数量框恰好是单个形似 1 的字符时修复，不污染普通文字。
@@ -1046,7 +1046,7 @@ class SmithMixin:
         for i in range(_VISIBLE_ROWS):
             top = _ROW_TOP + i * _ROW_PITCH
             cy = top + 48
-            tokens = self.maa.ocr_all(roi_4to4(
+            tokens = self.device.ocr_all(roi_4to4(
                 _NAME_ROI_X1, top + _NAME_ROI_DY1,
                 _NAME_ROI_X2, top + _NAME_ROI_DY2,
             ))

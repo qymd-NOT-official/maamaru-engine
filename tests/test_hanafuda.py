@@ -10,7 +10,7 @@ from unittest.mock import patch
 from touken.event_timeline import SCRIPT_EVENT_MAP
 from touken.flows.battle import BattleMixin
 from touken.flows.hanafuda import HanafudaMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.runtime_paths import _fill_missing_config_keys
 
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "touken_config.example.json"
@@ -173,7 +173,7 @@ class HanafudaTelemetryTests(unittest.TestCase):
 
         class _Host(HanafudaMixin):
             def __init__(self):
-                self.maa = _Maa()
+                self.device = _Maa()
                 self.current_location = "出阵"
                 self.events = []
                 self.tama = iter([100, 777])
@@ -258,7 +258,7 @@ _CFG = {
 
 class _WatchHost(HanafudaMixin, BattleMixin):
     def __init__(self, frames, net_result=False):
-        self.maa = _WatchMaa(frames)
+        self.device = _WatchMaa(frames)
         self.config = {}
         self.clicked = []
         self._net_result = net_result
@@ -268,7 +268,7 @@ class _WatchHost(HanafudaMixin, BattleMixin):
         self.clicked.append(list(point))
 
     def _find_deploy_button(self, cfg):
-        return (1200, 645) if self.maa.frame.get("deploy") else None
+        return (1200, 645) if self.device.frame.get("deploy") else None
 
     def recover_network_stream(self):
         return self._net_result
@@ -394,7 +394,7 @@ class HanafudaEnterMapTests(unittest.TestCase):
     class _EnterHost(HanafudaMixin):
         def __init__(self, auto_march_ok):
             import types
-            self.maa = types.SimpleNamespace(
+            self.device = types.SimpleNamespace(
                 screenshot=lambda force=False: None,
                 save_screenshot=lambda path: True,
             )

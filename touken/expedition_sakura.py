@@ -99,25 +99,25 @@ def candidates(body, snapshot):
 
 def fresh_body_stream(agent, team, after=None):
     """Use an on-page response first; enter formation directly when needed."""
-    from .maa_adapter import roi_4to4
-    agent.maa.screenshot(force=True)
-    in_place = bool(agent.maa.ocr('部队编成', roi_4to4(480, 0, 800, 60)))
+    from .device_adapter import roi_4to4
+    agent.device.screenshot(force=True)
+    in_place = bool(agent.device.ocr('部队编成', roi_4to4(480, 0, 800, 60)))
     if in_place:
         agent.current_location = '编队'
-        body = latest_party(client_events(agent.maa), after if after is not None else time.time() - 1)
+        body = latest_party(client_events(agent.device), after if after is not None else time.time() - 1)
         if body:
             return body
     since = time.time() - 1
     yield from agent.navigate_to_stream('编队')
     if agent.current_location != '编队' or not (yield from agent._select_team_confirmed(team)):
         return None
-    return latest_party(client_events(agent.maa), since)
+    return latest_party(client_events(agent.device), since)
 
 
 def record_body(agent, body, after):
     """Saving a record returns preset directly; no page round trip needed."""
     result = copy.deepcopy(body)
-    for event in client_events(agent.maa):
+    for event in client_events(agent.device):
         payload = successful_body(event)
         if (payload and (youzu_log._event_epoch(event) or 0) >= after
                 and event.get('endpoint') in ('/party/set_preset', '/party/list')

@@ -7,7 +7,7 @@ from unittest.mock import Mock
 from touken import game_state as gs
 from touken.flows.practice import PracticeMixin
 from touken.flows.snapshot import SnapshotMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 def event(endpoint, payload, at=1000, direction="S->C"):
@@ -104,8 +104,8 @@ def test_unknown_game_member_and_unreadable_screen_never_become_empty(monkeypatc
     monkeypatch.setattr(sword_db, "find_game_sword", lambda _: None)
     host = PracticeMixin()
     assert host._judge(gs.practice_members(offer()))[0] == "躲"
-    host.maa = Mock()
-    host.maa.ocr_all.return_value = []
+    host.device = Mock()
+    host.device.ocr_all.return_value = []
     member = host._scan_member(152)
     assert member["type"] == "未知"
     assert host._judge([member])[0] == "躲"
@@ -132,8 +132,8 @@ def test_unknown_members_are_still_rejected_without_repeated_or_false_roster_rea
 def test_known_list_results_and_order_do_not_read_stamps():
     host = PracticeMixin()
     host._practice_rows = gs.practice_list([opponents(), *battle()], now=1003)
-    host.maa = Mock()
-    host.maa.ocr_all.side_effect = AssertionError("known outcome needs no stamp")
+    host.device = Mock()
+    host.device.ocr_all.side_effect = AssertionError("known outcome needs no stamp")
     assert host._scan_existing_results() == {0:"win"}
     assert host._scan_list_order() == [1,2,3,4]
     assert gs.practice_rank(9) is None
@@ -142,9 +142,9 @@ def test_known_list_results_and_order_do_not_read_stamps():
 def test_offer_reads_only_the_new_matching_response(monkeypatch):
     from touken.flows import practice as module
     host = PracticeMixin()
-    host.maa = Mock()
-    host.maa.ocr.return_value = Point(640,20)
-    host.maa.ocr_all.side_effect = AssertionError("game roster needs no OCR")
+    host.device = Mock()
+    host.device.ocr.return_value = Point(640,20)
+    host.device.ocr_all.side_effect = AssertionError("game roster needs no OCR")
     host._practice_rows = gs.practice_list([opponents()], now=1001)
     request = event("/practice/offer", {"enemy_id": 101}, direction="C->S")
     response = event("/practice/offer", {"status":0, **offer()}, 1001)
@@ -163,9 +163,9 @@ def balances(at=1000):
 def test_complete_snapshot_needs_no_navigation_screen_or_menu(monkeypatch,tmp_path):
     from touken.flows import snapshot as module
     host = SnapshotMixin()
-    host.maa = Mock()
+    host.device = Mock()
     host.navigate_to_stream = Mock(side_effect=AssertionError("data requires no navigation"))
-    host.maa.screenshot.side_effect = AssertionError("data requires no screen")
+    host.device.screenshot.side_effect = AssertionError("data requires no screen")
     monkeypatch.setattr(module,"_STATUS_DIR",tmp_path)
     monkeypatch.setattr(module,"available_events",lambda _:[balances()])
     monkeypatch.setattr(gs.time,"time",lambda:1001)
@@ -182,16 +182,16 @@ def test_complete_snapshot_needs_no_navigation_screen_or_menu(monkeypatch,tmp_pa
 def test_closing_resource_sync_never_falls_back_to_ocr(monkeypatch, tmp_path, has_data):
     from touken.flows import snapshot as module
     host = SnapshotMixin()
-    host.maa = Mock()
-    host.maa.ocr_all.side_effect = AssertionError("收尾不再读顶栏")
-    host.maa.screenshot.side_effect = AssertionError("收尾资源同步不拍屏")
+    host.device = Mock()
+    host.device.ocr_all.side_effect = AssertionError("收尾不再读顶栏")
+    host.device.screenshot.side_effect = AssertionError("收尾资源同步不拍屏")
     monkeypatch.setattr(module, "_STATUS_DIR", tmp_path)
     partial = event("/sally", {"status": 0, "currency": {"money": 77}})
     monkeypatch.setattr(module, "available_events", lambda _: [partial] if has_data else [])
     monkeypatch.setattr(gs.time, "time", lambda: 1001)
     assert host.quick_peek(force=True, data_only=True) is has_data
-    host.maa.ocr_all.assert_not_called()
-    host.maa.screenshot.assert_not_called()
+    host.device.ocr_all.assert_not_called()
+    host.device.screenshot.assert_not_called()
     if has_data:
         saved = json.loads((tmp_path / "inventory.json").read_text(encoding="utf-8"))
         assert saved["resources"] == {"小判": 77}
@@ -202,11 +202,11 @@ def test_closing_resource_sync_never_falls_back_to_ocr(monkeypatch, tmp_path, ha
 def test_partial_snapshot_keeps_json_and_unreadable_furnaces_unknown(monkeypatch,tmp_path):
     from touken.flows import snapshot as module
     host=SnapshotMixin()
-    host.maa=Mock()
+    host.device=Mock()
     def ocr(roi):
         if roi.x==400:return [(str(i*100),Point(400+i*100,20)) for i in range(1,6)]
         return []
-    host.maa.ocr_all.side_effect=ocr
+    host.device.ocr_all.side_effect=ocr
     host._read_koban=lambda:77
     monkeypatch.setattr(module,"_STATUS_DIR",tmp_path)
     monkeypatch.setattr(module,"available_events",lambda _:[event("/home",{"status":0,"resource":{"charcoal":11}})])
@@ -236,8 +236,8 @@ def test_furnace_states_follow_deadlines_and_changes_invalidate_old_slots():
 def test_current_battle_receipt_precedes_screen_result(monkeypatch):
     from touken.flows import practice as module
     host=PracticeMixin()
-    host.maa=Mock()
-    host.maa.ocr.return_value=Point(640,20)
+    host.device=Mock()
+    host.device.ocr.return_value=Point(640,20)
     host._practice_enemy_id=101
     host._formation_name=lambda name:name
     host._formation_mode_state=lambda **kwargs:None

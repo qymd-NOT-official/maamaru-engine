@@ -48,7 +48,7 @@ def test_failed_or_unpaired_response_does_not_become_income():
 
 class RewardFlow(OsakaMixin):
     def __init__(self):
-        self.maa = SimpleNamespace()
+        self.device = SimpleNamespace()
         self.record_event = Mock()
         self._read_koban = Mock(side_effect=AssertionError("Must not open an inventory page"))
 

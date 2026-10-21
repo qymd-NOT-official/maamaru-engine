@@ -402,7 +402,7 @@ class TakeoverFlagTests(unittest.TestCase):
                         "team_select": {"teams": {"3": {}}}}
         agent.navigate_to_stream.return_value = iter([])
         agent.current_location = "出阵"
-        agent.maa.template_match.return_value = True
+        agent.device.template_match.return_value = True
         agent._expedition_takeover_requested.return_value = True
         messages = list(RaidMixin.raid_stream(agent, max_rounds=3, team_no=3))
         hit = [m for m in messages if "🚩 远征排班请求接管" in m]
@@ -423,7 +423,7 @@ class GatekeeperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
                 patch.object(server, "STATUS_DIR", Path(d)):
             agent = Mock()
-            agent.maa.exists.return_value = False
+            agent.device.exists.return_value = False
             messages = list(server._build_dispatch(
                 agent, "unused", self._params("k9")))
             result = json.loads((Path(d) / "dispatch_result.json")
@@ -433,7 +433,7 @@ class GatekeeperTests(unittest.TestCase):
             agent.collect_expedition_stream.assert_not_called()
             agent.expedition_stream.assert_not_called()
             agent.navigate_to_stream.assert_not_called()
-            agent.maa.click.assert_not_called()
+            agent.device.click.assert_not_called()
             refuse = [m for m in messages if "交回排班" in m]
             self.assertTrue(refuse)
             self.assertFalse(_is_fail(refuse[0]), refuse[0])
@@ -443,7 +443,7 @@ class GatekeeperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
                 patch.object(server, "STATUS_DIR", Path(d)):
             agent = Mock()
-            agent.maa.exists.return_value = True
+            agent.device.exists.return_value = True
             agent.collect_expedition_stream.return_value = iter(["收菜"])
             agent.expedition_stream.return_value = iter([
                 "[远征] ✅ 部队2已出发：时代2，收工"])
@@ -462,7 +462,7 @@ class GatekeeperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
                 patch.object(server, "STATUS_DIR", Path(d)):
             agent = Mock()
-            agent.maa.exists.return_value = True
+            agent.device.exists.return_value = True
             agent.collect_expedition_stream.return_value = iter(["收菜"])
             agent.expedition_stream.return_value = iter([
                 "[远征] 找不到可用的远征开始按钮；这支部队可能不满足该图条件，"
@@ -705,7 +705,7 @@ if __name__ == "__main__":
 def test_old_countdown_does_not_wait_or_block_dispatch(tmp_path, scheduled, remaining_min):
     from panel import server
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["没有读到结算"])
     agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
     record = {"4": {"map_code": "C1", "dispatched_at": _ts_text(time.time()), "duration_min": remaining_min}}
@@ -766,7 +766,7 @@ def test_invalid_or_old_success_result_does_not_finish_current_dispatch(at):
 def test_next_shift_collects_then_departs(tmp_path):
     from panel import server
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["收菜成功"])
     agent.expedition_stream.return_value = iter(["[远征] ✅ 部队4已出发"])
     record = {"4": {"map_code": "C1", "dispatched_at": "2026-10-02 08:00:00", "duration_min": 60}}
@@ -782,7 +782,7 @@ def test_dispatch_does_not_depart_after_preset_failure(tmp_path):
     from panel import server, expedition_advisor as ea
     from touken import custom_formations as cf
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["收菜"])
     preset = {"formation_id": "f5", "formation_signature": "sig",
               "party": {"sum": 600, "max": 99, "names": ["药研藤四郎"]}, "record": {}}
@@ -802,7 +802,7 @@ def test_dispatch_changed_preset_does_not_touch_formation(tmp_path):
     from panel import server, expedition_advisor as ea
     from touken import custom_formations as cf
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter([])
     with patch.object(server, "STATUS_DIR", tmp_path), patch.object(server, "_read_expedition_records", return_value={}), \
          patch.object(ea, "expedition_formation_options", return_value=[]), \
@@ -818,7 +818,7 @@ def test_dispatch_applies_preset_before_departure(tmp_path):
     from panel import server, expedition_advisor as ea
     from touken import custom_formations as cf
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter(["collect"])
     agent.expedition_stream.return_value = iter(["[远征] ✅ 部队5已出发"])
     preset = {"formation_id": "f5", "formation_signature": "sig",
@@ -841,7 +841,7 @@ def test_timeline_dispatch_uses_its_own_training_and_injury(tmp_path):
     from touken import expedition_sakura
     for enabled in (False, True):
         agent = Mock()
-        agent.maa.exists.return_value = True
+        agent.device.exists.return_value = True
         agent.collect_expedition_stream.return_value = iter(['收菜成功'])
         agent.expedition_stream.return_value = iter(['[远征补花] ✓ 原队伍和装备已核对恢复', '[远征] ✅ 部队4已出发'])
         def recovered(_agent):
@@ -867,7 +867,7 @@ def test_timeline_training_failure_is_terminal_not_departure(tmp_path):
     from panel import server
     from touken import expedition_sakura
     agent = Mock()
-    agent.maa.exists.return_value = True
+    agent.device.exists.return_value = True
     agent.collect_expedition_stream.return_value = iter([])
     agent.expedition_stream.return_value = iter(['[远征补花] ✗ 补花未完成，本次暂不续派'])
     def recovered(_agent):

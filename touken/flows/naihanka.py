@@ -15,7 +15,7 @@
 import json
 import time
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..runtime_paths import STATUS_DIR
 from ..game_state import available_events, duty_state, begin_operation, confirm_operation
 from . import naihanka_report
@@ -76,35 +76,35 @@ class NaihankaMixin:
 
         # ========== 2. 判断状态：已在跑 or 可以开始 ==========
         time.sleep(1.0)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         marker_cfg = cfg["running_marker"]
         marker_roi = roi_4to4(*marker_cfg["roi"]) if "roi" in marker_cfg else None
-        duty = duty_state(available_events(self.maa))
+        duty = duty_state(available_events(self.device))
         if duty and duty["running"]:
             self._remember_duty(duty)
             yield "[内番] 游戏数据确认已经在内番中，收工"
             return
-        if duty is None and self.maa.template_match(marker_cfg["template"], marker_roi):
+        if duty is None and self.device.template_match(marker_cfg["template"], marker_roi):
             yield "[内番] 已经在内番中了，今天不用开始，收工"
             return
 
-        start = self.maa.template_match(cfg["start_button"]["template"])
+        start = self.device.template_match(cfg["start_button"]["template"])
         if not start:
             yield "[内番] 既没看到内番开始按钮也没看到内番中标记，画面不对劲，停"
             return
 
         # ========== 3. 点开始 + 二次确认 ==========
-        self.maa.click(start)
+        self.device.click(start)
         time.sleep(1.0)
 
         confirmed = False
         for _ in range(10):
-            self.maa.screenshot(force=True)
-            confirm = self.maa.template_match(cfg["confirm_button"]["template"])
+            self.device.screenshot(force=True)
+            confirm = self.device.template_match(cfg["confirm_button"]["template"])
             if confirm:
-                self._duty_boundary = begin_operation(self.maa)
-                self.maa.click(confirm)
+                self._duty_boundary = begin_operation(self.device)
+                self.device.click(confirm)
                 confirmed = True
                 break
             time.sleep(0.5)
@@ -144,11 +144,11 @@ class NaihankaMixin:
 
         boundary = getattr(self, "_duty_boundary", None)
         self._duty_boundary = None
-        outcome = confirm_operation(self.maa, boundary, "duty") if boundary else None
+        outcome = confirm_operation(self.device, boundary, "duty") if boundary else None
         if outcome is False:
             yield "[内番] 游戏拒绝本次内番开始，本次停止"
             return
-        duty = duty_state(available_events(self.maa))
+        duty = duty_state(available_events(self.device))
         if outcome is True:
             state = _load_naihanka_state()
             state["started_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(boundary["result_at"]))
@@ -159,24 +159,24 @@ class NaihankaMixin:
         dialogue_seen = False
 
         for _ in range(60):  # 安全上限
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 内番符氪金弹窗 → 教材规矩：不准用，点取消
-            cancel = self.maa.template_match(cfg["cancel_button"]["template"])
+            cancel = self.device.template_match(cfg["cancel_button"]["template"])
             if cancel:
-                self.maa.click(cancel)
+                self.device.click(cancel)
                 yield "[内番] 检测到内番符弹窗，已点取消（咱不氪这个）"
                 time.sleep(1.0)
                 continue
 
             # 画面离开了内番界面 = 对话/动画正在演
-            title_visible = self.maa.template_match(title_template)
+            title_visible = self.device.template_match(title_template)
             if not title_visible:
                 dialogue_seen = True
 
             # 完工标志：回到内番界面 + 右下角内番中
             running = outcome is True or bool(duty and duty["running"])
-            if title_visible and (running or self.maa.template_match(marker_cfg["template"], marker_roi)):
+            if title_visible and (running or self.device.template_match(marker_cfg["template"], marker_roi)):
                 elapsed = time.time() - confirm_time
                 if dialogue_seen or elapsed > 10:
                     yield "[内番] 内番开始成功，收工 🎉"
@@ -203,9 +203,9 @@ class NaihankaMixin:
             return []
         self._naihanka_report_read = True
         time.sleep(2.0)  # 徽章按组蹦，切磋组慢，等落定再读
-        img = self.maa.screenshot(force=True)
+        img = self.device.screenshot(force=True)
         try:
-            gains = naihanka_report.read_report_gains(img, self.maa.ocr_all)
+            gains = naihanka_report.read_report_gains(img, self.device.ocr_all)
         except Exception:
             gains = []
         self._naihanka_gains = gains
@@ -236,10 +236,10 @@ class NaihankaMixin:
         self._naihanka_report_read = False
 
         for _ in range(10):  # 安全上限
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 内番报告屏：谁+1 在这儿
-            if self.maa.ocr("内番报告", title_roi):
+            if self.device.ocr("内番报告", title_roi):
                 for msg in self._collect_report_gains():
                     yield msg
                 self._click_point(cfg["skip_tap"])
@@ -247,13 +247,13 @@ class NaihankaMixin:
                 continue
 
             # 回到今日内番表 = 收结果播完了（或本来就没得收）
-            if self.maa.template_match(title_template):
+            if self.device.template_match(title_template):
                 break
 
             # 残留的内番符弹窗 → 教材规矩：不准用，点取消
-            cancel = self.maa.template_match(cfg["cancel_button"]["template"])
+            cancel = self.device.template_match(cfg["cancel_button"]["template"])
             if cancel:
-                self.maa.click(cancel)
+                self.device.click(cancel)
                 yield "[内番] 检测到内番符弹窗，已点取消（咱不氪这个）"
             else:
                 self._click_point(cfg["skip_tap"])  # 横幅/对话：点穿
@@ -267,7 +267,7 @@ class NaihankaMixin:
         因为打击/防御/冲力/机动也可能是合成喂的，不抢报告屏的功。
         """
         try:
-            table = naihanka_report.read_table_stats(self.maa.ocr_all)
+            table = naihanka_report.read_table_stats(self.device.ocr_all)
         except Exception:
             return
         if not table:

@@ -10,7 +10,7 @@ from touken.flows.daily import (
     _snapshot_report_status,
 )
 from touken.flows.snapshot import SnapshotMixin, _parse_furnace_remain
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class _SnapshotMaa:
@@ -37,8 +37,8 @@ class _SnapshotMaa:
 
 
 class _SnapshotFlow(SnapshotMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.current_location = "锻刀"
 
     def _open_menu(self):
@@ -48,34 +48,34 @@ class _SnapshotFlow(SnapshotMixin):
 
 class SnapshotCleanupTests(unittest.TestCase):
     def test_reads_koban_without_requiring_page_template_and_always_exits(self):
-        maa = _SnapshotMaa([("519,967 枚", Point(1080, 50))])
-        flow = _SnapshotFlow(maa)
+        device = _SnapshotMaa([("519,967 枚", Point(1080, 50))])
+        flow = _SnapshotFlow(device)
 
         with patch("touken.flows.snapshot.time.sleep"):
             koban = flow._read_koban()
 
         self.assertEqual(koban, 519967)
-        self.assertEqual(maa.clicks, [Point(1020, 618), Point(1248, 35)])
+        self.assertEqual(device.clicks, [Point(1020, 618), Point(1248, 35)])
         self.assertIsNone(flow.current_location)
 
     def test_missing_koban_still_exits_and_invalidates_navigation_state(self):
-        maa = _SnapshotMaa([])
-        flow = _SnapshotFlow(maa)
+        device = _SnapshotMaa([])
+        flow = _SnapshotFlow(device)
 
         with patch("touken.flows.snapshot.time.sleep"):
             self.assertIsNone(flow._read_koban())
 
-        self.assertEqual(maa.clicks[-1], Point(1248, 35))
+        self.assertEqual(device.clicks[-1], Point(1248, 35))
         self.assertIsNone(flow.current_location)
 
     def test_ocr_exception_still_exits_and_does_not_escape(self):
-        maa = _SnapshotMaa(ocr_error=RuntimeError("OCR offline"))
-        flow = _SnapshotFlow(maa)
+        device = _SnapshotMaa(ocr_error=RuntimeError("OCR offline"))
+        flow = _SnapshotFlow(device)
 
         with patch("touken.flows.snapshot.time.sleep"):
             self.assertIsNone(flow._read_koban())
 
-        self.assertEqual(maa.clicks[-1], Point(1248, 35))
+        self.assertEqual(device.clicks[-1], Point(1248, 35))
         self.assertIsNone(flow.current_location)
 
     def test_parse_furnace_remain(self):

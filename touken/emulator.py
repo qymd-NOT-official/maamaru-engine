@@ -151,7 +151,7 @@ def shutdown_emulator(manager_path: str, instance: int = 0, emit=print) -> bool:
 
 
 def sleep_computer(emit=print) -> bool:
-    """电脑休眠（可选项！用户被 MAA 黑过屏，这功能必须手动勾才会触发）"""
+    """电脑休眠（可选项！用户被休眠黑过屏，这功能必须手动勾才会触发）"""
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],

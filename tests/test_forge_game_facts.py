@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from touken import game_state
 from touken.flows.smith import SmithMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 def event(endpoint, body, at=1000, direction="S->C"):
@@ -98,16 +98,16 @@ def test_capacity_json_is_used_without_ocr(monkeypatch):
     monkeypatch.setattr(game_state.time, "time", lambda: 1001)
     host = SmithMixin()
     host._forge_events = Mock(return_value=[roster()])
-    host.maa = Mock()
-    host.maa.ocr_all.side_effect = AssertionError("JSON already supplies capacity")
+    host.device = Mock()
+    host.device.ocr_all.side_effect = AssertionError("JSON already supplies capacity")
     assert host._read_capacity() == (2, 200)
 
 
 def test_capacity_missing_json_falls_back_to_actual_screen():
     host = SmithMixin()
     host._forge_events = Mock(return_value=[])
-    host.maa = Mock()
-    host.maa.ocr_all.return_value = [("196 / 200", Point(1100, 40))]
+    host.device = Mock()
+    host.device.ocr_all.return_value = [("196 / 200", Point(1100, 40))]
     assert host._read_capacity() == (196, 200)
 
 
@@ -116,8 +116,8 @@ def test_current_ticket_json_is_not_overwritten_by_screen(monkeypatch):
     host = SmithMixin()
     host._forge_events = Mock(return_value=[event("/forge", {"status": 0, "resource": {"bill": 90},
         "assist_item_id": "8", "assist_item_num": 100})])
-    host.maa = Mock()
-    host.maa.ocr_all.side_effect = AssertionError("JSON already supplies ticket counts")
+    host.device = Mock()
+    host.device.ocr_all.side_effect = AssertionError("JSON already supplies ticket counts")
     assert host._read_sidebar_counts() == {"委托符": 90, "加速符": 100}
 
 
@@ -126,9 +126,9 @@ def test_forge_game_success_does_not_require_return_title(monkeypatch):
     monkeypatch.setattr("touken.flows.smith.time.sleep", lambda _: None)
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=True))
     host = SmithMixin()
-    host.maa = _LimitedForgeMaa(popup=False)
-    original = host.maa.ocr
-    host.maa.ocr = lambda text, *args, **kwargs: None if text == "锻刀状况" else original(text, *args, **kwargs)
+    host.device = _LimitedForgeMaa(popup=False)
+    original = host.device.ocr
+    host.device.ocr = lambda text, *args, **kwargs: None if text == "锻刀状况" else original(text, *args, **kwargs)
     assert host._start_forge(205)
 
 
@@ -137,7 +137,7 @@ def test_game_rejection_cannot_be_overridden_by_running_screen(monkeypatch):
     monkeypatch.setattr("touken.flows.smith.time.sleep", lambda _: None)
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=False))
     host = SmithMixin()
-    host.maa = _LimitedForgeMaa(popup=False)
+    host.device = _LimitedForgeMaa(popup=False)
     assert not host._start_forge(205)
 
 
@@ -163,6 +163,6 @@ def test_returning_to_forge_page_without_countdown_is_not_success(monkeypatch):
     from test_smith_ocr import _LimitedForgeMaa
     monkeypatch.setattr("touken.flows.smith.time.sleep", lambda _: None)
     host = SmithMixin()
-    host.maa = _LimitedForgeMaa(popup=False)
+    host.device = _LimitedForgeMaa(popup=False)
     host._read_countdown = Mock(return_value=None)
     assert not host._start_forge(205)

@@ -7,7 +7,7 @@
 import re
 import time
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..youzu_log import _event_epoch, _int
 from ..game_state import (FACT_MAX_AGE, available_events, begin_operation,
                           confirm_operation, successful_body)
@@ -101,12 +101,12 @@ class RewardsMixin:
         rois = [roi_4to4(*raw_roi) for raw_roi in raw_rois]
 
         # 强制刷新截图
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         # OCR 依次扫描左侧和右上角；找到哪个位置，后面的领取 ROI 就跟着哪个卡片走。
         result = None
         for roi in rois:
-            result = self.maa.ocr(
+            result = self.device.ocr(
                 expected=find_config["expected"],
                 roi=roi,
                 match_mode=find_config.get("match_mode", "contains")
@@ -136,11 +136,11 @@ class RewardsMixin:
         # 售罄是“今天已经领过”的明确成功状态，不要再去点旧兜底坐标。
         # 旧“售罄.png”是很小的灰底白字图，0.5 阈值在商品图片和边框上也会
         # 误命中。售罄属于文字状态，只接受按钮条内 OCR 的明确结果。
-        if self.maa.ocr("售罄", claim_roi, match_mode="contains"):
+        if self.device.ocr("售罄", claim_roi, match_mode="contains"):
             yield "[SHOP] 今日暖心礼包已售罄，说明此前已经领取，跳过"
             return
 
-        claim_result = self.maa.template_match(
+        claim_result = self.device.template_match(
             template=claim_config["template"],
             roi=claim_roi,
             threshold=0.75
@@ -148,15 +148,15 @@ class RewardsMixin:
 
         if claim_result:
             yield f"[SHOP] 点击领取按钮 at ({claim_result.x}, {claim_result.y})"
-            self.maa.click(claim_result)
+            self.device.click(claim_result)
         else:
             # 模板更新不及时还可以用文字兜底；两者都失败就不盲点。
-            claim_result = self.maa.ocr("领取", claim_roi)
+            claim_result = self.device.ocr("领取", claim_roi)
             if not claim_result:
                 yield "[SHOP] 暖心礼包未售罄，但未识别到领取按钮，本次未点击"
                 return
             yield f"[SHOP] 通过文字找到领取按钮 at ({claim_result.x}, {claim_result.y})"
-            self.maa.click(claim_result)
+            self.device.click(claim_result)
 
         yield "[SHOP] 等待弹窗出现..."
         time.sleep(1.5)
@@ -169,8 +169,8 @@ class RewardsMixin:
 
         # 循环等待弹窗出现
         for _ in range(10):
-            self.maa.screenshot(force=True)
-            verify_result = self.maa.ocr(
+            self.device.screenshot(force=True)
+            verify_result = self.device.ocr(
                 expected=verify_config["expected"],
                 roi=verify_roi,
                 match_mode=verify_config.get("match_mode", "contains")
@@ -193,10 +193,10 @@ class RewardsMixin:
         buy_roi_raw = buy_config.get("roi", [0, 0, 1280, 720])
         buy_roi = roi_4to4(buy_roi_raw[0], buy_roi_raw[1], buy_roi_raw[2], buy_roi_raw[3])
 
-        boundary = begin_operation(self.maa)
+        boundary = begin_operation(self.device)
         bought = False
         for _ in range(3):
-            buy_result = self.maa.template_match(
+            buy_result = self.device.template_match(
                 template=buy_config["template"],
                 roi=buy_roi,
                 threshold=0.5
@@ -204,30 +204,30 @@ class RewardsMixin:
             if not buy_result:
                 # 模板认不出用文字兜底；都认不出绝不盲点固定坐标
                 # （2026-09-07 起禁用盲点：点位飘了会买错东西，花的是真小判）
-                buy_result = self.maa.ocr("购买", buy_roi)
+                buy_result = self.device.ocr("购买", buy_roi)
                 if buy_result:
                     yield (f"[SHOP] 通过文字找到购买按钮 at "
                            f"({buy_result.x}, {buy_result.y})")
             if not buy_result:
                 break
-            self.maa.click(buy_result)
+            self.device.click(buy_result)
             yield f"[SHOP] 点击购买 at ({buy_result.x}, {buy_result.y})"
             time.sleep(0.5)
-            outcome = confirm_operation(self.maa, boundary, "free_gift")
+            outcome = confirm_operation(self.device, boundary, "free_gift")
             if outcome is not None:
                 bought = outcome
                 break
             # 0价标签连续两帧消失 = 购买被受理（单帧 OCR 抖一下不算数）
             for _ in range(8):
                 time.sleep(0.5)
-                self.maa.screenshot(force=True)
-                if self.maa.ocr(expected=verify_config["expected"],
+                self.device.screenshot(force=True)
+                if self.device.ocr(expected=verify_config["expected"],
                                 roi=verify_roi,
                                 match_mode=verify_config.get("match_mode",
                                                              "contains")):
                     continue
-                self.maa.screenshot(force=True)
-                if not self.maa.ocr(
+                self.device.screenshot(force=True)
+                if not self.device.ocr(
                         expected=verify_config["expected"], roi=verify_roi,
                         match_mode=verify_config.get("match_mode",
                                                      "contains")):
@@ -249,8 +249,8 @@ class RewardsMixin:
         close_config = shop_config.get("popup_close")
         if close_config:
             for _ in range(3):
-                self.maa.screenshot(force=True)
-                if self.maa.exists(close_config.get("template")):
+                self.device.screenshot(force=True)
+                if self.device.exists(close_config.get("template")):
                     self._click_template_config(close_config)
                     time.sleep(0.5)
                 else:
@@ -289,7 +289,7 @@ class RewardsMixin:
             # 一页的一键领取点了也是白点（空 tab 瞎点就是这么来的）。任务行
             # 不带 tab 归属，预检给的是全局答案，只用来全拦，不替按钮模板做
             # 决定；数据缺失/过期返回 None，照旧落到下面的模板兜底。
-            claimable = _mission_reward_claimable(available_events(self.maa))
+            claimable = _mission_reward_claimable(available_events(self.device))
             if claimable is False:
                 if hasattr(self, "record_event"):
                     self.record_event("task_rewards.none", tab=tab_name)
@@ -299,12 +299,12 @@ class RewardsMixin:
             # 按钮自己的局部区域确认纵排“活动”；不能全屏搜，弹窗背后的出阵
             # 菜单也有“活动”。标签不存在时旧坐标会落到主线，必须禁止点击。
             if tab_name == "活动":
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 tab_x, tab_y = map(int, tab_coord)
                 activity_roi = roi_4to4(
                     max(0, tab_x - 28), max(0, tab_y - 70),
                     min(1280, tab_x + 28), min(720, tab_y + 70))
-                if not self.maa.ocr("活动", activity_roi,
+                if not self.device.ocr("活动", activity_roi,
                                     match_mode="contains"):
                     yield "[TASK] 当前没有活动任务标签，跳过（不领取主线）"
                     continue
@@ -316,9 +316,9 @@ class RewardsMixin:
 
             # 检查一键领取按钮
             claim_config = task_config["claim_button"]
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
-            claim_result = self.maa.template_match(
+            claim_result = self.device.template_match(
                 template=claim_config["template"],
                 roi=None,
                 threshold=_CLAIM_BUTTON_THRESHOLD
@@ -327,20 +327,20 @@ class RewardsMixin:
                 "inactive_template", "一键领取_灰.png")
             inactive_result = None
             if not claim_result:
-                inactive_result = self.maa.template_match(
+                inactive_result = self.device.template_match(
                     template=inactive_template, roi=None,
                     threshold=_CLAIM_BUTTON_THRESHOLD)
 
             if claim_result:
                 yield f"[TASK] {tab_name} 有奖励可领，点击一键领取..."
-                boundary = begin_operation(self.maa)
-                self.maa.click(claim_result)
+                boundary = begin_operation(self.device)
+                self.device.click(claim_result)
 
                 # 等待领取动画/弹窗
                 time.sleep(1.5)
 
                 # 弹窗还在的窗口期读报酬明细；读失败不阻断领取流程
-                outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                outcome = confirm_operation(self.device, boundary, "task_rewards")
                 popup, notes = (None, []) if outcome is not None else self._read_popup_guarded(tab_name)
                 for note in notes:
                     yield note
@@ -354,9 +354,9 @@ class RewardsMixin:
                 # 处理"任务信息已失效"弹窗。它会吞掉那次领取点击（手动实测），
                 # 确认后必须补点一次一键领取，否则三次领取全丢
                 # （2026-08-20 日课血泪：日常/月常/活动全部 unconfirmed）。
-                confirm_point = self.maa.template_match("通用_确定.png", None)
+                confirm_point = self.device.template_match("通用_确定.png", None)
                 if confirm_point and outcome is not True:
-                    self.maa.click(confirm_point)
+                    self.device.click(confirm_point)
                     yield "[TASK] 任务信息已失效，刷新"
                     # 点确定后任务列表会自行刷新；实机并不保证 0.5 秒内就把
                     # 一键领取按钮画回来。这里必须等页面就绪，不能只截一帧，
@@ -364,19 +364,19 @@ class RewardsMixin:
                     retry = None
                     for _ in range(8):
                         time.sleep(0.5)
-                        self.maa.screenshot(force=True)
-                        retry = self.maa.template_match(
+                        self.device.screenshot(force=True)
+                        retry = self.device.template_match(
                             template=claim_config["template"], roi=None,
                             threshold=_CLAIM_BUTTON_THRESHOLD)
                         if retry:
                             break
                     if retry:
                         yield f"[TASK] {tab_name} 补点一键领取..."
-                        boundary = begin_operation(self.maa)
-                        self.maa.click(retry)
+                        boundary = begin_operation(self.device)
+                        self.device.click(retry)
                         time.sleep(1.5)
                         # 补点后重新走一遍报酬弹窗读取（首点被吞时没弹过）
-                        outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                        outcome = confirm_operation(self.device, boundary, "task_rewards")
                         if popup is None and outcome is None:
                             popup, notes = self._read_popup_guarded(tab_name)
                             for note in notes:
@@ -395,17 +395,17 @@ class RewardsMixin:
                 button_confirmed = False
                 late_popup = False
                 for _ in range(6) if outcome is None else ():
-                    self.maa.screenshot(force=True)
-                    still_active = self.maa.template_match(
+                    self.device.screenshot(force=True)
+                    still_active = self.device.template_match(
                         template=claim_config["template"], roi=None,
                         threshold=_CLAIM_BUTTON_THRESHOLD)
-                    now_inactive = self.maa.template_match(
+                    now_inactive = self.device.template_match(
                         template=inactive_template, roi=None,
                         threshold=_CLAIM_BUTTON_THRESHOLD)
                     if now_inactive and not still_active:
                         button_confirmed = True
                         break
-                    if popup is None and self.maa.exists("ui完成任务.png"):
+                    if popup is None and self.device.exists("ui完成任务.png"):
                         late_popup = True
                         break
                     time.sleep(0.5)
@@ -419,7 +419,7 @@ class RewardsMixin:
                             yield msg
                 popup_confirmed = popup is not None or late_popup
                 if outcome is None:
-                    outcome = confirm_operation(self.maa, boundary, "task_rewards")
+                    outcome = confirm_operation(self.device, boundary, "task_rewards")
                 if outcome is True or outcome is None and (button_confirmed or popup_confirmed):
                     if hasattr(self, "record_event"):
                         claimed_id = self.record_event("task_rewards.claimed",
@@ -455,8 +455,8 @@ class RewardsMixin:
         close_config = task_config.get("popup_close")
         if close_config:
             for _ in range(3):
-                self.maa.screenshot(force=True)
-                if self.maa.exists(close_config.get("template")):
+                self.device.screenshot(force=True)
+                if self.device.exists(close_config.get("template")):
                     self._click_template_config(close_config)
                     yield "[TASK] 已关闭任务列表"
                     time.sleep(0.8)
@@ -490,9 +490,9 @@ class RewardsMixin:
         messages = []
         closed = False
         for _ in range(5):
-            self.maa.screenshot(force=True)
-            has_close = self.maa.exists(close_config.get("template"))
-            has_complete = self.maa.exists("ui完成任务.png")
+            self.device.screenshot(force=True)
+            has_close = self.device.exists(close_config.get("template"))
+            has_complete = self.device.exists("ui完成任务.png")
 
             if has_close and has_complete:
                 # 是奖励弹窗，关闭
@@ -515,8 +515,8 @@ class RewardsMixin:
             (items, notes) — items: [(资源名, 数量)]；notes: 被跳过格子的说明。
             标题识别不到 = 弹窗没弹（没领到），返回 None。
         """
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("报酬一览", roi_4to4(*_POPUP_TITLE_ROI),
+        self.device.screenshot(force=True)
+        if not self.device.ocr("报酬一览", roi_4to4(*_POPUP_TITLE_ROI),
                             match_mode="contains"):
             return None
         items, notes = [], []
@@ -528,7 +528,7 @@ class RewardsMixin:
             nonlocal unknown_frame_saved
             if unknown_frame_saved:
                 return True
-            save_screenshot = getattr(self.maa, "save_screenshot", None)
+            save_screenshot = getattr(self.device, "save_screenshot", None)
             if not callable(save_screenshot):
                 return False
             try:
@@ -547,7 +547,7 @@ class RewardsMixin:
                                 x + _POPUP_CELL_W, _POPUP_ICON_Y[1])
             resource = None
             for template, name in _POPUP_ICONS:
-                if self.maa.template_match(template, roi=icon_roi, threshold=0.8):
+                if self.device.template_match(template, roi=icon_roi, threshold=0.8):
                     resource = name
                     break
             qty, qty_observed = self._read_popup_qty(roi_4to4(
@@ -590,7 +590,7 @@ class RewardsMixin:
         observed = False
         value = None
         try:
-            tokens = self.maa.ocr_all(roi)
+            tokens = self.device.ocr_all(roi)
             observed = any(str(text).strip() for text, _ in tokens)
             m = re.search(r"[\d,]+", "".join(t for t, _ in tokens))
             if m:

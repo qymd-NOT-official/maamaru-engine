@@ -84,8 +84,7 @@ def run_checks() -> list[Check]:
     if getattr(sys, "frozen", False):
         checks.append(Check("runtime", "运行环境", "ok", "Python 与依赖已内置"))
     else:
-        modules = ("fastapi", "uvicorn", "webview", "maa",
-                   "rapidocr_onnxruntime")
+        modules = ("fastapi", "uvicorn", "webview", "rapidocr_onnxruntime")
         absent = [name for name in modules if importlib.util.find_spec(name) is None]
         checks.append(Check(
             "runtime", "运行环境", "ok" if not absent else "error",

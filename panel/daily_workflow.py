@@ -140,7 +140,7 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
             from touken.runtime_paths import STATUS_DIR
             from .expedition_observation import FILENAME, save_observations
             result = collect_game_records(
-                agent.maa.adb_path, agent.maa.adb_address,
+                agent.device.adb_path, agent.device.adb_address,
                 extra_consumers=(
                     lambda events: save_observations(events, STATUS_DIR / FILENAME),))
             yield (f"[日课] ✓ 账本已同步：观察 {result['observations_written']} 条，"

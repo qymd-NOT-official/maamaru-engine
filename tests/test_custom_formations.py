@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """预设编队档案（custom_formations）与批量应用（apply_preset_formation_stream）。
 
-假 MAA / 假 ensure，不碰真机；STATE_DIR 一律指到临时目录，不碰真实用户数据。
+假设备 / 假 ensure，不碰真机；STATE_DIR 一律指到临时目录，不碰真实用户数据。
 话术纪律钉死：成功的消息不许命中翻车词表，停下的话术必须命中
 （touken/flows/report_judge.py 的 _FAIL_RE）。
 """
@@ -508,7 +508,7 @@ class _PresetHost(FormationEditorMixin):
     即目的地）。host 上直接替换方法，与下游 panel 的用法一致。"""
 
     def __init__(self, ensure_results):
-        self.maa = _ClickMaa()
+        self.device = _ClickMaa()
         self.config = {}
         self.current_location = None
         self.nav_calls = []
@@ -611,7 +611,7 @@ class ApplyStreamTests(unittest.TestCase):
             # 否则槽位里的 form_status 会让每行都背证据缺口而必 ambiguous
             self.assertEqual(c["match_fields"], ("name", "level"))
         # 切队标签点过
-        self.assertIn(_TEAM_TAB[3], host.maa.clicks)
+        self.assertIn(_TEAM_TAB[3], host.device.clicks)
         self.assertEqual(host.nav_calls, ["编队"])
 
     def test_slots_applied_in_ascending_order_even_if_dict_unsorted(self):
@@ -642,7 +642,7 @@ class ApplyStreamTests(unittest.TestCase):
         self.assertTrue(_is_fail(msgs[-1]))
         self.assertEqual(host.nav_calls, [])
         self.assertEqual(host.ensure_calls, [])
-        self.assertEqual(host.maa.clicks, [])
+        self.assertEqual(host.device.clicks, [])
 
     def test_bad_team_no_refused_before_anything(self):
         host = _PresetHost({})
@@ -665,7 +665,7 @@ class ApplyStreamTests(unittest.TestCase):
         self.assertTrue(_is_fail(msgs[-1]))
         self.assertEqual(host.nav_calls, ["编队"])
         self.assertEqual(host.ensure_calls, [])
-        self.assertEqual(host.maa.clicks, [])
+        self.assertEqual(host.device.clicks, [])
 
 
 class CurrentGameFormationTests(unittest.TestCase):

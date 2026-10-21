@@ -25,14 +25,14 @@ import re
 import time
 from datetime import datetime
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from ..runtime_paths import DEBUG_DIR
 
 
-def _ocr_int(maa, roi_raw) -> int | None:
+def _ocr_int(device, roi_raw) -> int | None:
     """OCR 区域里只接受一个完整数值；多个数字混在一起时不猜。"""
     try:
-        tokens = maa.ocr_all(roi_4to4(*roi_raw))
+        tokens = device.ocr_all(roi_4to4(*roi_raw))
         numbers = [match.replace(",", "") for text, _ in tokens or []
                    for match in re.findall(r"\d[\d,]*", str(text))]
         return int(numbers[0]) if len(numbers) == 1 else None
@@ -58,7 +58,7 @@ class RaidMixin:
         try:
             DEBUG_DIR.mkdir(parents=True, exist_ok=True)
             path = DEBUG_DIR / f"raid_{reason}_{datetime.now():%Y%m%d_%H%M%S}.png"
-            if self.maa.save_screenshot(str(path), force=True):
+            if self.device.save_screenshot(str(path), force=True):
                 return path
         except Exception:
             pass
@@ -134,16 +134,16 @@ class RaidMixin:
             ui_title_variants.append(("hailian", hailian_title["template"]))
         entered = None
         for _ in range(6):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             for variant, template in ui_title_variants:
-                if self.maa.template_match(template):
+                if self.device.template_match(template):
                     entered = variant
                     break
             if entered:
                 break
-            entry = self.maa.template_match(cfg["activity_entry"]["template"])
+            entry = self.device.template_match(cfg["activity_entry"]["template"])
             if entry:
-                self.maa.click(entry)
+                self.device.click(entry)
                 time.sleep(2.0)
             else:
                 time.sleep(1.0)
@@ -184,7 +184,7 @@ class RaidMixin:
                 self._save_raid_failure_frame("deploy_missing")
                 yield "[RAID] 找不到部队选择按钮，已留图并停止"
                 return
-            self.maa.click(deploy)
+            self.device.click(deploy)
             time.sleep(1.5)
 
             if not self._wait_for_team_select(cfg, attempts=10):
@@ -239,8 +239,8 @@ class RaidMixin:
                 elif popup_variant == "lulian":
                     tri = cfg["triple"]
                     check_roi = roi_4to4(*tri["check_roi"])
-                    self.maa.screenshot(force=True)
-                    if self.maa.template_match(tri["check_template"], check_roi):
+                    self.device.screenshot(force=True)
+                    if self.device.template_match(tri["check_template"], check_roi):
                         yield "[RAID] 三倍枡已勾选，跳过"
                     else:
                         self._click_point(tri["click"])
@@ -293,7 +293,7 @@ class RaidMixin:
         持有数 OCR 读出来 >0 才勾；读不出或为 0 绝不点；已勾跳过；
         点完验不上也不再补点（再点一下反而会取消勾选）。"""
         count_roi = fish3.get("count_ocr", {}).get("roi")
-        held = _ocr_int(self.maa, count_roi) if count_roi else None
+        held = _ocr_int(self.device, count_roi) if count_roi else None
         if held is None:
             yield "[RAID] 三倍鱼笼持有数没读出来，不碰甲州金道具"
             return
@@ -301,14 +301,14 @@ class RaidMixin:
             yield "[RAID] 三倍鱼笼持有 0，跳过勾选（甲州金道具不白买）"
             return
         check_roi = roi_4to4(*fish3["check_roi"])
-        self.maa.screenshot(force=True)
-        if self.maa.template_match(fish3["check_template"], check_roi):
+        self.device.screenshot(force=True)
+        if self.device.template_match(fish3["check_template"], check_roi):
             yield "[RAID] 三倍鱼笼已勾选，跳过"
             return
         self._click_point(fish3["click"])
         time.sleep(0.5)
-        self.maa.screenshot(force=True)
-        if self.maa.template_match(fish3["check_template"], check_roi):
+        self.device.screenshot(force=True)
+        if self.device.template_match(fish3["check_template"], check_roi):
             yield f"[RAID] 已勾三倍鱼笼（持有 {held}）"
         else:
             yield ("[RAID] ⚠️ 三倍鱼笼点完没验上，不再补点"
@@ -330,13 +330,13 @@ class RaidMixin:
                 and close):
             yield "[RAID] 自动行军配置不全，本圈手动打"
             return False
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         self._click_point(march_cfg["button"])
         opened = False
         for _ in range(10):
             time.sleep(0.6)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=dlg["expected"],
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=dlg["expected"],
                             roi=roi_4to4(*dlg_roi_raw)):
                 opened = True
                 break
@@ -344,37 +344,37 @@ class RaidMixin:
             yield "[RAID] 自动行军对话框没开，本圈手动打"
             return False
         selected_roi = roi_4to4(*selected_roi_raw)
-        if self.maa.template_match(selected_template, selected_roi):
+        if self.device.template_match(selected_template, selected_roi):
             self._click_point(close)
             time.sleep(0.8)
             yield "[RAID] 自动行军委托已勾选，本圈继续使用"
             return True
         delegate = None
         for _ in range(6):
-            hit = self.maa.ocr(expected=dep["expected"],
+            hit = self.device.ocr(expected=dep["expected"],
                                roi=roi_4to4(*dep_roi_raw))
             if hit:
                 delegate = hit
                 break
             time.sleep(0.4)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
         if not delegate:
             self._click_point(close)
             time.sleep(0.8)
             yield "[RAID] 委托按钮认不出，已关对话框，本圈手动打"
             return False
-        self.maa.click(delegate)
+        self.device.click(delegate)
         time.sleep(0.8)
-        self.maa.screenshot(force=True)
-        selected = self.maa.template_match(selected_template, selected_roi)
+        self.device.screenshot(force=True)
+        selected = self.device.template_match(selected_template, selected_roi)
         self._click_point(close)
         time.sleep(1.0)
         if not selected:
             yield "[RAID] 委托后没有读到勾选，本圈手动打"
             return False
         # 复查：对话框说明文字应已消失；没消失再补一下 ✕
-        self.maa.screenshot(force=True)
-        if self.maa.ocr(expected=dlg["expected"],
+        self.device.screenshot(force=True)
+        if self.device.ocr(expected=dlg["expected"],
                         roi=roi_4to4(*dlg_roi_raw)):
             self._click_point(close)
             time.sleep(0.8)
@@ -384,14 +384,14 @@ class RaidMixin:
     def _read_shells_total(self, cfg) -> int | None:
         """读联队战主界面的夜光贝累计数（记账用，读不出不挡路）。"""
         from ..game_state import available_events, activity_points
-        points = activity_points(available_events(self.maa), "raid", after=getattr(self, "_raid_points_after", None))
+        points = activity_points(available_events(self.device), "raid", after=getattr(self, "_raid_points_after", None))
         if points is not None:
             return points
         ocr_cfg = cfg.get("shells_total_ocr", {})
         roi_raw = ocr_cfg.get("roi")
         if not roi_raw:
             return None
-        return _ocr_int(self.maa, roi_raw)
+        return _ocr_int(self.device, roi_raw)
 
     # ---------- 战斗循环（独立公开，中途断线也能单独恢复）----------
 
@@ -428,7 +428,7 @@ class RaidMixin:
             end_cfg = cfg.get(key)
             if not end_cfg:
                 continue
-            # roi 可留空：有的模板（RGBA 的 ui南瓜）在 MAA 的 roi 匹配下会神秘不中，
+            # roi 可留空：有的模板（RGBA 的 ui南瓜）在旧引擎的 roi 匹配下会神秘不中，
             # 全屏 + 高阈值一样稳，标题本身够独特
             end_roi = roi_4to4(*end_cfg["roi"]) if end_cfg.get("roi") else None
             end_checks.append((end_cfg["template"], end_roi, end_cfg["threshold"]))
@@ -452,11 +452,11 @@ class RaidMixin:
                 shown = fought if fought is not None else battles
                 yield f"{tag} 战斗循环心跳 {_i}/{max_iter}（已打 {shown} 场）"
                 self.quick_peek(tag=cfg_key)  # 顺路拍顶栏家底，零导航（60s 节流）
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             if debug_dir:
                 debug_idx += 1
-                self.maa.save_screenshot(f"{debug_dir}/f{debug_idx:03d}.png", force=False)
+                self.device.save_screenshot(f"{debug_dir}/f{debug_idx:03d}.png", force=False)
 
             # 网络超时弹窗（MuMu 断网）：点确定没用就重启模拟器续打
             net = yield from self.recover_network_stream()
@@ -471,18 +471,18 @@ class RaidMixin:
                 continue
 
             # 继续下一场？（右下角"战斗"按钮）
-            battle_btn = self.maa.ocr(expected=battle_cfg["expected"], roi=battle_roi)
+            battle_btn = self.device.ocr(expected=battle_cfg["expected"], roi=battle_roi)
             if battle_btn:
                 battles += 1
                 yield f"{tag} 第 {battles} 场"
-                self.maa.click(battle_btn)
+                self.device.click(battle_btn)
                 time.sleep(3.0)
                 continue
 
             # 一圈结束？（活动标题回到屏幕上，高阈值防战斗中误认）
             if (battles >= 1 or not need_battle) and time.time() - battle_loop_start > END_CHECK_GRACE_SEC:
                 for end_template, end_roi, end_threshold in end_checks:
-                    if self.maa.template_match(end_template, end_roi, end_threshold):
+                    if self.device.template_match(end_template, end_roi, end_threshold):
                         round_done = True
                         break
                 if round_done:

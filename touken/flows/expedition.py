@@ -31,7 +31,7 @@ import numpy as np
 
 from ..runtime_paths import STATUS_DIR
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 
 _MAPS_TABLE = Path(__file__).parent.parent / "data" / "expedition_maps.json"
 _STATUS_DIR = STATUS_DIR
@@ -58,7 +58,7 @@ def _save_exp_record(rec: dict):
         pass
 
 
-def reconcile_records_with_game(maa) -> list:
+def reconcile_records_with_game(device) -> list:
     """派遣记录与游戏现状对账，把游戏确认已回家的残留记录翻篇删档。
 
     玩家优先规矩（2026-10-14）：脚本自己记的旧账与游戏现实冲突时以
@@ -73,7 +73,7 @@ def reconcile_records_with_game(maa) -> list:
         from ..game_state import available_events
         from ..expedition_state import (parse_expedition_records,
                                         reconcile_view_with_game)
-        events = available_events(maa)
+        events = available_events(device)
         if not events:
             return []
         records = _load_exp_record()
@@ -206,15 +206,15 @@ class ExpeditionMixin:
                 map_roi = roi_4to4(*cfg["map_ocr_roi"])
                 map_pt = None
                 for _ in range(6):
-                    self.maa.screenshot(force=True)
-                    map_pt = self.maa.ocr(expected=map_name, roi=map_roi)
+                    self.device.screenshot(force=True)
+                    map_pt = self.device.ocr(expected=map_name, roi=map_roi)
                     if map_pt:
                         break
                     time.sleep(0.5)
                 if not map_pt:
                     yield f"[远征] 没找到小图「{map_name}」（名字写错了？时代不对？要翻页？），停"
                     return
-                self.maa.click(map_pt)
+                self.device.click(map_pt)
                 time.sleep(1.0)
 
             if not expect_name or self._confirm_map_selected(expect_name):
@@ -229,15 +229,15 @@ class ExpeditionMixin:
         team_roi = roi_4to4(*ocr_cfg["roi"])
         team_ui_ok = False
         for attempt in range(12):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=ocr_cfg["expected"], roi=team_roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=ocr_cfg["expected"], roi=team_roi):
                 team_ui_ok = True
                 break
             # 前两次还没进就找"部队选择"按钮点（远征界面是按钮进入，不是直通）
             if attempt <= 3:
                 deploy = self._find_deploy_button(cfg)
                 if deploy:
-                    self.maa.click(deploy)
+                    self.device.click(deploy)
                     time.sleep(1.5)
             time.sleep(0.5)
         if not team_ui_ok:
@@ -260,31 +260,31 @@ class ExpeditionMixin:
                 yield "[远征] 🛑 游戏数据验出重伤！按规矩绝不派遣，停。去修刀吧"
                 return
         else:
-            self.maa.screenshot(force=True)
-            if self.maa.template_match(cfg["injury_stamp"]["template"]):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["injury_stamp"]["template"]):
                 yield "[远征] 🛑 检测到重伤标记！按规矩绝不派遣，停。去修刀吧"
                 return
 
         # ========== 7. 点"远征开始" ==========
-        start = self.maa.template_match(cfg["start_button"]["template"])
+        start = self.device.template_match(cfg["start_button"]["template"])
         if not start:
             start_ocr = cfg["start_ocr"]
-            start = self.maa.ocr(expected=start_ocr["expected"],
+            start = self.device.ocr(expected=start_ocr["expected"],
                                  roi=roi_4to4(*start_ocr["roi"]),
                                  match_mode="exact")
         if not start:
             yield ("[远征] 找不到可用的远征开始按钮；这支部队可能不满足该图条件，"
                    "或仍在远征，停止派遣")
             return
-        self.maa.click(start)
+        self.device.click(start)
         time.sleep(1.5)
 
         # ========== 8. 二次确认弹窗：点"确认"（道具复选框不碰，默认不用） ==========
         confirm_ocr = cfg["confirm_ocr"]
         confirm = None
         for _ in range(8):
-            self.maa.screenshot(force=True)
-            confirm = self.maa.ocr(expected=confirm_ocr["expected"],
+            self.device.screenshot(force=True)
+            confirm = self.device.ocr(expected=confirm_ocr["expected"],
                                    roi=roi_4to4(*confirm_ocr["roi"]))
             if confirm:
                 break
@@ -293,7 +293,7 @@ class ExpeditionMixin:
             yield "[远征] 确认弹窗没出现，停，你去看看卡哪了"
             return
         confirmed_at = int(time.time())
-        self.maa.click(confirm)
+        self.device.click(confirm)
         yield "[远征] 🐎 确认完毕，出发远征！过场动画跑着..."
 
         # ========== 9. 游戏响应确认结果，缺数据才看画面 ==========
@@ -311,8 +311,8 @@ class ExpeditionMixin:
         running_roi = roi_4to4(*running_ocr["roi"])
         for _ in range(20):  # 过场几秒，给足 10 秒
             time.sleep(0.5)
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected=running_ocr["expected"], roi=running_roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected=running_ocr["expected"], roi=running_roi):
                 yield f"[远征] ✅ 部队{team_no}已出发：时代{era}「{map_name}」，收工"
                 self._record_dispatch(team_no, era, selected_slot, map_name)
                 return
@@ -322,11 +322,11 @@ class ExpeditionMixin:
         return
 
     def _dispatch_game_result(self, team_no, era, slot, after):
-        if slot is None or not getattr(self.maa, "adb_address", None):
+        if slot is None or not getattr(self.device, "adb_address", None):
             return None
         from ..game_state import expedition_started, read_events
         try:
-            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            events = read_events(self.device.adb_path, self.device.adb_address)
             return expedition_started(events, team_no, (era - 1) * 4 + slot, after)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return None
@@ -343,13 +343,13 @@ class ExpeditionMixin:
             cfg = self.config.get("injury_check", {}) or {}
         if not cfg.get("use_youzu_log", True):
             return None, None
-        if not getattr(self.maa, "adb_address", None):
+        if not getattr(self.device, "adb_address", None):
             return None, None
         try:
             if "events" not in cache:
                 from ..game_state import read_events
-                cache["events"] = read_events(self.maa.adb_path,
-                                              self.maa.adb_address)
+                cache["events"] = read_events(self.device.adb_path,
+                                              self.device.adb_address)
             from ..game_state import injury_report
             report = injury_report(cache["events"], team_no,
                                    max_age=float(cfg.get("max_age_sec", 600)))
@@ -439,11 +439,11 @@ class ExpeditionMixin:
         time.sleep(2.0)      # 等归来动画冒出来
 
         for _ in range(30):  # 安全上限
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 结算界面 → 观察哨读账记账（认不出记 unknown），再点一下翻页
             obs = None
-            if self.maa.ocr(expected=title_ocr["expected"], roi=title_roi):
+            if self.device.ocr(expected=title_ocr["expected"], roi=title_roi):
                 obs = self.observe_expedition_settlement(
                     via="collect", seen=settle_seen, sequence=collected + 1, record=False)
             if obs is not None:
@@ -462,7 +462,7 @@ class ExpeditionMixin:
                 continue
 
             # 归来横幅 → 点一下进结算
-            if self.maa.ocr(expected=banner_ocr["expected"], roi=banner_roi):
+            if self.device.ocr(expected=banner_ocr["expected"], roi=banner_roi):
                 yield "[收菜] 远征归来横幅，点过"
                 self._click_point(tap)
                 home_streak = 0
@@ -471,7 +471,7 @@ class ExpeditionMixin:
                 continue
 
             # 确认站在本丸：连续两次看到且无横幅/结算，收工
-            if self.maa.template_match(home_tpl):
+            if self.device.template_match(home_tpl):
                 home_streak += 1
                 if home_streak >= 2:
                     break
@@ -547,12 +547,12 @@ class ExpeditionMixin:
         return
 
     def _collection_facts(self, after, exclude=()):
-        if not getattr(self.maa, "adb_address", None):
+        if not getattr(self.device, "adb_address", None):
             return None
         from ..game_state import read_events, expedition_settlements
         from ..record_sync import consume_game_records
         try:
-            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            events = read_events(self.device.adb_path, self.device.adb_address)
             facts = expedition_settlements(events, after, exclude)
             try:
                 consume_game_records(events)
@@ -594,9 +594,9 @@ class ExpeditionMixin:
         target = re.sub(r"[^一-鿿]", "", expect_name or "")
         if len(target) < 2:
             return True  # 名字太短没法对，别挡路
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         try:
-            tokens = self.maa.ocr_all(roi_4to4(0, 0, 1280, 720)) or []
+            tokens = self.device.ocr_all(roi_4to4(0, 0, 1280, 720)) or []
         except Exception:
             return False
         for text, _point in tokens:
@@ -630,14 +630,14 @@ class ExpeditionMixin:
             return None
 
         title_roi = roi_4to4(*title_ocr["roi"])
-        img = self.maa.screenshot(force=True)
-        if img is None or not self.maa.ocr(expected=title_ocr["expected"],
+        img = self.device.screenshot(force=True)
+        if img is None or not self.device.ocr(expected=title_ocr["expected"],
                                            roi=title_roi):
             return None
         # 转场半途保护：标题连看两帧都在才读账，防止读进翻页动画里
         time.sleep(0.4)
-        img = self.maa.screenshot(force=True)
-        if img is None or not self.maa.ocr(expected=title_ocr["expected"],
+        img = self.device.screenshot(force=True)
+        if img is None or not self.device.ocr(expected=title_ocr["expected"],
                                            roi=title_roi):
             return None
 
@@ -714,11 +714,11 @@ class ExpeditionMixin:
         图，只认刚回来的那份，旧账不作数。数据通道不在或拉取失败返回 None，
         调用方回退视觉记账。
         """
-        if not getattr(self.maa, "adb_address", None):
+        if not getattr(self.device, "adb_address", None):
             return None
         from ..game_state import read_events, expedition_settlements
         try:
-            events = read_events(self.maa.adb_path, self.maa.adb_address)
+            events = read_events(self.device.adb_path, self.device.adb_address)
             receipts = expedition_settlements(events, 0)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             return None
@@ -807,7 +807,7 @@ class ExpeditionMixin:
             [875, 570, 920, 625], [875, 620, 920, 680],
         )
         rewards, status = {}, {}
-        ocr_all = getattr(self.maa, "ocr_all", None)
+        ocr_all = getattr(self.device, "ocr_all", None)
         if callable(ocr_all):
             for resource, fallback in zip(resources, fallback_rois):
                 roi = reward_cfg.get("resource_rois", {}).get(resource, fallback)
@@ -870,7 +870,7 @@ class ExpeditionMixin:
         col_roi = roi_4to4(*[int(v) for v in col])
         for resource, tpl in special_cfg.get("templates", {}).items():
             try:
-                pt = self.maa.template_match(tpl, roi=col_roi)
+                pt = self.device.template_match(tpl, roi=col_roi)
             except Exception:
                 pt = None
             if not pt:
@@ -891,7 +891,7 @@ class ExpeditionMixin:
         用 save_screenshot(force=False) 存当前缓存帧（就是读账用的那张稳定帧），
         不另走 ADB 截图；失败只记日志，不阻塞收菜和事实落库。
         """
-        save = getattr(self.maa, "save_screenshot", None)
+        save = getattr(self.device, "save_screenshot", None)
         if not callable(save):
             return False
         try:
@@ -911,7 +911,7 @@ class ExpeditionMixin:
     def _read_special_amount(self, col_roi, icon_pt):
         """道具图标右侧同行的 ×数量；读不出返回 None（不猜）"""
         try:
-            rows = self.maa.ocr_all(col_roi) or []
+            rows = self.device.ocr_all(col_roi) or []
         except Exception:
             return None
         best = None
@@ -933,14 +933,14 @@ class ExpeditionMixin:
         info = {"team_no": None, "era": None, "slot": None,
                 "map_name": None, "header": None}
 
-        team_texts = self.maa.ocr_all(roi_4to4(*cfg["settlement_team_roi"]))
+        team_texts = self.device.ocr_all(roi_4to4(*cfg["settlement_team_roi"]))
         team_join = "".join(t for t, _ in team_texts)
         m = re.search(r"第\s*([1-5一二三四五])\s*部队", team_join)
         if m:
             ch = m.group(1)
             info["team_no"] = int(ch) if ch.isdigit() else _NUMERALS.get(ch)
 
-        map_texts = self.maa.ocr_all(roi_4to4(*cfg["settlement_map_roi"]))
+        map_texts = self.device.ocr_all(roi_4to4(*cfg["settlement_map_roi"]))
         map_join = "".join(t for t, _ in map_texts)
         info["header"] = map_join or None
         m2 = re.search(r"([一二三四五])\s*[-—–一]\s*([一二三四五])", map_join)

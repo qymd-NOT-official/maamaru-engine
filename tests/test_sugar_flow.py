@@ -5,7 +5,7 @@ import numpy as np
 
 from touken.flow_control import FlowAborted
 from touken.flows.sugar import SugarMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class Game:
@@ -104,7 +104,7 @@ class Game:
 
 class Flow(SugarMixin):
     def __init__(self, timeout=False, popup=None):
-        self.maa = Game(timeout, popup)
+        self.device = Game(timeout, popup)
         self.current_location = "强化"
 
     def navigate_to_stream(self, target):
@@ -187,8 +187,8 @@ class SugarFlowTests(unittest.TestCase):
     def test_feed_current_body_then_pick_next_without_name_filter(self, sleep):
         flow = Flow()
         messages = list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.feeds, 3)
-        self.assertEqual(flow.maa.picks, 2)
+        self.assertEqual(flow.device.feeds, 3)
+        self.assertEqual(flow.device.picks, 2)
         self.assertIn("炼了 3 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
@@ -198,42 +198,42 @@ class SugarFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(FlowAborted, "回不到素材界面"):
             messages.extend(flow._shugo_loop_stream(False))
         self.assertTrue(any("完成第" in message for message in messages))
-        self.assertEqual(flow.maa.feeds, 1)
+        self.assertEqual(flow.device.feeds, 1)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_dry_run_does_not_feed(self, sleep):
         flow = Flow()
         list(flow._shugo_loop_stream(True))
-        self.assertEqual(flow.maa.feeds, 0)
+        self.assertEqual(flow.device.feeds, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_progress_runs_past_sixty_feeds(self, sleep):
         flow = Flow()
-        flow.maa.remaining = [80, 1]
+        flow.device.remaining = [80, 1]
         list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.feeds, 81)
+        self.assertEqual(flow.device.feeds, 81)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_repeated_unfeedable_body_stops(self, sleep):
         flow = Flow()
-        flow.maa.remaining = [0, 0]
-        original_click = flow.maa.click
+        flow.device.remaining = [0, 0]
+        original_click = flow.device.click
         def click(target):
             original_click(target)
-            if flow.maa.state == "list":
-                flow.maa.body = 0
-        flow.maa.click = click
+            if flow.device.state == "list":
+                flow.device.body = 0
+        flow.device.click = click
         messages = []
         with self.assertRaisesRegex(FlowAborted, "连续 3 次重选"):
             messages.extend(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.picks, 3)
+        self.assertEqual(flow.device.picks, 3)
         self.assertFalse(any("完成第" in message for message in messages))
 
     @patch("touken.flows.sugar.time.sleep")
     def test_swallowed_tap_recovers_by_reclicking(self, sleep):
         flow = Flow(popup="late")
         messages = list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.feeds, 3)
+        self.assertEqual(flow.device.feeds, 3)
         self.assertNotIn("没等到确认弹窗", "".join(messages))
         self.assertNotIn("没反应", "".join(messages))
         self.assertIn("收工：炼了 3 轮", messages[-1])
@@ -243,7 +243,7 @@ class SugarFlowTests(unittest.TestCase):
         flow = Flow(popup="once")
         messages = list(flow._shugo_loop_stream(False))
         self.assertIn("没等到确认弹窗", "".join(messages))
-        self.assertEqual(flow.maa.feeds, 1)
+        self.assertEqual(flow.device.feeds, 1)
         self.assertIn("收工：炼了 1 轮", messages[-1])
 
     @patch("touken.flows.sugar.time.sleep")
@@ -252,42 +252,42 @@ class SugarFlowTests(unittest.TestCase):
         messages = []
         with self.assertRaises(FlowAborted):
             messages.extend(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.feeds, 0)
+        self.assertEqual(flow.device.feeds, 0)
         self.assertIn("没等到确认弹窗", "".join(messages))
 
     @patch("touken.flows.sugar.time.sleep")
     def test_disabled_filter_is_enabled_before_selecting(self, sleep):
         flow = Flow()
-        flow.maa.filter_checked = False
+        flow.device.filter_checked = False
         list(flow._shugo_loop_stream(False))
-        self.assertTrue(flow.maa.filter_checked)
-        self.assertEqual(flow.maa.filter_clicks, 1)
-        self.assertEqual(flow.maa.feeds, 3)
+        self.assertTrue(flow.device.filter_checked)
+        self.assertEqual(flow.device.filter_clicks, 1)
+        self.assertEqual(flow.device.feeds, 3)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_enabled_filter_is_not_toggled_off(self, sleep):
         flow = Flow()
         list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.filter_clicks, 0)
+        self.assertEqual(flow.device.filter_clicks, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_failed_filter_toggle_stops_before_selecting(self, sleep):
         flow = Flow()
-        flow.maa.filter_checked = False
-        flow.maa.filter_click_works = False
+        flow.device.filter_checked = False
+        flow.device.filter_click_works = False
         with self.assertRaisesRegex(FlowAborted, "未能开启"):
             list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.filter_clicks, 1)
-        self.assertEqual(flow.maa.picks, 0)
+        self.assertEqual(flow.device.filter_clicks, 1)
+        self.assertEqual(flow.device.picks, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_wrong_page_does_not_toggle_or_select(self, sleep):
         flow = Flow()
-        flow.maa.list_visible = False
+        flow.device.list_visible = False
         with self.assertRaisesRegex(FlowAborted, "未确认习合本体列表"):
             list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.filter_clicks, 0)
-        self.assertEqual(flow.maa.picks, 0)
+        self.assertEqual(flow.device.filter_clicks, 0)
+        self.assertEqual(flow.device.picks, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_unknown_checkbox_state_does_not_toggle_or_select(self, sleep):
@@ -295,36 +295,36 @@ class SugarFlowTests(unittest.TestCase):
                       np.zeros((360, 640, 3), dtype=np.uint8)):
             with self.subTest(shape=getattr(image, "shape", None)):
                 flow = Flow()
-                flow.maa.screenshot = lambda **kwargs: image
+                flow.device.screenshot = lambda **kwargs: image
                 with self.assertRaisesRegex(FlowAborted, "未识别.*勾选状态"):
                     list(flow._shugo_loop_stream(False))
-                self.assertEqual(flow.maa.filter_clicks, 0)
-                self.assertEqual(flow.maa.picks, 0)
+                self.assertEqual(flow.device.filter_clicks, 0)
+                self.assertEqual(flow.device.picks, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_selection_text_recovers_missed_button_template(self, sleep):
         flow = Flow()
-        original_match = flow.maa.template_match
-        original_ocr = flow.maa.ocr
-        flow.maa.template_match = lambda name, *args, **kwargs: (
+        original_match = flow.device.template_match
+        original_ocr = flow.device.ocr
+        flow.device.template_match = lambda name, *args, **kwargs: (
             None if name == "选择png.png" else original_match(name, *args, **kwargs))
         def ocr(text, *args):
             if text == "选择":
-                return "body" if flow.maa.state == "list" and flow.maa.body < 2 else None
+                return "body" if flow.device.state == "list" and flow.device.body < 2 else None
             return original_ocr(text, *args)
-        flow.maa.ocr = ocr
+        flow.device.ocr = ocr
         list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.feeds, 3)
+        self.assertEqual(flow.device.feeds, 3)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_visible_swords_without_button_are_not_treated_as_empty(self, sleep):
         flow = Flow()
-        original_match = flow.maa.template_match
-        original_ocr = flow.maa.ocr
-        flow.maa.ocr_all = lambda *args, **kwargs: []
-        flow.maa.template_match = lambda name, *args, **kwargs: (
+        original_match = flow.device.template_match
+        original_ocr = flow.device.ocr
+        flow.device.ocr_all = lambda *args, **kwargs: []
+        flow.device.template_match = lambda name, *args, **kwargs: (
             None if name == "选择png.png" else original_match(name, *args, **kwargs))
-        flow.maa.ocr = lambda text, *args: text == "乱舞" or original_ocr(text, *args)
+        flow.device.ocr = lambda text, *args: text == "乱舞" or original_ocr(text, *args)
         with self.assertRaisesRegex(FlowAborted, "列表仍有刀剑"):
             list(flow._shugo_loop_stream(False))
 
@@ -344,54 +344,54 @@ class SugarFlowTests(unittest.TestCase):
     @patch("touken.flows.sugar.time.sleep")
     def test_skips_unlocked_seven_and_feeds_later_bodies(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(7, False, 2), (5, False, 1), (4, False, 1)])
+        flow.device = SevenGame([(7, False, 2), (5, False, 1), (4, False, 1)])
         messages = list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.fed_bodies, [1, 2])
-        self.assertEqual(flow.maa.remaining[0], 2)
+        self.assertEqual(flow.device.fed_bodies, [1, 2])
+        self.assertEqual(flow.device.remaining[0], 2)
         self.assertTrue(any("乱舞 7 级" in message for message in messages))
 
     @patch("touken.flows.sugar.time.sleep")
     def test_unlocked_body_reaching_seven_moves_to_next_body(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(6, False, 3), (4, False, 1)])
+        flow.device = SevenGame([(6, False, 3), (4, False, 1)])
         list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.fed_bodies, [0, 1])
-        self.assertEqual(flow.maa.levels[0], 7)
-        self.assertEqual(flow.maa.remaining[0], 2)
+        self.assertEqual(flow.device.fed_bodies, [0, 1])
+        self.assertEqual(flow.device.levels[0], 7)
+        self.assertEqual(flow.device.remaining[0], 2)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_yellow_locked_body_continues_past_seven(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(7, True, 2), (8, False, 2)])
+        flow.device = SevenGame([(7, True, 2), (8, False, 2)])
         list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.fed_bodies, [0, 0])
-        self.assertEqual(flow.maa.levels[0], 9)
+        self.assertEqual(flow.device.fed_bodies, [0, 0])
+        self.assertEqual(flow.device.levels[0], 9)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_all_skipped_page_does_not_hide_later_candidates(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(7, False, 1)] * 5 + [(4, False, 1)])
+        flow.device = SevenGame([(7, False, 1)] * 5 + [(4, False, 1)])
         list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.fed_bodies, [5])
+        self.assertEqual(flow.device.fed_bodies, [5])
 
     @patch("touken.flows.sugar.time.sleep")
     def test_all_seven_returns_without_feeding(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(7, False, 1), (9, False, 1)])
+        flow.device = SevenGame([(7, False, 1), (9, False, 1)])
         list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.feeds, 0)
+        self.assertEqual(flow.device.feeds, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_unknown_unlocked_level_does_not_get_fed(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(None, False, 1)])
+        flow.device = SevenGame([(None, False, 1)])
         with self.assertRaisesRegex(FlowAborted, "未读清"):
             list(flow._shugo_loop_stream(False, skip_unlocked_seven=True))
-        self.assertEqual(flow.maa.feeds, 0)
+        self.assertEqual(flow.device.feeds, 0)
 
     @patch("touken.flows.sugar.time.sleep")
     def test_non_sugar_caller_keeps_feeding_unlocked_seven(self, sleep):
         flow = Flow()
-        flow.maa = SevenGame([(7, False, 2)])
+        flow.device = SevenGame([(7, False, 2)])
         list(flow._shugo_loop_stream(False))
-        self.assertEqual(flow.maa.fed_bodies, [0, 0])
+        self.assertEqual(flow.device.fed_bodies, [0, 0])

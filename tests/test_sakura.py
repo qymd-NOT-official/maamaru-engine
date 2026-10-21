@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""刷花与出阵自动换队长的纯逻辑测试（假 MAA，不碰真机）。"""
+"""刷花与出阵自动换队长的纯逻辑测试（假设备，不碰真机）。"""
 
 import unittest
 from unittest.mock import patch
 
 from touken.flows.sakura import SakuraMixin, _parse_fatigue_text
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class ParseFatigueTests(unittest.TestCase):
@@ -64,76 +64,76 @@ class Maa:
             return []
 
 
-def _flow(maa):
+def _flow(device):
     flow = SakuraMixin()
-    flow.maa = maa
+    flow.device = device
     return flow
 
 
 FULL = {1: 80, 2: 60, 3: 90, 4: 30, 5: 70, 6: 85}
 
 
-def _rotate(maa, margin=10):
+def _rotate(device, margin=10):
     from unittest.mock import patch
     with patch("touken.flows.sakura.time.sleep"):
-        return list(_flow(maa)._rotate_captain_here(margin=margin))
+        return list(_flow(device)._rotate_captain_here(margin=margin))
 
 
 class RotateCaptainTests(unittest.TestCase):
     def test_lowest_fatigue_is_dragged_to_captain(self):
-        maa = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "小狐丸"})
-        messages = _rotate(maa)
+        device = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "小狐丸"})
+        messages = _rotate(device)
 
         # 从 4 号位（fy=483 → 行心 447）拖到队长位（fy=199 → 行心 163）
-        self.assertEqual(maa.swipes, [(200, 447, 200, 163, 1000)])
+        self.assertEqual(device.swipes, [(200, 447, 200, 163, 1000)])
         self.assertTrue(any("小狐丸" in m and "上任队长" in m for m in messages))
         self.assertTrue(any("全队疲劳" in m for m in messages))
 
     def test_unrecognized_name_uses_slot_in_logs(self):
-        maa = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "3KK"})
-        messages = _rotate(maa)
+        device = Maa(dict(FULL), after_rows={**FULL, 1: 30}, names={4: "3KK"})
+        messages = _rotate(device)
         self.assertTrue(any("4号位 上任队长" in m for m in messages))
         self.assertFalse(any("3KK" in m for m in messages))
 
     def test_same_garbage_name_cannot_confirm_swallowed_drag(self):
-        maa = Maa(dict(FULL), after_rows=dict(FULL),
+        device = Maa(dict(FULL), after_rows=dict(FULL),
                   names={4: "3KK"}, after_names={1: "3KK", 4: "3KK"})
-        messages = _rotate(maa)
+        messages = _rotate(device)
         self.assertFalse(any("上任队长" in m for m in messages))
         self.assertTrue(any("拖动可能没生效" in m for m in messages))
 
     def test_captain_already_lowest_does_nothing(self):
-        maa = Maa({**FULL, 1: 20})
-        messages = _rotate(maa)
+        device = Maa({**FULL, 1: 20})
+        messages = _rotate(device)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("位置没毛病" in m for m in messages))
 
     def test_gap_below_margin_is_not_worth_it(self):
-        maa = Maa({**FULL, 1: 40, 4: 35})
-        messages = _rotate(maa)
+        device = Maa({**FULL, 1: 40, 4: 35})
+        messages = _rotate(device)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("不值得折腾" in m for m in messages))
 
     def test_missing_first_row_is_rejected(self):
         # 首行漏读会让全队错号：顶 anchor 直接拒读，宁可不换也不拖错人
         rows = dict(FULL)
         del rows[1]
-        maa = Maa(rows)
-        messages = _rotate(maa)
+        device = Maa(rows)
+        messages = _rotate(device)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("读不齐" in m for m in messages))
 
     def test_missing_middle_row_is_rejected(self):
         # 中间漏行会留下倍距空洞，同样拒读
         rows = dict(FULL)
         del rows[3]
-        maa = Maa(rows)
-        messages = _rotate(maa)
+        device = Maa(rows)
+        messages = _rotate(device)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("读不齐" in m for m in messages))
 
     def test_all_unreadable_stops(self):
@@ -143,10 +143,10 @@ class RotateCaptainTests(unittest.TestCase):
 
     def test_swallowed_drag_is_retried_then_reported(self):
         # 拖完队长位还是原值 → 手势被吞，按现位置再拖一次，仍不行就如实汇报
-        maa = Maa(dict(FULL), after_rows=dict(FULL))
-        messages = _rotate(maa)
+        device = Maa(dict(FULL), after_rows=dict(FULL))
+        messages = _rotate(device)
 
-        self.assertEqual(maa.swipes, [(200, 447, 200, 163, 1000),
+        self.assertEqual(device.swipes, [(200, 447, 200, 163, 1000),
                                       (200, 447, 200, 163, 1500)])
         self.assertTrue(any("再拖一次" in m for m in messages))
         self.assertTrue(any("拖动可能没生效" in m for m in messages))
@@ -154,11 +154,11 @@ class RotateCaptainTests(unittest.TestCase):
 
     def test_misread_fatigue_is_verified_by_captain_name(self):
         # 疲劳复读 OCR 错字（30 认成 36）但队长位名字对得上 → 算换好了
-        maa = Maa(dict(FULL), after_rows={**FULL, 1: 36},
+        device = Maa(dict(FULL), after_rows={**FULL, 1: 36},
                   names={4: "小狐丸"}, after_names={1: "小狐丸"})
-        messages = _rotate(maa)
+        messages = _rotate(device)
 
-        self.assertEqual(len(maa.swipes), 1)
+        self.assertEqual(len(device.swipes), 1)
         self.assertTrue(any("换好了" in m and "小狐丸" in m for m in messages))
         self.assertFalse(any("拖动可能没生效" in m for m in messages))
 
@@ -188,7 +188,7 @@ class SortieRotateHookTests(unittest.TestCase):
 
         host = Host()
         host._disable_auto_march = lambda: True
-        host.maa = self.Maa()
+        host.device = self.Maa()
         host.config = {
             "sortie": {"decide_button": {"template": "decide.png"},
                        "area_select_ui": {"template": "area.png"},
@@ -345,10 +345,10 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 64, 3, 50, 1), 2: (102, 55, 5, 40, 1),
                    3: (103, 47, 118, 45, 1), 4: (104, 54, 5, 35, 1),
                    5: (105, 94, 11, 20, 1), 6: (106, 96, 7, 30, 1)}
-        maa = Maa({s: row[1] for s, row in members.items()},
+        device = Maa({s: row[1] for s, row in members.items()},
                   after_rows={1: 49, 2: 55, 3: 64, 4: 54, 5: 94, 6: 96})
-        messages = self._run(maa, members)
-        self.assertEqual(len(maa.swipes), 1)
+        messages = self._run(device, members)
+        self.assertEqual(len(device.swipes), 1)
         self.assertTrue(any("编号核对一致" in message for message in messages))
         self.assertFalse(any("再拖一次" in message for message in messages))
 
@@ -356,18 +356,18 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 30, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 85, 118, 45, 1)}
-        maa = Maa(dict(FULL), after_rows={**FULL, 1: 30})
-        messages = self._run(maa, members, confirm=False)
-        self.assertEqual(len(maa.swipes), 1)
+        device = Maa(dict(FULL), after_rows={**FULL, 1: 30})
+        messages = self._run(device, members, confirm=False)
+        self.assertEqual(len(device.swipes), 1)
         self.assertTrue(any("停止后续出阵" in message for message in messages))
         self.assertFalse(any("上任队长" in message for message in messages))
 
-    def _run(self, maa, members, team=2, now=1000, age=5, margin=10, confirm=True):
+    def _run(self, device, members, team=2, now=1000, age=5, margin=10, confirm=True):
         from touken import game_state as gs
-        flow = _flow(maa)
+        flow = _flow(device)
         def events(adapter):
             current = dict(members)
-            if maa.swipes and confirm:
+            if device.swipes and confirm:
                 low = min(current, key=lambda slot: current[slot][1])
                 current[1], current[low] = current[low], current[1]
             return [_facts_event(team, current, now=now)]
@@ -383,10 +383,10 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 30, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 85, 118, 45, 1)}
-        maa = Maa({**FULL, 4: 100}, after_rows={**FULL, 1: 30}, names={4: "3KK"})
-        messages = self._run(maa, members)
+        device = Maa({**FULL, 4: 100}, after_rows={**FULL, 1: 30}, names={4: "3KK"})
+        messages = self._run(device, members)
 
-        self.assertEqual(maa.swipes, [(200, 447, 200, 163, 1000)])
+        self.assertEqual(device.swipes, [(200, 447, 200, 163, 1000)])
         self.assertTrue(any("小狐丸" in m and "上任队长" in m for m in messages))
         self.assertTrue(any("全队疲劳" in m for m in messages))
         # 汇报名来自名册数据：OCR 名字（3KK）既不可信也不该出现
@@ -397,20 +397,20 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 40, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 20, 118, 45, 1)}
-        maa = Maa({**FULL, 1: 20})
-        messages = self._run(maa, members, age=601)
+        device = Maa({**FULL, 1: 20})
+        messages = self._run(device, members, age=601)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("数据不完整或已过期" in m for m in messages))
 
     def test_partial_facts_never_gate_decision(self):
         # 6 号位疲劳缺失：不拿部分数据或 OCR 猜测全队最低。
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1)}
-        maa = Maa({**FULL, 1: 20})
-        messages = self._run(maa, members)
+        device = Maa({**FULL, 1: 20})
+        messages = self._run(device, members)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("数据不完整或已过期" in m for m in messages))
 
     def test_facts_without_row_coordinates_never_drag(self):
@@ -418,10 +418,10 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 30, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 85, 118, 45, 1)}
-        maa = Maa({})
-        messages = self._run(maa, members)
+        device = Maa({})
+        messages = self._run(device, members)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("定位不到" in m for m in messages))
 
     def test_facts_missing_low_row_coordinates_skip(self):
@@ -429,20 +429,20 @@ class RotateCaptainFactsTests(unittest.TestCase):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 60, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 40, 5, 35, 1),
                    5: (105, 70, 11, 20, 1), 6: (106, 20, 118, 45, 1)}
-        maa = Maa({s: FULL[s] for s in range(1, 6)})
-        messages = self._run(maa, members)
+        device = Maa({s: FULL[s] for s in range(1, 6)})
+        messages = self._run(device, members)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("没定位全" in m for m in messages))
 
     def test_facts_gap_below_margin_skips(self):
         members = {1: (101, 80, 3, 50, 1), 2: (102, 78, 5, 40, 1),
                    3: (103, 90, 7, 30, 1), 4: (104, 75, 5, 35, 1),
                    5: (105, 80, 11, 20, 1), 6: (106, 85, 118, 45, 1)}
-        maa = Maa(dict(FULL))
-        messages = self._run(maa, members)
+        device = Maa(dict(FULL))
+        messages = self._run(device, members)
 
-        self.assertEqual(maa.swipes, [])
+        self.assertEqual(device.swipes, [])
         self.assertTrue(any("不值得折腾" in m for m in messages))
 
 
@@ -482,9 +482,9 @@ class SakuraListMaa:
 class SwapTiredInFactsTests(unittest.TestCase):
     """刷花换人的数据优先路径：全刀池过滤候选，OCR 只定位行坐标。"""
 
-    def _run(self, maa, event, threshold=50, eligible=True):
+    def _run(self, device, event, threshold=50, eligible=True):
         from touken import game_state as gs
-        flow = _flow(maa)
+        flow = _flow(device)
         calls = []
 
         def fake_legacy(self_, threshold_):
@@ -517,13 +517,13 @@ class SwapTiredInFactsTests(unittest.TestCase):
                 (205, 35, 7, 30, 1)]   # 在部队3 → 排除
         parties = {str(n): {"slot": {}} for n in range(1, 6)}
         parties["3"] = {"slot": {"1": {"serial_id": 205}}}
-        maa = SakuraListMaa([(200, 40), (300, 45)],
+        device = SakuraListMaa([(200, 40), (300, 45)],
                             names={200: "小狐丸", 300: "三日月"})
-        result, calls, messages, gate = self._run(maa, _pool_event(pool, parties))
+        result, calls, messages, gate = self._run(device, _pool_event(pool, parties))
 
         self.assertIs(result, True)
         # 换入按钮点的是小狐丸行（200-40）；数据在册不走老路
-        self.assertEqual(maa.clicks, [(1033, 160), (1197, 160)])
+        self.assertEqual(device.clicks, [(1033, 160), (1197, 160)])
         self.assertEqual(calls, [])
         self.assertTrue(any("小狐丸" in m and "换！" in m for m in messages))
         # 点击前仍经画面核实锁/等级（同刀异振的坑不踩）
@@ -531,30 +531,30 @@ class SwapTiredInFactsTests(unittest.TestCase):
 
     def test_facts_confirm_full_blossom_without_scanning(self):
         pool = [(201, 80, 5, 39, 1), (202, 100, 3, 50, 1)]
-        maa = SakuraListMaa([], names={})
-        result, calls, messages, _ = self._run(maa, _pool_event(pool))
+        device = SakuraListMaa([], names={})
+        result, calls, messages, _ = self._run(device, _pool_event(pool))
 
         self.assertIs(result, False)
         self.assertTrue(any("全员飘花" in m for m in messages))
-        self.assertEqual(maa.swipes, [])      # 数据定论：名单一页都不用扫
-        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(device.swipes, [])      # 数据定论：名单一页都不用扫
+        self.assertEqual(device.clicks, [(1033, 160)])
         self.assertEqual(calls, [])
 
     def test_missing_facts_fall_back_to_ocr_scan(self):
-        maa = SakuraListMaa([(200, 40)], names={200: "小狐丸"})
-        result, calls, _, _ = self._run(maa, None)
+        device = SakuraListMaa([(200, 40)], names={200: "小狐丸"})
+        result, calls, _, _ = self._run(device, None)
 
         self.assertEqual(result, "legacy")
         self.assertEqual(calls, [50])
-        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(device.clicks, [(1033, 160)])
 
     def test_unlocated_candidate_never_clicked_and_falls_back(self):
         # 疲劳对上了但名字 OCR 空：定位没核实，不许盲点，交回视觉兜底
         pool = [(201, 40, 5, 39, 1)]
-        maa = SakuraListMaa([(200, 40)], names={})
-        result, calls, messages, gate = self._run(maa, _pool_event(pool))
+        device = SakuraListMaa([(200, 40)], names={})
+        result, calls, messages, gate = self._run(device, _pool_event(pool))
 
-        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(device.clicks, [(1033, 160)])
         self.assertEqual(gate.call_count, 0)
         self.assertEqual(result, "legacy")
         self.assertEqual(calls, [50])
@@ -563,23 +563,23 @@ class SwapTiredInFactsTests(unittest.TestCase):
     def test_same_fatigue_rows_disambiguated_by_name(self):
         # 两行同疲劳 40：三日月那振没锁不在候选里，只能点小狐丸那行
         pool = [(201, 40, 5, 39, 1), (202, 40, 3, 50, 0)]
-        maa = SakuraListMaa([(200, 40), (300, 40)],
+        device = SakuraListMaa([(200, 40), (300, 40)],
                             names={200: "三日月", 300: "小狐丸"})
-        result, calls, _, _ = self._run(maa, _pool_event(pool))
+        result, calls, _, _ = self._run(device, _pool_event(pool))
 
         self.assertIs(result, True)
-        self.assertEqual(maa.clicks, [(1033, 160), (1197, 260)])
+        self.assertEqual(device.clicks, [(1033, 160), (1197, 260)])
         self.assertEqual(calls, [])
 
     def test_gated_row_is_skipped_without_click(self):
         # 锁/等级画面核实不过：这行跳过不点，扫完回退视觉兜底
         pool = [(201, 40, 5, 39, 1)]
-        maa = SakuraListMaa([(200, 40)], names={200: "小狐丸"})
-        result, calls, messages, gate = self._run(maa, _pool_event(pool),
+        device = SakuraListMaa([(200, 40)], names={200: "小狐丸"})
+        result, calls, messages, gate = self._run(device, _pool_event(pool),
                                                   eligible=False)
 
         self.assertEqual(gate.call_count, 1)
-        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(device.clicks, [(1033, 160)])
         self.assertEqual(result, "legacy")
         self.assertEqual(calls, [50])
         self.assertTrue(any("锁/等级没核实" in m for m in messages))
@@ -588,11 +588,11 @@ class SwapTiredInFactsTests(unittest.TestCase):
         # 白山吉光事件：数据是上次同步的 46，画面已自然恢复到 49，
         # 容差内仍视作同一振，不许回退老路
         pool = [(201, 46, 165, 35, 1)]
-        maa = SakuraListMaa([(200, 49)], names={200: "白山吉光"})
-        result, calls, messages, gate = self._run(maa, _pool_event(pool))
+        device = SakuraListMaa([(200, 49)], names={200: "白山吉光"})
+        result, calls, messages, gate = self._run(device, _pool_event(pool))
 
         self.assertIs(result, True)
-        self.assertEqual(maa.clicks, [(1033, 160), (1197, 160)])
+        self.assertEqual(device.clicks, [(1033, 160), (1197, 160)])
         self.assertEqual(calls, [])
         self.assertEqual(gate.call_count, 1)
         self.assertTrue(any("白山吉光" in m and "换！" in m for m in messages))
@@ -600,11 +600,11 @@ class SwapTiredInFactsTests(unittest.TestCase):
     def test_beyond_recovery_slack_falls_back(self):
         # 画面疲劳比数据高出容差以上：不能当同一振，交回视觉兜底
         pool = [(201, 46, 165, 35, 1)]
-        maa = SakuraListMaa([(200, 60)], names={200: "白山吉光"})
-        result, calls, messages, gate = self._run(maa, _pool_event(pool))
+        device = SakuraListMaa([(200, 60)], names={200: "白山吉光"})
+        result, calls, messages, gate = self._run(device, _pool_event(pool))
 
         self.assertEqual(gate.call_count, 0)
-        self.assertEqual(maa.clicks, [(1033, 160)])
+        self.assertEqual(device.clicks, [(1033, 160)])
         self.assertEqual(result, "legacy")
         self.assertEqual(calls, [50])
 

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""国服侧自研模板匹配（cv2），拆 MAA 的替换件。
+"""国服侧自研模板匹配（cv2）。
 
-语义对齐 MAAAdapter 现有约定：帧是 numpy BGR 数组，ROI 是像素
+语义对齐 DeviceAdapter 现有约定：帧是 numpy BGR 数组，ROI 是像素
 (x, y, w, h)（(0,0,0,0) 或 None = 全屏），返回命中中心的像素坐标与分数。
-灰度 + TM_CCOEFF_NORMED，与 MaaFW 模板匹配的底层算法同族；
-分差用 A/B 模式实测校准（MAAMARU_TEMPLATE_ENGINE=ab）。
+灰度 + TM_CCOEFF_NORMED，与模板匹配的传统底层算法同族；
+分差曾用 A/B 双跑模式实测校准，毕业后拆除。
 
 中文文件名注意：cv2.imread 在 Windows 下不吃非 ASCII 路径，
 模板一律走 PIL 加载。
@@ -65,6 +65,6 @@ def match(image_bgr: np.ndarray, template_path: Path,
 def match_score(image_bgr: np.ndarray, template_path: Path,
                 roi: tuple[int, int, int, int] | None = None,
                 threshold: float = 0.5) -> float:
-    """只取分数；低于阈值或未命中返回 0.0（对齐 MAA 的过滤语义）。"""
+    """只取分数；低于阈值或未命中返回 0.0（对齐旧引擎的过滤语义）。"""
     hit = match(image_bgr, template_path, roi, threshold)
     return hit[2] if hit else 0.0

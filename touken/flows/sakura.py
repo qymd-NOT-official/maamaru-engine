@@ -34,7 +34,7 @@ import subprocess
 import time
 
 from .. import sword_db
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 
 _TEAM_TAB = {1: (154, 91), 2: (274, 91), 3: (394, 91), 4: (516, 91), 5: (638, 91)}
 _ROW_CY = [160, 258, 357, 455, 553, 652]
@@ -88,7 +88,7 @@ _FATIGUE_RECOVERY_SLACK = 5
 
 
 class SakuraMixin:
-    """刷花。依赖宿主类的 navigate_to_stream、sortie_stream、maa。"""
+    """刷花。依赖宿主类的 navigate_to_stream、sortie_stream、device。"""
 
     def sakura_stream(self, team_no: int = 5, slot: int = 1,
                       target: int = 100, max_rounds: int = 40,
@@ -179,7 +179,7 @@ class SakuraMixin:
         from .. import youzu_log
         from ..game_state import read_events
         try:
-            for event in reversed(read_events(self.maa.adb_path, self.maa.adb_address)):
+            for event in reversed(read_events(self.device.adb_path, self.device.adb_address)):
                 body = event.get('payload')
                 if (event.get('direction') != 'S->C' or event.get('status') != 200
                         or not isinstance(body, dict) or str(body.get('status')) != '0'
@@ -199,35 +199,35 @@ class SakuraMixin:
         return None
 
     def _prepare_sakura_team(self, team_no):
-        self.maa.screenshot(force=True)
-        if self.maa.ocr('部队编成', roi_4to4(500, 0, 780, 60)):
+        self.device.screenshot(force=True)
+        if self.device.ocr('部队编成', roi_4to4(500, 0, 780, 60)):
             self.current_location = '编队'
         else:
             yield from self.navigate_to_stream("编队")
         if self.current_location != "编队" or not (yield from self._select_team_confirmed(team_no)):
             yield "[刷花] 目标部队未确认，停止"
             return False
-        self.maa.screenshot(force=True)
-        pt = self.maa.template_match("team/部队解散.png", roi_4to4(1120, 205, 1280, 265), threshold=.85)
+        self.device.screenshot(force=True)
+        pt = self.device.template_match("team/部队解散.png", roi_4to4(1120, 205, 1280, 265), threshold=.85)
         if not pt:
             yield "[刷花] 找不到部队解散按钮，停止"
             return False
-        self.maa.click(pt)
+        self.device.click(pt)
         time.sleep(1)
-        self.maa.screenshot(force=True)
-        yes = self.maa.ocr("是", roi_4to4(350, 250, 930, 650), match_mode="exact")
+        self.device.screenshot(force=True)
+        yes = self.device.ocr("是", roi_4to4(350, 250, 930, 650), match_mode="exact")
         if not yes:
             yield "[刷花] 未确认解散弹窗，停止"
             return False
         cleared_since = int(time.time())
-        self.maa.click(yes)
+        self.device.click(yes)
         time.sleep(1)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         from ..selection_identity import client_events, team_cleared
         # 第一部队解散保留队长，其余部队清空六槽。空槽数字/底线会被 OCR 当成内容，不能拿它
         # 推翻客户端本次响应；页面标题只确认仍在编队，人数由 JSON 确认。
-        if (not self.maa.ocr('部队编成', roi_4to4(500, 0, 780, 60))
-                or not team_cleared(client_events(self.maa), team_no, cleared_since)):
+        if (not self.device.ocr('部队编成', roi_4to4(500, 0, 780, 60))
+                or not team_cleared(client_events(self.device), team_no, cleared_since)):
             yield "[刷花] 解散后未确认队员位置清空，停止"
             return False
         cleared_label = '二至六号位清空' if team_no == 1 else '六个位置清空'
@@ -308,7 +308,7 @@ class SakuraMixin:
         # 名册校正）；OCR 兜底决策时才读画面名字再校正。
         recognized_name = facts[low_slot]["name"] if facts is not None else None
         if not recognized_name:
-            name_tokens = self.maa.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
+            name_tokens = self.device.ocr_all(roi_4to4(100, low_fy - 32, 265, low_fy - 4))
             name_raw = max((t for t, _ in name_tokens), key=len, default=f"{low_slot}号位")
             found_name = sword_db.find_by_name(name_raw, fuzzy=False)
             recognized_name = (found_name[1].get("name_zh") or found_name[1]["name"]
@@ -323,7 +323,7 @@ class SakuraMixin:
             # 换位不会改变疲劳；验收的是当前队长的实例编号，而不是 OCR
             # 复读数字。没有确认时只等待，不凭相同疲劳或旧行号重复拖动。
             expected_serial = facts[low_slot]["serial_id"]
-            self.maa.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top, duration)
+            self.device.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top, duration)
             for _ in range(3):
                 time.sleep(1.0)
                 updated = self._rotate_team_fatigue(team_no)
@@ -334,7 +334,7 @@ class SakuraMixin:
             return False
         after_values = {}
         for attempt in (1, 2):
-            self.maa.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top,
+            self.device.swipe(_DRAG_X, cy_low, _DRAG_X, cy_top,
                            duration if attempt == 1 else int(duration * 1.5))
             time.sleep(2.0)
 
@@ -348,7 +348,7 @@ class SakuraMixin:
                 return
             if after:
                 cap_fy = after[1][0]
-                cap_tokens = self.maa.ocr_all(
+                cap_tokens = self.device.ocr_all(
                     roi_4to4(100, cap_fy - 32, 265, cap_fy - 4))
                 cap_found = sword_db.find_by_name(
                     max((t for t, _ in cap_tokens), key=len, default=""), fuzzy=False)
@@ -378,8 +378,8 @@ class SakuraMixin:
         Returns: {位置: (疲劳行y, 疲劳值)}；首行位置不对或相邻行距突变
         说明整列错位/中间漏行，对号会错——返回 {}，宁可不读也不拖错人。
         """
-        self.maa.screenshot(force=True)
-        tokens = self.maa.ocr_all(roi_4to4(*_FATIGUE_COL))
+        self.device.screenshot(force=True)
+        tokens = self.device.ocr_all(roi_4to4(*_FATIGUE_COL))
         lines = {}  # y 聚类 -> 该行 token（±12px 算同一行）
         for t, p in tokens:
             key = round(p.y / 12)
@@ -415,13 +415,13 @@ class SakuraMixin:
         Returns: 疲劳值 int；读不到返回 None（yield from 接返回值）
         """
         from ..game_state import available_events, fatigue_value
-        fatigue = fatigue_value(available_events(self.maa), team_no, slot)
+        fatigue = fatigue_value(available_events(self.device), team_no, slot)
         if fatigue is not None:
             return fatigue
         if in_place:
             # 换人已回到所选部队，直接读，不重走目录或重选部队。
-            self.maa.screenshot(force=True)
-            if not self.maa.ocr("部队编成", roi_4to4(500, 0, 780, 60)):
+            self.device.screenshot(force=True)
+            if not self.device.ocr("部队编成", roi_4to4(500, 0, 780, 60)):
                 yield "[刷花] 换人后未确认编队页，停止"
                 return None
         else:
@@ -430,12 +430,12 @@ class SakuraMixin:
             if self.current_location != "编队":
                 yield "[刷花] 到不了编队"
                 return None
-            self.maa.click(Point(*_TEAM_TAB[team_no]))
+            self.device.click(Point(*_TEAM_TAB[team_no]))
             time.sleep(1.5)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         cy = _ROW_CY[slot - 1]
-        tokens = self.maa.ocr_all(roi_4to4(290, cy + 28, 425, cy + 52))
+        tokens = self.device.ocr_all(roi_4to4(290, cy + 28, 425, cy + 52))
         text = "".join(t for t, _ in tokens)
         return _parse_fatigue_text(text)
 
@@ -453,7 +453,7 @@ class SakuraMixin:
         from .. import youzu_log
         from ..game_state import (FACT_MAX_AGE, available_events,
                                   successful_body, sword_facts)
-        events = available_events(self.maa)
+        events = available_events(self.device)
         now = time.time()
         full_at = max(((youzu_log._event_epoch(e) or 0) for e in events
                        if e.get("endpoint") in youzu_log._SWORD_FULL_ENDPOINTS
@@ -507,10 +507,10 @@ class SakuraMixin:
         Returns: True/False 为定论，None=没核实出来（yield from 接返回值）
         """
         cy = _ROW_CY[slot - 1]
-        self.maa.click(Point(_SWAP_X, cy))
+        self.device.click(Point(_SWAP_X, cy))
         time.sleep(2.0)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("刀剑男士选择", roi_4to4(500, 0, 780, 55)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("刀剑男士选择", roi_4to4(500, 0, 780, 55)):
             yield "[刷花·换人] 选择列表没打开，放弃换人"
             return None
         if not self._sakura_sort_list():
@@ -550,7 +550,7 @@ class SakuraMixin:
             if value is None:
                 continue
             fy = group[0][2]
-            name_tokens = self.maa.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
+            name_tokens = self.device.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
             raw_name = max((t for t, _ in name_tokens), key=len, default="")
             found = sword_db.find_by_name(raw_name, fuzzy=False)
             name = (found[1].get('name_zh') or found[1]['name']) if found else None
@@ -567,9 +567,9 @@ class SakuraMixin:
         """
         seen_pages = set()
         for page in range(_SEL_MAX_PAGES):
-            image = self.maa.screenshot(force=True)
+            image = self.device.screenshot(force=True)
             # 整列 OCR 按 y 分行找"疲劳"——列表滚动后行位置会飘，不写死行坐标
-            tokens = self.maa.ocr_all(roi_4to4(460, 100, 620, 700))
+            tokens = self.device.ocr_all(roi_4to4(460, 100, 620, 700))
             fingerprint = tuple((t, round(p.y)) for t, p in tokens)
             if fingerprint in seen_pages:
                 return None
@@ -591,13 +591,13 @@ class SakuraMixin:
                         continue
                     yield f"[刷花·换人] 名单第{page + 1}页找到 {cand['name']} 疲劳{value}，换！"
                     self._sakura_selection_at = time.time()
-                    self.maa.click(Point(_SEL_DECIDE_X, fy - 40))
+                    self.device.click(Point(_SEL_DECIDE_X, fy - 40))
                     time.sleep(1.5)
                     # 可能有确认弹窗
-                    self.maa.screenshot(force=True)
-                    pt = self.maa.template_match("通用_确定.png", threshold=0.7)
+                    self.device.screenshot(force=True)
+                    pt = self.device.template_match("通用_确定.png", threshold=0.7)
                     if pt:
-                        self.maa.click(pt)
+                        self.device.click(pt)
                         time.sleep(1.5)
                     if self._wait_list_closed():
                         return True
@@ -606,7 +606,7 @@ class SakuraMixin:
                 # 升序名单已经翻过所有候选的疲劳还没影：名单跟数据对不上
                 return None
             # 本页没有候选，翻页
-            self.maa.swipe(640, 550, 640, 200, 800)
+            self.device.swipe(640, 550, 640, 200, 800)
             time.sleep(2.0)
         return None
 
@@ -618,9 +618,9 @@ class SakuraMixin:
         """
         seen_pages = set()
         for page in range(_SEL_MAX_PAGES):
-            image = self.maa.screenshot(force=True)
+            image = self.device.screenshot(force=True)
             # 整列 OCR 按 y 分行找"疲劳"——列表滚动后行位置会飘，不写死行坐标
-            tokens = self.maa.ocr_all(roi_4to4(460, 100, 620, 700))
+            tokens = self.device.ocr_all(roi_4to4(460, 100, 620, 700))
             fingerprint = tuple((t, round(p.y)) for t, p in tokens)
             if fingerprint in seen_pages:
                 yield "[刷花·换人] 名单到底或翻页未生效，停止；未确认没有候选"
@@ -654,25 +654,25 @@ class SakuraMixin:
                     continue
                 # 找到累的了：读个名字好汇报（过名册校正错别字），点决定
                 # （按钮中心≈疲劳行上方40）
-                name_tokens = self.maa.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
+                name_tokens = self.device.ocr_all(roi_4to4(100, fy - 18, 325, fy + 13))
                 raw_name = max((t for t, _ in name_tokens), key=len, default="")
                 found = sword_db.find_by_name(raw_name, fuzzy=False)
                 name = (found[1].get('name_zh') or found[1]['name']) if found else '这振刀'
                 yield f"[刷花·换人] 第{page + 1}页找到 {name} 疲劳{value}，换！"
                 self._sakura_selection_at = time.time()
-                self.maa.click(Point(_SEL_DECIDE_X, fy - 40))
+                self.device.click(Point(_SEL_DECIDE_X, fy - 40))
                 time.sleep(1.5)
                 # 可能有确认弹窗
-                self.maa.screenshot(force=True)
-                pt = self.maa.template_match("通用_确定.png", threshold=0.7)
+                self.device.screenshot(force=True)
+                pt = self.device.template_match("通用_确定.png", threshold=0.7)
                 if pt:
-                    self.maa.click(pt)
+                    self.device.click(pt)
                     time.sleep(1.5)
                 if self._wait_list_closed():
                     return True
                 yield f"[刷花·换人] {name}目前无法选入，继续找下一振"
             # 本页没有累的，翻页
-            self.maa.swipe(640, 550, 640, 200, 800)
+            self.device.swipe(640, 550, 640, 200, 800)
             time.sleep(2.0)
         # 完整扫描上限不等于没有候选：不能把没扫完说成全军飘花。
         yield "[刷花·换人] 名单扫描达到上限，停止；未确认全本丸都已飘花"
@@ -684,7 +684,7 @@ class SakuraMixin:
         # 名字行在疲劳行上方约6px；复用同源校准的选择列表锁识别。
         if recognize_selection_lock(image, fatigue_y - 6) != 'locked':
             return False
-        tokens = self.maa.ocr_all(roi_4to4(470, fatigue_y - 84, 591, fatigue_y - 57)) or []
+        tokens = self.device.ocr_all(roi_4to4(470, fatigue_y - 84, 591, fatigue_y - 57)) or []
         text = ''.join(t for t, _ in tokens)
         levels = re.findall(r'刀剑\s*(\d{1,3})\s*级', text)
         return len(levels) == 1 and int(levels[0]) > 1
@@ -694,38 +694,38 @@ class SakuraMixin:
             return False
         if not self._click_panel_button("取消筛选"):
             return False
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("筛选", roi_4to4(150, 50, 900, 150)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("筛选", roi_4to4(150, 50, 900, 150)):
             if not self._open_filter_panel():
                 return False
         if not self._click_panel_button("全刀剑", require_selected=True):
             return False
         # 按钮印的其实是简体「樱吹雪」（早年注释误判成繁体）；查找词沿用
-        # 繁体不动——MAA 一直这么命中的，自研引擎匹配层有繁简归一兜底。
+        # 繁体不动——旧引擎一直这么命中的，自研引擎匹配层有繁简归一兜底。
         if not self._click_panel_button("櫻吹雪", roi=(942, 430, 1082, 479), require_selected=True):
             return False
         if not self._click_panel_button("确定"):
             return False
         time.sleep(1)
         for _ in range(2):
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             roi = roi_4to4(930, 70, 1030, 115)
-            if self.maa.ocr("升序", roi):
+            if self.device.ocr("升序", roi):
                 return True
-            pt = self.maa.ocr("降序", roi)
+            pt = self.device.ocr("降序", roi)
             if not pt:
                 return False
-            self.maa.click(pt)
+            self.device.click(pt)
             time.sleep(1)
         return False
 
     # ==================== 自动装备刀装 ====================
 
     def _sakura_equipment_page(self, slot=1):
-        self.maa.click(Point(_EQUIP_X, _ROW_CY[slot - 1]))
+        self.device.click(Point(_EQUIP_X, _ROW_CY[slot - 1]))
         time.sleep(2)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("更换装备", roi_4to4(530, 0, 750, 60)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("更换装备", roi_4to4(530, 0, 750, 60)))
 
     @staticmethod
     def _sakura_blank_checkbox(image, bounds):
@@ -739,15 +739,15 @@ class SakuraMixin:
         # 运行帧校准：只搜各自复选框，避免拿别处的勾来判断。
         for label, bounds in (("期间限定", (296, 81, 327, 112)),
                               ("远战", (430, 81, 461, 112))):
-            image = self.maa.screenshot(force=True)
+            image = self.device.screenshot(force=True)
             if image is None:
                 return False
-            pt = self.maa.template_match("team/ui道具勾选.png", roi_4to4(*bounds), threshold=.85)
+            pt = self.device.template_match("team/ui道具勾选.png", roi_4to4(*bounds), threshold=.85)
             if pt:
-                self.maa.click(pt)
+                self.device.click(pt)
                 time.sleep(2)  # 等点击特效消失再读勾。
-                image = self.maa.screenshot(force=True)
-                if self.maa.template_match("team/ui道具勾选.png", roi_4to4(*bounds), threshold=.85):
+                image = self.device.screenshot(force=True)
+                if self.device.template_match("team/ui道具勾选.png", roi_4to4(*bounds), threshold=.85):
                     yield f"[刷花] {label}仍勾选，停止"
                     return False
             if not self._sakura_blank_checkbox(image, bounds):
@@ -756,10 +756,10 @@ class SakuraMixin:
         return True
 
     def _sakura_equipment_return(self):
-        self.maa.click(Point(*_EQUIP_BACK))
+        self.device.click(Point(*_EQUIP_BACK))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("部队编成", roi_4to4(500, 0, 780, 60)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("部队编成", roi_4to4(500, 0, 780, 60)))
 
     def _auto_equip(self, slot: int):
         if not self._sakura_equipment_page(slot):
@@ -767,16 +767,16 @@ class SakuraMixin:
             return False
         if not (yield from self._sakura_clear_equipment_filters()):
             return False
-        pt = self.maa.template_match("team/自动装备刀装.png", threshold=.85)
+        pt = self.device.template_match("team/自动装备刀装.png", threshold=.85)
         if not pt:
             yield "[刷花] 自动装备刀装按钮未确认，停止"
             return False
-        self.maa.click(pt)
+        self.device.click(pt)
         time.sleep(2)
-        self.maa.screenshot(force=True)
-        confirm = self.maa.template_match("通用_确定.png", threshold=.7)
+        self.device.screenshot(force=True)
+        confirm = self.device.template_match("通用_确定.png", threshold=.7)
         if confirm:
-            self.maa.click(confirm)
+            self.device.click(confirm)
             time.sleep(1)
         if not self._sakura_equipment_return():
             yield "[刷花] 装备后未回到编队，停止"
@@ -792,21 +792,21 @@ class SakuraMixin:
                 if self.current_location != "编队":
                     yield "[刷花] 卸装前到不了编队，停止"
                     return False
-            self.maa.click(Point(*_TEAM_TAB[team_no]))
+            self.device.click(Point(*_TEAM_TAB[team_no]))
             time.sleep(1.5)
         if not self._sakura_equipment_page():
             yield "[刷花] 卸装时装备页没打开，停止"
             return False
-        pt = self.maa.template_match("team/全部卸装.png", threshold=.85)
+        pt = self.device.template_match("team/全部卸装.png", threshold=.85)
         if not pt:
             yield "[刷花] 全部卸装按钮未确认，停止"
             return False
-        self.maa.click(pt)
+        self.device.click(pt)
         time.sleep(2)
-        self.maa.screenshot(force=True)
-        confirm = self.maa.template_match("通用_确定.png", threshold=.7)
+        self.device.screenshot(force=True)
+        confirm = self.device.template_match("通用_确定.png", threshold=.7)
         if confirm:
-            self.maa.click(confirm)
+            self.device.click(confirm)
             time.sleep(1)
         if not self._sakura_equipment_return():
             yield "[刷花] 卸装后未回到编队，停止"

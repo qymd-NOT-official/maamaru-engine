@@ -5,7 +5,7 @@ from touken.flows.battle import BattleMixin
 from touken.flows.sortie import SortieMixin
 from touken.flows.osaka import OsakaMixin
 from touken.flows.raid import RaidMixin, _ocr_int
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class FakeMaa:
@@ -40,8 +40,8 @@ class FakeMaa:
 
 
 class Flow(BattleMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {
             "team_select": {
                 "teams": {"3": [394, 91]},
@@ -149,7 +149,7 @@ class BattleComponentTests(unittest.TestCase):
 
         class RecordFlow(BattleMixin):
             def __init__(self):
-                self.maa = Maa()
+                self.device = Maa()
                 self.config = {"team_select": {"team_record": {
                     "button": {"template": "team/部队记录.png"},
                     "records": {"1": [1225, 179]},
@@ -159,11 +159,11 @@ class BattleComponentTests(unittest.TestCase):
                 }}}
 
             def _click_template_config(self, config):
-                point = self.maa.template_match(config.get("template"))
-                return self.maa.click(point) if point else False
+                point = self.device.template_match(config.get("template"))
+                return self.device.click(point) if point else False
 
             def _click_point(self, target):
-                return self.maa.click(Point(*target))
+                return self.device.click(Point(*target))
 
         return RecordFlow()
 
@@ -172,8 +172,8 @@ class BattleComponentTests(unittest.TestCase):
         cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(flow._save_team_record(cfg, record_no=1))
-        self.assertEqual(flow.maa.state, "team")
-        self.assertIn(Point(1225, 179), flow.maa.clicked)
+        self.assertEqual(flow.device.state, "team")
+        self.assertIn(Point(1225, 179), flow.device.clicked)
 
     def test_warning_restores_record_one_through_formation_screen(self):
         flow = self._record_flow("warning")
@@ -183,25 +183,25 @@ class BattleComponentTests(unittest.TestCase):
         }
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(flow._restore_equipment_from_warning(cfg, record_no=1))
-        self.assertEqual(flow.maa.state, "team")
-        self.assertIn(Point(500, 510), flow.maa.clicked)
-        self.assertIn(Point(740, 85), flow.maa.clicked)
+        self.assertEqual(flow.device.state, "team")
+        self.assertIn(Point(500, 510), flow.device.clicked)
+        self.assertIn(Point(740, 85), flow.device.clicked)
 
     def test_save_uses_back_when_record_page_does_not_close_itself(self):
         flow = self._record_flow("team", save_auto_return=False)
         cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(flow._save_team_record(cfg, record_no=1))
-        self.assertEqual(flow.maa.state, "team")
-        self.assertIn(Point(73, 31), flow.maa.clicked)
+        self.assertEqual(flow.device.state, "team")
+        self.assertIn(Point(73, 31), flow.device.clicked)
 
     def test_record_confirmation_uses_guarded_fallback_when_yes_template_changes(self):
         flow = self._record_flow("team", yes_template=False)
         cfg = {"team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(flow._save_team_record(cfg, record_no=1))
-        self.assertEqual(flow.maa.state, "team")
-        self.assertIn(Point(784, 510), flow.maa.clicked)
+        self.assertEqual(flow.device.state, "team")
+        self.assertIn(Point(784, 510), flow.device.clicked)
 
     def test_injury_templates_are_restricted_to_our_team_side(self):
         flow = Flow(FakeMaa(templates={"battle/轻伤.png": Point(200, 150)}))
@@ -214,12 +214,12 @@ class BattleComponentTests(unittest.TestCase):
             "injury_status_roi": [0, 90, 570, 690],
         }
         self.assertEqual(flow._team_injury_status(cfg), "轻伤")
-        self.assertTrue(flow.maa.template_calls)
-        for _, roi in flow.maa.template_calls:
+        self.assertTrue(flow.device.template_calls)
+        for _, roi in flow.device.template_calls:
             self.assertEqual((roi.x, roi.y, roi.w, roi.h),
                              (220, 90, 120, 600))
         self.assertTrue(all(threshold == 0.88
-                            for _, threshold in flow.maa.template_thresholds))
+                            for _, threshold in flow.device.template_thresholds))
 
     def test_partial_injury_ocr_never_promotes_hurt_to_heavy(self):
         class Maa(FakeMaa):
@@ -252,7 +252,7 @@ class BattleComponentTests(unittest.TestCase):
         flow = Flow(Maa())
 
         self.assertEqual(flow._team_injury_status(cfg), "中伤")
-        self.assertEqual(flow.maa.template_thresholds[:2], [
+        self.assertEqual(flow.device.template_thresholds[:2], [
             ("battle/ui重伤.png", 0.88),
             ("battle/中伤.png", 0.88),
         ])
@@ -267,8 +267,8 @@ class BattleComponentTests(unittest.TestCase):
             self.assertTrue(flow._deny_heavy_injury_warning({
                 "injury_deny_button": {"template": "否.png"},
             }))
-        self.assertEqual(flow.maa.clicks, [deny])
-        self.assertEqual(flow.maa.template_calls, [])
+        self.assertEqual(flow.device.clicks, [deny])
+        self.assertEqual(flow.device.template_calls, [])
 
     def test_full_injury_ocr_keeps_medium_injury_as_medium(self):
         class Maa(FakeMaa):
@@ -288,7 +288,7 @@ class BattleComponentTests(unittest.TestCase):
         flow = Flow(Maa(templates={"battle/ui重伤.png": Point(280, 150)}))
         cfg = {"injury_stamps": {"重伤": {"template": "battle/ui重伤.png"}}}
         self.assertEqual(flow._team_injury_status(cfg), "中伤")
-        self.assertEqual(flow.maa.template_calls, [])
+        self.assertEqual(flow.device.template_calls, [])
 
     def test_injury_template_still_covers_ocr_blind_frame(self):
         """OCR 漏读（糊帧/动画）时模板窄栏兜底仍然生效。"""
@@ -398,8 +398,8 @@ class BattleComponentTests(unittest.TestCase):
             def _click_point(self, point):
                 super()._click_point(point)
                 if point == [910, 32]:
-                    self.maa.templates.pop("battle/阵形选择手动.png", None)
-                    self.maa.templates["battle/阵形选择自动.png"] = Point(910, 32)
+                    self.device.templates.pop("battle/阵形选择手动.png", None)
+                    self.device.templates["battle/阵形选择自动.png"] = Point(910, 32)
 
         flow = ToggleFlow(FormationPageMaa(title_ttl=1, templates={
             "battle/ui阵形选择.png": Point(640, 24),
@@ -451,7 +451,7 @@ class BattleComponentTests(unittest.TestCase):
                 formation_name="逆行阵", enable_auto=True), "advantage")
         # 双击落在有利标记上，兜底阵形卡一下没碰
         self.assertEqual(flow.points, [])
-        self.assertEqual(len(flow.maa.clicks), 2)
+        self.assertEqual(len(flow.device.clicks), 2)
 
     def test_formation_state_waits_for_lagging_title(self):
         """进场动画里红色标题比模式按钮晚渲染：刚进页面读不到状态不能秒报
@@ -508,14 +508,14 @@ class BattleComponentTests(unittest.TestCase):
             flow._formation_mode_state(allow_auto_without_title=True), "auto")
         self.assertIsNone(flow._formation_mode_state())
         self.assertIn(("battle/阵形选择自动.png", 0.9),
-                      flow.maa.template_thresholds)
+                      flow.device.template_thresholds)
 
     def test_wait_for_team_select_can_open_the_panel(self):
         deploy = Point(100, 200)
-        maa = FakeMaa(
+        device = FakeMaa(
             ocr_results=[False, False, deploy, deploy, True],
         )
-        flow = Flow(maa)
+        flow = Flow(device)
         cfg = {
             "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
             "deploy_button": {"ocr": {
@@ -523,30 +523,30 @@ class BattleComponentTests(unittest.TestCase):
         }
 
         self.assertTrue(flow._wait_for_team_select(cfg, attempts=3, open_after=1))
-        self.assertEqual(maa.clicks, [deploy])
+        self.assertEqual(device.clicks, [deploy])
 
     def test_deploy_button_requires_both_ocr_words_and_never_uses_template(self):
         point = Point(1200, 640)
-        maa = FakeMaa(ocr_results=[point, point])
-        flow = Flow(maa)
+        device = FakeMaa(ocr_results=[point, point])
+        flow = Flow(device)
 
         self.assertEqual(flow._find_deploy_button({
             "deploy_button": {"ocr": {
                 "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}}
         }), point)
-        self.assertEqual(maa.ocr_calls, ["部队", "选择"])
-        self.assertEqual(maa.template_calls, [])
-        self.assertTrue(maa.screenshot_calls[0])
+        self.assertEqual(device.ocr_calls, ["部队", "选择"])
+        self.assertEqual(device.template_calls, [])
+        self.assertTrue(device.screenshot_calls[0])
 
-        maa = FakeMaa(ocr_results=[point, False])
+        device = FakeMaa(ocr_results=[point, False])
         self.assertIsNone(flow._find_deploy_button({
             "deploy_button": {"ocr": {
                 "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}}
         }))
 
     def test_team_select_already_open_never_clicks_bottom_right(self):
-        maa = FakeMaa(ocr_results=[Point(640, 29)])
-        flow = Flow(maa)
+        device = FakeMaa(ocr_results=[Point(640, 29)])
+        flow = Flow(device)
         cfg = {
             "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
             "deploy_button": {"ocr": {
@@ -554,8 +554,8 @@ class BattleComponentTests(unittest.TestCase):
         }
 
         self.assertTrue(flow._wait_for_team_select(cfg, attempts=2, open_after=0))
-        self.assertEqual(maa.clicks, [])
-        self.assertEqual(maa.ocr_calls, ["部队选择"])
+        self.assertEqual(device.clicks, [])
+        self.assertEqual(device.ocr_calls, ["部队选择"])
 
     def test_pick_team_uses_the_shared_team_coordinates(self):
         flow = Flow(FakeMaa())
@@ -571,7 +571,7 @@ class BattleComponentTests(unittest.TestCase):
         self.assertTrue(flow._click_depart({
             "depart_button": {"template": "team/即刻出阵.png"},
         }))
-        self.assertEqual(flow.maa.clicks, [depart])
+        self.assertEqual(flow.device.clicks, [depart])
         self.assertFalse(flow._click_depart({"depart_button": {}}))
 
     def test_ticket_refill_is_a_shared_three_step_flow(self):
@@ -583,12 +583,12 @@ class BattleComponentTests(unittest.TestCase):
             "恢复一个.png": recover,
             "确定.png": confirm,
         }))
-        original_click = flow.maa.click
+        original_click = flow.device.click
         def click_and_close(point):
             original_click(point)
             if point == confirm:
-                flow.maa.templates.pop("确定.png", None)
-        flow.maa.click = click_and_close
+                flow.device.templates.pop("确定.png", None)
+        flow.device.click = click_and_close
         cfg = {"ticket_recover": {
             "popup_button": {"template": "补充.png"},
             "recover_button": {"template": "恢复一个.png"},
@@ -597,7 +597,7 @@ class BattleComponentTests(unittest.TestCase):
         with patch("touken.flows.battle.time.sleep"):
             messages = list(flow._recover_ticket_stream(cfg, tag="[异去]"))
         self.assertTrue(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill, recover, confirm])
+        self.assertEqual(flow.device.clicks, [refill, recover, confirm])
         self.assertEqual(messages, ["[异去] 手形补充完成"])
 
     class _SliderMaa(FakeMaa):
@@ -637,7 +637,7 @@ class BattleComponentTests(unittest.TestCase):
             messages = list(flow._recover_ticket_stream(
                 self._SLIDER_CFG, tag="[花札]"))
         self.assertTrue(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill, Point(300, 300),
+        self.assertEqual(flow.device.clicks, [refill, Point(300, 300),
                                            Point(300, 300)])
         self.assertEqual(messages, ["[花札] 手形补充完成"])
 
@@ -651,7 +651,7 @@ class BattleComponentTests(unittest.TestCase):
             messages = list(flow._recover_ticket_stream(
                 self._SLIDER_CFG, tag="[花札]"))
         self.assertFalse(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill])
+        self.assertEqual(flow.device.clicks, [refill])
         self.assertTrue(any("不是 1" in m for m in messages))
 
     def test_slider_refill_stops_before_payment_when_quantity_unreadable(self):
@@ -663,7 +663,7 @@ class BattleComponentTests(unittest.TestCase):
         with patch("touken.flows.battle.time.sleep"):
             list(flow._recover_ticket_stream(self._SLIDER_CFG, tag="[花札]"))
         self.assertFalse(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill])
+        self.assertEqual(flow.device.clicks, [refill])
 
     def test_slider_refill_stops_looping_when_confirm_never_leaves(self):
         refill = Point(100, 100)
@@ -676,7 +676,7 @@ class BattleComponentTests(unittest.TestCase):
             messages = list(flow._recover_ticket_stream(
                 self._SLIDER_CFG, tag="[花札]"))
         self.assertFalse(flow._recover_ok)
-        self.assertEqual(flow.maa.clicks, [refill] + [Point(300, 300)] * 3)
+        self.assertEqual(flow.device.clicks, [refill] + [Point(300, 300)] * 3)
         self.assertTrue(any("防死循环" in m for m in messages))
 
 
@@ -714,12 +714,12 @@ class YosariRouteTests(unittest.TestCase):
                 "expected": ["部队", "选择"], "roi": [1120, 580, 1279, 710]}},
         }
         flow = Route()
-        flow.maa = FakeMaa(
+        flow.device = FakeMaa(
             ocr_results=[True, Point(1200, 640), Point(1200, 640)],
         )
         self.assertTrue(flow._yosari_round_done(cfg))
 
-        flow.maa = FakeMaa(ocr_results=[True, Point(1200, 640), False])
+        flow.device = FakeMaa(ocr_results=[True, Point(1200, 640), False])
         self.assertFalse(flow._yosari_round_done(cfg))
 
     def test_manual_march_uses_the_button_template_not_partial_ocr(self):
@@ -728,7 +728,7 @@ class YosariRouteTests(unittest.TestCase):
 
         button = Point(1146, 617)
         flow = Route()
-        flow.maa = FakeMaa(templates={"battle/行军.png": button})
+        flow.device = FakeMaa(templates={"battle/行军.png": button})
         self.assertEqual(flow._find_march_continue({}), button)
 
     def test_yosari_new_refill_flow_confirms_four_dialogs(self):
@@ -745,7 +745,7 @@ class YosariRouteTests(unittest.TestCase):
 
         class Route(SortieMixin, BattleMixin):
             def __init__(self):
-                self.maa = Maa()
+                self.device = Maa()
                 self.points = []
                 self.events = []
 
@@ -772,7 +772,7 @@ class YosariRouteTests(unittest.TestCase):
     def test_yosari_refill_records_fact_without_guessing_unreadable_koban(self):
         class Route(SortieMixin, BattleMixin):
             def __init__(self):
-                self.maa = FakeMaa(ocr_results=[True, True, True, True])
+                self.device = FakeMaa(ocr_results=[True, True, True, True])
                 self.points = []
                 self.events = []
 
@@ -794,7 +794,7 @@ class YosariRouteTests(unittest.TestCase):
     def test_yosari_refill_off_closes_before_spending_koban(self):
         class Route(SortieMixin, BattleMixin):
             def __init__(self):
-                self.maa = FakeMaa(ocr_results=[True, True])
+                self.device = FakeMaa(ocr_results=[True, True])
                 self.points = []
 
             def _click_point(self, point):
@@ -813,7 +813,7 @@ class YosariRouteTests(unittest.TestCase):
         （2026-10-19 现场：关自动行军面板后点出阵，画面停在部队选择页空等）"""
         class Route(SortieMixin, BattleMixin):
             def __init__(self):
-                self.maa = FakeMaa(
+                self.device = FakeMaa(
                     ocr_results=[False] * 10 + [True],
                     templates={"team/即刻出阵.png": Point(1201, 627)})
                 self.points = []
@@ -828,14 +828,14 @@ class YosariRouteTests(unittest.TestCase):
                  "depart_button": {"template": "team/即刻出阵.png"}}))
         self.assertTrue(result)
         self.assertIn("补点一次", "\n".join(messages))
-        self.assertEqual(flow.maa.clicks, [Point(1201, 627)])
+        self.assertEqual(flow.device.clicks, [Point(1201, 627)])
         self.assertEqual(flow.points, [[640, 603]])
 
     def test_yosari_departure_stops_when_depart_button_gone(self):
         """按钮不在了（确认框可能正弹着只是文字没认到）→ 不补点，安全停车"""
         class Route(SortieMixin, BattleMixin):
             def __init__(self):
-                self.maa = FakeMaa(ocr_results=[False] * 10)
+                self.device = FakeMaa(ocr_results=[False] * 10)
                 self.points = []
 
             def _click_point(self, point):
@@ -848,7 +848,7 @@ class YosariRouteTests(unittest.TestCase):
                  "depart_button": {"template": "team/即刻出阵.png"}}))
         self.assertFalse(result)
         self.assertIn("[异去] 没看到归城提灯出阵确认框；停止", messages)
-        self.assertEqual(flow.maa.clicks, [])
+        self.assertEqual(flow.device.clicks, [])
         self.assertEqual(flow.points, [])
 
 
@@ -860,13 +860,13 @@ class OsakaRouteTests(unittest.TestCase):
                         ("81层", Point(300, 190))]
 
         flow = OsakaMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         self.assertEqual(flow._read_osaka_floor({}), 81)
 
     def test_floor_selector_rereads_after_every_arrow_click(self):
         class Route(OsakaMixin):
             def __init__(self):
-                self.maa = FakeMaa()
+                self.device = FakeMaa()
                 self.readings = iter([99, 89, 88, 87, 86, 85, 84, 83, 82, 81])
                 self.points = []
 
@@ -885,7 +885,7 @@ class OsakaRouteTests(unittest.TestCase):
     def test_floor_selector_stops_when_a_grey_arrow_does_not_change_floor(self):
         class Route(OsakaMixin):
             def __init__(self):
-                self.maa = FakeMaa()
+                self.device = FakeMaa()
                 self.readings = iter([29, 29])
                 self.points = []
 
@@ -908,14 +908,14 @@ class OsakaRouteTests(unittest.TestCase):
 
     def test_floor_end_uses_stable_label_and_result_witness(self):
         flow = OsakaMixin()
-        flow.maa = FakeMaa(ocr_results=[True, True])
+        flow.device = FakeMaa(ocr_results=[True, True])
 
         self.assertTrue(flow._osaka_floor_done({}))
-        self.assertEqual(flow.maa.ocr_calls, ["当前层数", "传送凭证"])
+        self.assertEqual(flow.device.ocr_calls, ["当前层数", "传送凭证"])
 
     def test_route_buttons_never_participate_in_floor_end_detection(self):
         flow = OsakaMixin()
-        flow.maa = FakeMaa(
+        flow.device = FakeMaa(
             ocr_results=[False],
             templates={
                 "battle/行军.png": Point(1130, 610),
@@ -925,14 +925,14 @@ class OsakaRouteTests(unittest.TestCase):
         )
 
         self.assertFalse(flow._osaka_floor_done({}))
-        self.assertEqual(flow.maa.ocr_calls, ["当前层数"])
+        self.assertEqual(flow.device.ocr_calls, ["当前层数"])
 
-        flow.maa = FakeMaa(ocr_results=[True, False])
+        flow.device = FakeMaa(ocr_results=[True, False])
         self.assertFalse(flow._osaka_floor_done({}))
 
     def test_floor_end_does_not_depend_on_the_changing_floor_number(self):
         flow = OsakaMixin()
-        flow.maa = FakeMaa(ocr_results=[False])
+        flow.device = FakeMaa(ocr_results=[False])
 
         self.assertFalse(flow._osaka_floor_done({
             "floor_end_ocr": {"expected": "当前层数", "roi": [0, 0, 10, 10]},
@@ -941,7 +941,7 @@ class OsakaRouteTests(unittest.TestCase):
     def test_osaka_march_is_limited_to_the_bottom_right_button(self):
         button = Point(1130, 610)
         flow = OsakaMixin()
-        flow.maa = FakeMaa(templates={"battle/行军.png": button})
+        flow.device = FakeMaa(templates={"battle/行军.png": button})
 
         self.assertEqual(flow._find_osaka_march({}), button)
 
@@ -957,7 +957,7 @@ class OsakaRouteTests(unittest.TestCase):
                 return next(self.results)
 
         flow = OsakaMixin()
-        flow.maa = Maa()
+        flow.device = Maa()
         with patch("touken.flows.osaka.time.sleep"):
             self.assertEqual(flow._wait_for_osaka_march({}, attempts=4), button)
 
@@ -965,9 +965,9 @@ class OsakaRouteTests(unittest.TestCase):
 class _SafeDepartHost(BattleMixin):
     """通用安全出阵链的最小宿主：组件全部钉死，只看编排。"""
 
-    def __init__(self, injury=None, deny=False, cancel=None, maa=None):
+    def __init__(self, injury=None, deny=False, cancel=None, device=None):
         from types import SimpleNamespace
-        self.maa = maa or SimpleNamespace(screenshot=lambda force=False: None)
+        self.device = device or SimpleNamespace(screenshot=lambda force=False: None)
         self.config = {"team_select": {"teams": {"3": [394, 91]}},
                        "injury_check": {"use_youzu_log": False}}
         self._injury = injury
@@ -1114,14 +1114,14 @@ _RECOVER_CFG = {"ticket_recover": {
 
 
 class _RecoverDepartHost(_SafeDepartHost):
-    def __init__(self, maa):
-        super().__init__(maa=maa)
+    def __init__(self, device):
+        super().__init__(device=device)
         self.departs = 0
 
     def _click_depart(self, cfg):
         self.departs += 1
         if self.departs >= 2:
-            self.maa.state = "confirm"
+            self.device.state = "confirm"
         return True
 
 
@@ -1205,23 +1205,23 @@ class SafeDepartChainTests(unittest.TestCase):
         host._click_depart.assert_called_once()
 
     def test_second_confirmation_uses_its_configured_threshold(self):
-        maa = FakeMaa(templates={"海联确认": Point(640, 179),
+        device = FakeMaa(templates={"海联确认": Point(640, 179),
                                  "海联确定": Point(648, 610)})
-        host = _SafeDepartHost(maa=maa)
+        host = _SafeDepartHost(device=device)
         cfg = {"confirm_ui": {"template": "海联确认"},
                "confirm_button": {"template": "海联确定",
                                   "roi": [500, 560, 800, 660],
                                   "threshold": 0.8}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(host._confirm_departure(cfg))
-        self.assertIn(("海联确定", 0.8), maa.template_thresholds)
+        self.assertIn(("海联确定", 0.8), device.template_thresholds)
 
     def test_hailian_departure_title_accepts_special_popup_button(self):
         """特别合战场正文不同，但顶部标题和确定按钮与普通海联相同。"""
-        maa = Mock()
-        maa.ocr.return_value = Point(640, 79)
-        maa.template_match.return_value = Point(648, 610)
-        host = _SafeDepartHost(maa=maa)
+        device = Mock()
+        device.ocr.return_value = Point(640, 79)
+        device.template_match.return_value = Point(648, 610)
+        host = _SafeDepartHost(device=device)
         cfg = {"confirm_ui": {"ocr": {"expected": "出阵",
                                        "roi": [510, 48, 770, 112],
                                        "match_mode": "exact"}},
@@ -1230,21 +1230,21 @@ class SafeDepartChainTests(unittest.TestCase):
                                   "threshold": 0.8}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertTrue(host._confirm_departure(cfg))
-        maa.ocr.assert_called_with("出阵", unittest.mock.ANY,
+        device.ocr.assert_called_with("出阵", unittest.mock.ANY,
                                    match_mode="exact")
-        maa.click.assert_called_once_with(Point(648, 610))
+        device.click.assert_called_once_with(Point(648, 610))
 
     def test_departure_title_alone_never_clicks(self):
-        maa = Mock()
-        maa.ocr.return_value = Point(640, 79)
-        maa.template_match.return_value = None
-        host = _SafeDepartHost(maa=maa)
+        device = Mock()
+        device.ocr.return_value = Point(640, 79)
+        device.template_match.return_value = None
+        host = _SafeDepartHost(device=device)
         cfg = {"confirm_ui": {"ocr": {"expected": "出阵",
                                        "roi": [510, 48, 770, 112]}},
                "confirm_button": {"template": "lulian/ui海联确定.png"}}
         with patch("touken.flows.battle.time.sleep"):
             self.assertFalse(host._confirm_departure(cfg))
-        maa.click.assert_not_called()
+        device.click.assert_not_called()
 
     def test_activity_preparation_runs_after_injury_check(self):
         host = _SafeDepartHost()
@@ -1303,40 +1303,40 @@ class SafeDepartChainTests(unittest.TestCase):
 
     def test_refill_popup_declined_cancels_and_stops(self):
         """票尽弹窗 + 不补票：点取消收工，不碰确定。"""
-        maa = _RefillMaa()
+        device = _RefillMaa()
         msgs, result = _drain_chain(
-            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=False)
+            _SafeDepartHost(device=device), _REFILL_CFG, auto_refill=False)
         self.assertEqual(result, (False, False))
-        self.assertIn(_RefillMaa.CANCEL, maa.clicked)
-        self.assertNotIn(_RefillMaa.CONFIRM, maa.clicked)
+        self.assertIn(_RefillMaa.CANCEL, device.clicked)
+        self.assertNotIn(_RefillMaa.CONFIRM, device.clicked)
         self.assertTrue(any("不补票" in m for m in msgs), msgs)
 
     def test_refill_popup_confirmed_then_redeparts(self):
         """票尽弹窗 + 自动补票：点确定补一张，重新出阵后正常通过。"""
-        maa = _RefillMaa()
+        device = _RefillMaa()
         msgs, result = _drain_chain(
-            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=True)
+            _SafeDepartHost(device=device), _REFILL_CFG, auto_refill=True)
         self.assertEqual(result, (True, False))
-        self.assertIn(_RefillMaa.CONFIRM, maa.clicked)
+        self.assertIn(_RefillMaa.CONFIRM, device.clicked)
         self.assertTrue(any("补上一张" in m for m in msgs), msgs)
 
     def test_refill_popup_sticking_stops_before_double_spend(self):
         """补完票弹窗还在（没补上）：停手，绝不重复点小判。"""
-        maa = _RefillMaa(popup_sticks=True)
+        device = _RefillMaa(popup_sticks=True)
         msgs, result = _drain_chain(
-            _SafeDepartHost(maa=maa), _REFILL_CFG, auto_refill=True)
+            _SafeDepartHost(device=device), _REFILL_CFG, auto_refill=True)
         self.assertEqual(result, (False, False))
-        self.assertEqual(maa.clicked.count(_RefillMaa.CONFIRM), 1)
+        self.assertEqual(device.clicked.count(_RefillMaa.CONFIRM), 1)
         self.assertTrue(any("防止重复消费" in m for m in msgs), msgs)
 
     def test_raid_style_recover_is_reused_by_safe_depart_chain(self):
-        maa = _RecoverMaa()
+        device = _RecoverMaa()
         cfg = {**_RECOVER_CFG, "ticket_price": 300}
-        host = _SafeDepartHost(maa=maa)
+        host = _SafeDepartHost(device=device)
         msgs, result = _drain_chain(
             host, cfg, auto_refill=True)
         self.assertEqual(result, (True, False))
-        self.assertEqual(maa.clicked, [
+        self.assertEqual(device.clicked, [
             _RecoverMaa.REFILL, _RecoverMaa.RECOVER, _RecoverMaa.CONFIRM])
         self.assertTrue(any("手形补充完成" in m for m in msgs), msgs)
         self.assertIn(("ticket.refilled", {
@@ -1358,20 +1358,20 @@ class SafeDepartChainTests(unittest.TestCase):
         self.assertEqual(host.events, [("ticket.refilled", {"source": "RAID"})])
 
     def test_raid_style_recover_declined_uses_close(self):
-        maa = _RecoverMaa()
+        device = _RecoverMaa()
         msgs, result = _drain_chain(
-            _SafeDepartHost(maa=maa), _RECOVER_CFG, auto_refill=False)
+            _SafeDepartHost(device=device), _RECOVER_CFG, auto_refill=False)
         self.assertEqual(result, (False, False))
-        self.assertEqual(maa.clicked, [_RecoverMaa.CLOSE])
+        self.assertEqual(device.clicked, [_RecoverMaa.CLOSE])
         self.assertTrue(any("不补票" in m for m in msgs), msgs)
 
     def test_depart_confirm_wins_over_false_refill_match(self):
-        maa = _RecoverMaa()
+        device = _RecoverMaa()
         cfg = {
             **_RECOVER_CFG,
             "confirm_ui": {"template": "team/ui出阵确认.png"},
         }
-        host = _RecoverDepartHost(maa)
+        host = _RecoverDepartHost(device)
         msgs, result = _drain_chain(host, cfg, auto_refill=True)
         self.assertEqual(result, (True, False))
         self.assertEqual(host.departs, 2)
@@ -1393,8 +1393,8 @@ class _RaidLoopTime:
 
 
 class _RaidLoopHost(RaidMixin):
-    def __init__(self, maa, raid_cfg):
-        self.maa = maa
+    def __init__(self, device, raid_cfg):
+        self.device = device
         self.config = {"raid": raid_cfg}
 
     def _click_point(self, _point):
@@ -1434,7 +1434,7 @@ class RaidDepartureSafetyTests(unittest.TestCase):
         agent.current_location = "出阵"
         agent.navigate_to_stream.return_value = iter(())
         agent._expedition_takeover_requested.return_value = False
-        agent.maa.template_match.side_effect = (
+        agent.device.template_match.side_effect = (
             lambda template, *a, **kw: Point(500, 100)
             if template == "raid-title" else None)
         agent._find_deploy_button.return_value = Point(1150, 620)
@@ -1466,7 +1466,7 @@ class RaidDepartureSafetyTests(unittest.TestCase):
         agent.current_location = "出阵"
         agent.navigate_to_stream.return_value = iter(())
         agent._expedition_takeover_requested.return_value = False
-        agent.maa.template_match.side_effect = (
+        agent.device.template_match.side_effect = (
             lambda template, *a, **kw: Point(500, 100)
             if template == "raid-title" else None)
         agent._find_deploy_button.return_value = Point(1150, 620)
@@ -1495,8 +1495,8 @@ class RaidDepartureSafetyTests(unittest.TestCase):
         self.assertNotIn("battles", recorded.kwargs)
 
     def test_zero_fish_baskets_are_never_selected(self):
-        maa = FakeMaa(ocr_tokens=[[("0", Point(600, 540))]])
-        host = _RaidLoopHost(maa, {})
+        device = FakeMaa(ocr_tokens=[[("0", Point(600, 540))]])
+        host = _RaidLoopHost(device, {})
         messages = list(host._use_fish_basket3_stream({
             "count_ocr": {"roi": [515, 515, 665, 560]},
             "check_roi": [325, 465, 365, 507],
@@ -1504,14 +1504,14 @@ class RaidDepartureSafetyTests(unittest.TestCase):
             "click": [345, 487],
         }))
         self.assertTrue(any("持有 0" in msg for msg in messages))
-        self.assertEqual(maa.clicks, [])
+        self.assertEqual(device.clicks, [])
 
     def test_ocr_count_rejects_multiple_numbers(self):
-        maa = Mock()
-        maa.ocr_all.return_value = [("3,000/300,000", Point(10, 10))]
-        self.assertIsNone(_ocr_int(maa, [0, 0, 100, 100]))
-        maa.ocr_all.return_value = [("3,000", Point(10, 10))]
-        self.assertEqual(_ocr_int(maa, [0, 0, 100, 100]), 3000)
+        device = Mock()
+        device.ocr_all.return_value = [("3,000/300,000", Point(10, 10))]
+        self.assertIsNone(_ocr_int(device, [0, 0, 100, 100]))
+        device.ocr_all.return_value = [("3,000", Point(10, 10))]
+        self.assertEqual(_ocr_int(device, [0, 0, 100, 100]), 3000)
 
     def test_raid_stops_when_shared_departure_gate_rejects(self):
         agent = Mock()
@@ -1523,7 +1523,7 @@ class RaidDepartureSafetyTests(unittest.TestCase):
         agent.current_location = "出阵"
         agent.navigate_to_stream.return_value = iter(())
         agent._expedition_takeover_requested.return_value = False
-        agent.maa.template_match.side_effect = (
+        agent.device.template_match.side_effect = (
             lambda template, *a, **kw: Point(500, 100)
             if template == "raid-title" else None)
         agent._find_deploy_button.return_value = Point(1150, 620)
@@ -1546,14 +1546,14 @@ class RaidDepartureSafetyTests(unittest.TestCase):
 class RaidRoundEndVariantTests(unittest.TestCase):
     """一圈结束判定要同时认陆联/海联横幅（2026-09-24 海联接线）。"""
 
-    def _run(self, maa, cfg):
-        host = _RaidLoopHost(maa, cfg)
+    def _run(self, device, cfg):
+        host = _RaidLoopHost(device, cfg)
         with patch("touken.flows.raid.time", _RaidLoopTime()):
             list(host.battle_loop_stream(need_battle=False))
         return host._battle_loop_result
 
     def test_round_ends_on_hailian_banner(self):
-        maa = FakeMaa(templates={"lulian/ui海联.png": (582, 94)})
+        device = FakeMaa(templates={"lulian/ui海联.png": (582, 94)})
         cfg = _raid_loop_cfg({
             "round_end_hailian": {
                 "template": "lulian/ui海联.png",
@@ -1561,14 +1561,14 @@ class RaidRoundEndVariantTests(unittest.TestCase):
                 "threshold": 0.9,
             },
         })
-        self.assertEqual(self._run(maa, cfg), (True, 0))
-        hailian_calls = [t for t, _ in maa.template_calls
+        self.assertEqual(self._run(device, cfg), (True, 0))
+        hailian_calls = [t for t, _ in device.template_calls
                          if t == "lulian/ui海联.png"]
         self.assertTrue(hailian_calls)
 
     def test_round_still_ends_on_lulian_banner(self):
-        maa = FakeMaa(templates={"lulian/ui陆联.png": (480, 95)})
-        self.assertEqual(self._run(maa, _raid_loop_cfg()), (True, 0))
+        device = FakeMaa(templates={"lulian/ui陆联.png": (480, 95)})
+        self.assertEqual(self._run(device, _raid_loop_cfg()), (True, 0))
 
     def test_missing_round_end_raises(self):
         cfg = _raid_loop_cfg()
@@ -1588,10 +1588,10 @@ class DisableAutoMarchTests(unittest.TestCase):
             'check_delegated': {'template': 'checked', 'roi': [1100, 340, 1279, 430]},
             'enable_button': {'template': 'button'},
             'delegate_button': {'template': 'delegate'}, 'close_window': [1038, 47]}}}
-        host.maa = Mock()
-        host.maa.exists.side_effect = [delegated, final]
-        host.maa.template_match.side_effect = lambda tpl: opened if tpl == 'delegate' else True
-        host.maa.ocr.side_effect = lambda text, *args, **kwargs: (
+        host.device = Mock()
+        host.device.exists.side_effect = [delegated, final]
+        host.device.template_match.side_effect = lambda tpl: opened if tpl == 'delegate' else True
+        host.device.ocr.side_effect = lambda text, *args, **kwargs: (
             Point(400, 300) if (text == '自动行军' and opened) or (text == '不委托' and cancel) else None)
         host._click_template_config = Mock(return_value=True)
         host._click_point = Mock()
@@ -1607,16 +1607,16 @@ class DisableAutoMarchTests(unittest.TestCase):
     def test_on_is_cancelled_and_verified(self, sleep):
         host = self.host(True)
         self.assertTrue(host._disable_auto_march())
-        self.assertEqual(host.maa.ocr.call_args.args[0], '不委托')
-        self.assertEqual(host.maa.ocr.call_args.kwargs['match_mode'], 'exact')
-        host.maa.click.assert_called_once_with(Point(400, 300))
+        self.assertEqual(host.device.ocr.call_args.args[0], '不委托')
+        self.assertEqual(host.device.ocr.call_args.kwargs['match_mode'], 'exact')
+        host.device.click.assert_called_once_with(Point(400, 300))
         host._click_point.assert_called_once_with([1038, 47])
 
     @patch('touken.flows.battle.time.sleep')
     def test_missing_popup_never_closes_team_panel(self, sleep):
         host = self.host(True, opened=False)
         self.assertFalse(host._disable_auto_march())
-        host.maa.click.assert_not_called()
+        host.device.click.assert_not_called()
         host._click_point.assert_not_called()
 
     @patch('touken.flows.battle.time.sleep')

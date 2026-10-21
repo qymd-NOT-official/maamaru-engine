@@ -17,14 +17,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from touken import MAAAdapter  # noqa: E402
+from touken import DeviceAdapter  # noqa: E402
 
 SAMPLES_DIR = ROOT / "lab" / "samples"
 
 
-def make_maa() -> MAAAdapter:
+def make_maa() -> DeviceAdapter:
     cfg = json.loads((ROOT / "touken_config.json").read_text(encoding="utf-8"))
-    maa = MAAAdapter(
+    device = DeviceAdapter(
         adb_path=cfg["adb_path"],
         adb_address=cfg["adb_address"],
         resource_dir=str(ROOT / "resource" / "base"),
@@ -32,9 +32,9 @@ def make_maa() -> MAAAdapter:
         manager_path=cfg.get("emulator_manager"),
         emulator_instance=int(cfg.get("emulator_instance", 0)),
     )
-    if not maa.init():
-        raise RuntimeError("MAA 初始化失败：检查模拟器开没开、ADB 通不通")
-    return maa
+    if not device.init():
+        raise RuntimeError("设备初始化失败：检查模拟器开没开、ADB 通不通")
+    return device
 
 
 def main():
@@ -44,8 +44,8 @@ def main():
     SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     out = SAMPLES_DIR / name
 
-    maa = make_maa()
-    if maa.save_screenshot(str(out), force=True):
+    device = make_maa()
+    if device.save_screenshot(str(out), force=True):
         print(f"OK {out}")
     else:
         print("FAIL 截图没存下来")

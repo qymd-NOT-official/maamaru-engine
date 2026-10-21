@@ -770,7 +770,7 @@ def _host(cfg=None):
     h = _Host()
     h.config = cfg if cfg is not None else {
         "injury_check": {"use_youzu_log": True, "max_age_sec": 600}}
-    h.maa = _FakeMaa()
+    h.device = _FakeMaa()
     return h
 
 

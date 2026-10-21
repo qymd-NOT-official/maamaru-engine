@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.flows import formation_treasure as ft
 
 
@@ -64,15 +64,15 @@ class ParserTests(unittest.TestCase):
                                    ('1级', Point(907, y + 76))])
                 return tokens
 
-        maa = ListMaa()
+        device = ListMaa()
         last = ft.find_treasure_in_list(
-            maa, {'name': '三所物·狮子', 'level': 1, 'affection': 0}, 4)
+            device, {'name': '三所物·狮子', 'level': 1, 'affection': 0}, 4)
         self.assertEqual(last, (False, Point(1010, 518)))
-        maa.page = 0
+        device.page = 0
         first = ft.find_treasure_in_list(
-            maa, {'name': '曜变天目', 'level': 1, 'affection': 0}, 4)
+            device, {'name': '曜变天目', 'level': 1, 'affection': 0}, 4)
         self.assertEqual(first, (False, Point(1010, 218)))
-        self.assertEqual(maa.page, 0)
+        self.assertEqual(device.page, 0)
 
 
 class FakeMaa:
@@ -145,8 +145,8 @@ class FakeMaa:
 class EquipTests(unittest.TestCase):
     @patch.object(ft.time, "sleep")
     def test_occupancy_contradiction_stops_before_card_click(self, _sleep):
-        maa = FakeMaa(equipped=True, count_free=1)
-        agent = type("Agent", (), {"maa": maa})()
+        device = FakeMaa(equipped=True, count_free=1)
+        agent = type("Agent", (), {"device": device})()
         gen = ft.equip_preset_treasure_stream(agent, 1, TARGET)
         while True:
             try:
@@ -154,13 +154,13 @@ class EquipTests(unittest.TestCase):
             except StopIteration as stop:
                 self.assertFalse(stop.value)
                 break
-        self.assertNotIn((1045, 218), maa.clicks)
-        self.assertEqual(maa.state, "formation")
+        self.assertNotIn((1045, 218), device.clicks)
+        self.assertEqual(device.state, "formation")
 
     @patch.object(ft.time, "sleep")
     def test_multi_item_inventory_stops_before_selection(self, _sleep):
-        maa = FakeMaa(total=2)
-        agent = type("Agent", (), {"maa": maa})()
+        device = FakeMaa(total=2)
+        agent = type("Agent", (), {"device": device})()
         gen = ft.equip_preset_treasure_stream(agent, 1, TARGET)
         while True:
             try:
@@ -168,12 +168,12 @@ class EquipTests(unittest.TestCase):
             except StopIteration as stop:
                 self.assertFalse(stop.value)
                 break
-        self.assertEqual(maa.clicks, [(964, 160), (634, 365), (152, 26)])
+        self.assertEqual(device.clicks, [(964, 160), (634, 365), (152, 26)])
 
     @patch.object(ft.time, "sleep")
     def test_unreadable_owner_cancels_transfer(self, _sleep):
-        maa = FakeMaa(equipped=True, owner_known=False)
-        agent = type("Agent", (), {"maa": maa})()
+        device = FakeMaa(equipped=True, owner_known=False)
+        agent = type("Agent", (), {"device": device})()
         gen = ft.equip_preset_treasure_stream(agent, 1, TARGET)
         while True:
             try:
@@ -181,14 +181,14 @@ class EquipTests(unittest.TestCase):
             except StopIteration as stop:
                 self.assertFalse(stop.value)
                 break
-        self.assertIn((785, 468), maa.clicks)
-        self.assertNotIn((497, 468), maa.clicks)
-        self.assertEqual(maa.state, "formation")
+        self.assertIn((785, 468), device.clicks)
+        self.assertNotIn((497, 468), device.clicks)
+        self.assertEqual(device.state, "formation")
 
     @patch.object(ft.time, "sleep")
     def test_transfer_requires_owner_then_verifies_slot(self, _sleep):
-        maa = FakeMaa(equipped=True)
-        agent = type("Agent", (), {"maa": maa})()
+        device = FakeMaa(equipped=True)
+        agent = type("Agent", (), {"device": device})()
         gen = ft.equip_preset_treasure_stream(agent, 1, TARGET)
         while True:
             try:
@@ -196,9 +196,9 @@ class EquipTests(unittest.TestCase):
             except StopIteration as stop:
                 self.assertTrue(stop.value)
                 break
-        self.assertIn((497, 468), maa.clicks)
-        self.assertEqual(maa.slot, NAME)
-        self.assertEqual(maa.state, "formation")
+        self.assertIn((497, 468), device.clicks)
+        self.assertEqual(device.slot, NAME)
+        self.assertEqual(device.state, "formation")
 
 
 if __name__ == "__main__":

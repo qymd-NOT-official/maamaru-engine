@@ -4,34 +4,33 @@ Copyright (C) 2026 企业名单 (DbDB68)
 本项目使用以下第三方组件，特此致谢并列出其许可证：
 
 ================================================================================
-MaaFramework
+OpenCV（opencv-python-headless）
 ================================================================================
-来源: https://github.com/MaaXYZ/MaaFramework
-许可证: GNU Lesser General Public License v3.0 (LGPL-3.0)
-
-本项目通过 pip 包 `maafw` 调用 MaaFramework 的 Python 接口（图像识别、模拟器控制、OCR 等）。
-本项目未修改 MaaFramework 源码，仅作为下游使用者按 LGPL-3.0 链接其动态库。
-完整的 LGPL-3.0 许可证文本可在以下地址查阅：
-  https://www.gnu.org/licenses/lgpl-3.0.html
-
-LGPL-3.0 合规说明：
-1. MaaFramework 的完整源码以 LGPL-3.0 发布，用户可自由获取并替换其版本
-2. 我们通过 pip 包名 `maafw` 安装，未分发其源码副本（pip 会自动从 PyPI 拉取）
-3. 未对 MaaFramework 源码做任何修改
-
-MaaFramework 项目声明（"声明与许可"）：
-- 预期用途：软件测试自动化、界面操作模拟等合法技术场景
-- 禁止滥用：破坏游戏、违反第三方服务条款、网络攻击、侵犯他人合法权益
-- 责任豁免：用户需自行承担因使用本项目产生的法律及账号风险
+来源: https://github.com/opencv/opencv-python
+许可证: Apache License 2.0
+用于: 模板匹配与图像处理（自研视觉引擎）
 
 ================================================================================
-DirectML（由 MaaFramework 间接引入）
+ONNX Runtime
 ================================================================================
-来源: https://github.com/microsoft/DirectML
-许可证: MIT License (Microsoft Corporation)
+来源: https://github.com/microsoft/onnxruntime
+许可证: MIT License
+用于: 本地推理运行时（自研 OCR 引擎）
 
-DirectML 由 MaaFramework 作为其 GPU 加速依赖带入本项目运行环境。
-我们不直接链接 DirectML，也不分发其 DLL 文件。
+================================================================================
+RapidOCR / PP-OCR 模型权重
+================================================================================
+来源: https://github.com/RapidAI/RapidOCR（推理封装，Apache-2.0）
+模型: PP-OCR 系列（PaddleOCR 项目，Apache-2.0）
+用于: 画面文字识别的检测/识别模型权重与 Python 推理封装
+
+================================================================================
+minitouch
+================================================================================
+来源: https://github.com/openstf/minitouch
+许可证: Apache License 2.0
+用于: 设备内核级触摸注入（`resource/base/bin/minitouch/` 内为再分发的
+预编译二进制，未做任何修改）
 
 ================================================================================
 FastAPI

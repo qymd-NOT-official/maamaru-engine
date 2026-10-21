@@ -17,7 +17,7 @@ import re
 import numpy as np
 
 from .. import sword_db
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 
 # ===== 「内番报告」屏布局（1280x720，真机 nk_06 量定）=====
 REPORT_TITLE_ROI = (525, 318, 758, 362)  # 标题「内番报告」
@@ -114,7 +114,7 @@ def parse_column_tokens(tokens, mid_x, values_split_y, names_split_y):
 def read_report_gains(img, ocr_func) -> list:
     """读报告屏：徽章定位谁+1，OCR 认名字补上「是谁」。
 
-    ocr_func(Region) -> [(文本, Point)]，一般传 maa.ocr_all。
+    ocr_func(Region) -> [(文本, Point)]，一般传 device.ocr_all。
     返回 [{"name", "stat", "slot"}]，名字认不到用「饲马上位」式兜底标签。
     """
     badges = find_plus1_badges(img)

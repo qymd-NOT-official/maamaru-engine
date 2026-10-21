@@ -20,7 +20,7 @@
           一键领取 (1180,620) 奖励确认X (1144,48) 购买详情X (972,154) 收件箱X (1248,32)
   习合：标签模板 习合.png；本体行心 y [166,268,369,470,572,666]，选择 x≈1220
         隐藏无法习合的刀剑 (142,102)，红勾区域 x[133,151] y[93,112]
-        （2026-10-15 MAAAdapter 运行截图校准；进入本体列表后确认开启）
+        （2026-10-15 DeviceAdapter 运行截图校准；进入本体列表后确认开启）
         本体名字 OCR roi x[160,290] y[cy+12,cy+50]
         一键选择 (1203,481) 习合开始模板 习合开始.png（蓝才命中）
         确认弹窗 确认 (785,630)；返回箭头 (141,25)；跳动画安全点 (290,550)
@@ -28,14 +28,14 @@
 
 import time
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from ..flow_control import FlowAborted
 
 _MAX_NO_PROGRESS = 3  # 连续三次未完成习合才停止；成功一次即清零
 
 
 class SugarMixin:
-    """炼糖。依赖宿主类的 navigate_to_stream、maa。"""
+    """炼糖。依赖宿主类的 navigate_to_stream、device。"""
 
     def sugar_stream(self, dry_run: bool = False):
         """
@@ -83,20 +83,20 @@ class SugarMixin:
         """打开筛选面板并选过滤项。
         mode: "swords"（全刀剑，炼糖用）/ "supplies"（杂物四项）。
         supplies 先点「取消筛选」清场再点选，进来什么状态都不挑。"""
-        self.maa.click(Point(*self._FILTER_OPEN))
+        self.device.click(Point(*self._FILTER_OPEN))
         time.sleep(1.0)
         if mode == "supplies":
-            self.maa.click(Point(*self._FILTER_CLEAR))
+            self.device.click(Point(*self._FILTER_CLEAR))
             time.sleep(0.6)
             for x, y in self._FILTER_SUPPLIES:
-                self.maa.click(Point(x, y))
+                self.device.click(Point(x, y))
                 time.sleep(0.5)
         else:
-            self.maa.click(Point(*self._FILTER_SORT_BY_KIND))
+            self.device.click(Point(*self._FILTER_SORT_BY_KIND))
             time.sleep(0.8)
-            self.maa.click(Point(*self._FILTER_SWORDS))
+            self.device.click(Point(*self._FILTER_SWORDS))
             time.sleep(0.8)
-        self.maa.click(Point(*self._FILTER_OK))
+        self.device.click(Point(*self._FILTER_OK))
         time.sleep(1.5)
 
     def _inbox_claim_stream(self, dry_run: bool, filter_mode: str = "swords"):
@@ -119,53 +119,53 @@ class SugarMixin:
 
         # 筛选（收刀还是收杂物看 filter_mode）→ 确定
         from ..game_state import begin_operation, confirm_operation
-        boundary = begin_operation(self.maa)
+        boundary = begin_operation(self.device)
         self._apply_inbox_filter(filter_mode)
-        listed = confirm_operation(self.maa, boundary, "inbox_list", timeout=2.0)
+        listed = confirm_operation(self.device, boundary, "inbox_list", timeout=2.0)
         selected = boundary.get("result_filter", "")
         matching_filter = selected == "2" if filter_mode == "swords" else bool(selected) and "2" not in selected.split(",")
         entries = boundary.get("result_body", {}).get("receive") if listed is True and matching_filter else None
         if entries is not None and not entries:
             yield "[炼糖·收件箱] 当前筛选下没有待领邮件，收工"
-            self.maa.click(Point(1248, 32))
+            self.device.click(Point(1248, 32))
             time.sleep(1.0)
             return "empty"
 
-        self.maa.screenshot(force=True)
-        go = self.maa.template_match(
+        self.device.screenshot(force=True)
+        go = self.device.template_match(
             "收件箱一键领取.png",
             roi_4to4(1080, 540, 1275, 700), threshold=0.7)
         if not go:
             if entries is None:
                 raise FlowAborted("收件箱：未确认邮件为空，也没找到可领取按钮，停止操作")
             yield "[炼糖·收件箱] 还有待领邮件，但当前无法领取"
-            self.maa.click(Point(1248, 32))  # 收箱子
+            self.device.click(Point(1248, 32))  # 收箱子
             time.sleep(1.0)
             return "blocked"
-        claim_boundary = begin_operation(self.maa)
-        self.maa.click(go)
+        claim_boundary = begin_operation(self.device)
+        self.device.click(go)
         time.sleep(2.5)
 
         result = None
 
         # 奖励确认窗 → 关 X
-        self.maa.screenshot(force=True)
-        if self.maa.ocr("奖励确认", roi_4to4(500, 40, 780, 100)):
-            self.maa.click(Point(1144, 48))
+        self.device.screenshot(force=True)
+        if self.device.ocr("奖励确认", roi_4to4(500, 40, 780, 100)):
+            self.device.click(Point(1144, 48))
             time.sleep(1.5)
             yield "[炼糖·收件箱] 领了一批，奖励确认已关"
             result = "claimed"
 
         # 可能蹦购买详情（劝氪金）→ 关 X
-        self.maa.screenshot(force=True)
-        if self.maa.ocr("购买详情", roi_4to4(500, 140, 780, 200)):
-            self.maa.click(Point(972, 154))
+        self.device.screenshot(force=True)
+        if self.device.ocr("购买详情", roi_4to4(500, 140, 780, 200)):
+            self.device.click(Point(972, 154))
             time.sleep(1.5)
             yield "[炼糖·收件箱] 所持满了蹦氪金窗，已关（领不动的先躺箱里）"
             result = "blocked"
 
         if result is None:
-            claimed = confirm_operation(self.maa, claim_boundary, "inbox_claim", timeout=2.0)
+            claimed = confirm_operation(self.device, claim_boundary, "inbox_claim", timeout=2.0)
             if claimed is True:
                 yield "[炼糖·收件箱] 游戏已确认领取邮件"
                 result = "claimed"
@@ -173,7 +173,7 @@ class SugarMixin:
                 raise FlowAborted("收件箱：点击领取后未确认领到邮件，停止操作，不再反复往返")
 
         # 收箱子
-        self.maa.click(Point(1248, 32))
+        self.device.click(Point(1248, 32))
         time.sleep(1.0)
         return result
 
@@ -212,10 +212,10 @@ class SugarMixin:
             raise FlowAborted("炼糖：到达强化失败，停止操作")
         time.sleep(1.5)
 
-        tab = self.maa.template_match("习合.png", threshold=0.75)
+        tab = self.device.template_match("习合.png", threshold=0.75)
         if not tab:
             raise FlowAborted("炼糖：没找到习合标签，停止操作")
-        self.maa.click(tab)
+        self.device.click(tab)
         time.sleep(2.0)
 
         successes = 0
@@ -225,7 +225,7 @@ class SugarMixin:
         while True:
             if stalled >= _MAX_NO_PROGRESS:
                 raise FlowAborted("炼糖：连续 3 次重选都没能完成习合，停止操作，未确认喂完")
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if not in_materials:
                 yield from self._sugar_ensure_filter_stream()
                 body = yield from self._sugar_find_body_stream(skip_unlocked_seven=skip_unlocked_seven)
@@ -234,77 +234,77 @@ class SugarMixin:
                            if skip_unlocked_seven else "[炼糖·习合] 本轮没有可继续喂的本体")
                     break
                 btn, body_locked = body
-                self.maa.click(btn)
+                self.device.click(btn)
                 time.sleep(2.0)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if not self._sugar_materials_visible():
                     # 可能被突然蹦出的弹窗挡了：能关就关，再确认一次
                     self._sugar_close_popup()
                     time.sleep(1.0)
-                    self.maa.screenshot(force=True)
+                    self.device.screenshot(force=True)
                     if not self._sugar_materials_visible():
                         yield "[炼糖·习合] 点了选择但没进素材界面，返回重选"
-                        self.maa.click(Point(141, 25))
+                        self.device.click(Point(141, 25))
                         time.sleep(1.5)
                         stalled += 1
                         continue
                 in_materials = True
                 if dry_run:
                     yield "[炼糖·习合] （演习）已进入符合条件本体的素材界面，不动手"
-                    self.maa.click(Point(141, 25))
+                    self.device.click(Point(141, 25))
                     return 0
 
             # 满乱舞后按钮会变灰，仍是素材页；返回后换新的第一行。
-            select = self.maa.template_match("一键选择.png", threshold=0.75)
+            select = self.device.template_match("一键选择.png", threshold=0.75)
             if not select:
-                self.maa.click(Point(141, 25))
+                self.device.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
                 stalled += 1
                 continue
-            self.maa.click(select)
+            self.device.click(select)
             time.sleep(1.5)
-            self.maa.screenshot(force=True)
-            go = self.maa.template_match("习合开始.png", threshold=0.7)
+            self.device.screenshot(force=True)
+            go = self.device.template_match("习合开始.png", threshold=0.7)
             if not go:
-                self.maa.click(Point(141, 25))
+                self.device.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
                 stalled += 1
                 continue
-            self.maa.click(go)
+            self.device.click(go)
             # 确认弹窗偶尔慢半拍，或这一记点击被选人动画吞掉（2026-09-12 实测
             # 翻车点：弹窗没蹦出来，素材界面顶着"习合确认不在"被误判翻车）。
             # 连看三轮：没弹窗但蓝钮还亮着就补点，补出弹窗为止。
             confirmed = False
             for _ in range(3):
                 time.sleep(2.0)
-                self.maa.screenshot(force=True)
-                if self.maa.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
+                self.device.screenshot(force=True)
+                if self.device.ocr("是否确认", roi_4to4(350, 100, 930, 160)):
                     confirmed = True
                     break
-                again = self.maa.template_match("习合开始.png", threshold=0.7)
+                again = self.device.template_match("习合开始.png", threshold=0.7)
                 if again:
-                    self.maa.click(again)
+                    self.device.click(again)
             if not confirmed:
-                self.maa.screenshot(force=True)
-                if self.maa.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)):
+                self.device.screenshot(force=True)
+                if self.device.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)):
                     # 还坐在素材界面上：弹窗压根没来，直接返回重选这个本体
                     yield "[炼糖·习合] 习合开始点了没反应（弹窗没蹦出来），返回重选"
                 else:
                     # 蹦了别的窗（不是习合确认）：不替玩家按确认，能关就关
                     yield "[炼糖·习合] 没等到确认弹窗，关掉可能的弹窗后重选"
                     self._sugar_close_popup()
-                self.maa.click(Point(141, 25))
+                self.device.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
                 stalled += 1
                 continue
             from ..game_state import begin_operation, confirm_operation
-            boundary = begin_operation(self.maa)
-            self.maa.click(Point(785, 630))
+            boundary = begin_operation(self.device)
+            self.device.click(Point(785, 630))
 
-            outcome = confirm_operation(self.maa, boundary, "union", timeout=8.0)
+            outcome = confirm_operation(self.device, boundary, "union", timeout=8.0)
             if outcome is not True:
                 reason = ("未确认习合结果，停止操作，不再重复消耗素材"
                           if outcome is None else "游戏拒绝本次习合，停止操作")
@@ -315,14 +315,14 @@ class SugarMixin:
             yield f"[炼糖·习合] 完成第 {successes} 轮习合"
             for _ in range(12):
                 time.sleep(1.5)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if self._sugar_materials_visible():
                     break
-                self.maa.click(Point(290, 550))
+                self.device.click(Point(290, 550))
             else:
                 raise FlowAborted("炼糖：习合已完成，但回不到素材界面，停止操作，未确认喂完")
             if not body_locked:
-                self.maa.click(Point(141, 25))
+                self.device.click(Point(141, 25))
                 time.sleep(1.5)
                 in_materials = False
 
@@ -331,7 +331,7 @@ class SugarMixin:
 
     @staticmethod
     def _sugar_row_locked(image, center_y) -> bool | None:
-        """习合列表锁底色；2026-10-16 MAAAdapter 1280×720 BGR 运行帧校准。"""
+        """习合列表锁底色；2026-10-16 DeviceAdapter 1280×720 BGR 运行帧校准。"""
         if image is None or image.shape != (720, 1280, 3):
             return None
         region = image[center_y - 35:center_y + 35, 85:94]
@@ -348,30 +348,30 @@ class SugarMixin:
         from .sword_inventory import parse_levels_cell
 
         while True:
-            before = self.maa.screenshot(force=True)
+            before = self.device.screenshot(force=True)
             if before is None:
                 raise FlowAborted("炼糖：本体列表截图失败，停止操作")
-            self.maa.swipe(640, 240, 640, 600, 600)
+            self.device.swipe(640, 240, 640, 600, 600)
             time.sleep(1.5)
-            after = self.maa.screenshot(force=True)
+            after = self.device.screenshot(force=True)
             if after is None:
                 raise FlowAborted("炼糖：翻页后截图失败，停止操作")
             if np.array_equal(before[125:690, 1258:1278], after[125:690, 1258:1278]):
                 break
         unreadable = False
         while True:
-            image = self.maa.screenshot(force=True)
-            tokens = self.maa.ocr_all(roi_4to4(1180, 121, 1255, 690), image=image)
+            image = self.device.screenshot(force=True)
+            tokens = self.device.ocr_all(roi_4to4(1180, 121, 1255, 690), image=image)
             buttons = [point for text, point in tokens
                        if "".join(text.split()) == "选择" and 164 <= point.y <= 645]
             if not buttons:
                 for center_y in (166, 268, 369, 470, 572):
-                    button = self.maa.template_match(
+                    button = self.device.template_match(
                         "选择png.png", roi_4to4(1150, center_y - 45, 1275, center_y + 45), threshold=0.75)
                     if button:
                         buttons.append(button)
             if not buttons:
-                if self.maa.ocr("乱舞", roi_4to4(540, 120, 665, 690)):
+                if self.device.ocr("乱舞", roi_4to4(540, 120, 665, 690)):
                     raise FlowAborted("炼糖：列表仍有刀剑，但未识别到选择按钮，停止操作，未确认喂完")
                 return None
             for row_no, button in enumerate(sorted(buttons, key=lambda point: point.y), 1):
@@ -381,17 +381,17 @@ class SugarMixin:
                 if locked is True:
                     return button, True
                 level_roi = roi_4to4(540, button.y - 46, 665, button.y + 8)
-                levels = parse_levels_cell(self.maa.ocr_all(level_roi, image=image))
+                levels = parse_levels_cell(self.device.ocr_all(level_roi, image=image))
                 level = levels.get("tou_level")
                 if locked is None or level is None:
                     # 滑动回弹没停稳就截图，顶部的行必糊（2026-10-19 第一行
                     # 稳定碎成渣）：等一拍重拍重读一次，还读不清才放弃这行
                     time.sleep(0.8)
-                    retry_image = self.maa.screenshot(force=True)
+                    retry_image = self.device.screenshot(force=True)
                     retry_locked = self._sugar_row_locked(retry_image, button.y)
                     if retry_locked is True:
                         return button, True
-                    retry_levels = parse_levels_cell(self.maa.ocr_all(
+                    retry_levels = parse_levels_cell(self.device.ocr_all(
                         level_roi, image=retry_image))
                     if retry_locked is not None:
                         locked = retry_locked
@@ -406,9 +406,9 @@ class SugarMixin:
                     continue
                 return button, False
             position = image[125:690, 1258:1278].copy()
-            self.maa.swipe(640, 600, 640, 240, 600)
+            self.device.swipe(640, 600, 640, 240, 600)
             time.sleep(1.5)
-            after = self.maa.screenshot(force=True)
+            after = self.device.screenshot(force=True)
             if after is None:
                 raise FlowAborted("炼糖：翻页后截图失败，停止操作")
             if np.array_equal(position, after[125:690, 1258:1278]):
@@ -418,7 +418,7 @@ class SugarMixin:
 
     def _sugar_filter_checked(self) -> bool | None:
         """读取同源 BGR 运行帧里的红勾；截图或勾选框不明确时返回未知。"""
-        image = self.maa.screenshot()
+        image = self.device.screenshot()
         if image is None or image.shape != (720, 1280, 3):
             return None
         region = image[93:112, 133:151]
@@ -429,19 +429,19 @@ class SugarMixin:
         return bool(red > 10)
 
     def _sugar_ensure_filter_stream(self):
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
         label = roi_4to4(155, 80, 405, 120)
-        if not self.maa.ocr("隐藏无法习合的刀剑", label):
+        if not self.device.ocr("隐藏无法习合的刀剑", label):
             raise FlowAborted("炼糖：未确认习合本体列表，停止操作")
         checked = self._sugar_filter_checked()
         if checked is None:
             raise FlowAborted("炼糖：未识别隐藏无法习合的刀剑勾选状态，停止操作")
         if checked:
             return
-        self.maa.click(Point(142, 102))
+        self.device.click(Point(142, 102))
         time.sleep(1.5)
-        self.maa.screenshot(force=True)
-        if (not self.maa.ocr("隐藏无法习合的刀剑", label)
+        self.device.screenshot(force=True)
+        if (not self.device.ocr("隐藏无法习合的刀剑", label)
                 or self._sugar_filter_checked() is not True):
             raise FlowAborted("炼糖：未能开启隐藏无法习合的刀剑，停止操作")
         yield "[炼糖·习合] 已自动开启隐藏无法习合的刀剑"
@@ -450,14 +450,14 @@ class SugarMixin:
         """挡路的弹窗能认出 X 就点 X；认不出就点弹窗左下的取消位
         （实机校准 (497,628)，这游戏的弹窗规矩左钮=取消/关闭这类反义动作，
         确认类的右钮绝对不碰）。都没关掉就留给后续步骤自己判断。"""
-        self.maa.screenshot(force=True)
-        x = self.maa.template_match("通用_关闭.png", threshold=0.7)
+        self.device.screenshot(force=True)
+        x = self.device.template_match("通用_关闭.png", threshold=0.7)
         if x:
-            self.maa.click(x)
+            self.device.click(x)
         else:
-            self.maa.click(Point(497, 628))
+            self.device.click(Point(497, 628))
         time.sleep(1.0)
 
     def _sugar_materials_visible(self):
         # 文字可同时识别亮/灰按钮，不能用亮按钮判断满级后的返回状态。
-        return bool(self.maa.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)))
+        return bool(self.device.ocr("一键选择", roi_4to4(1120, 435, 1275, 525)))

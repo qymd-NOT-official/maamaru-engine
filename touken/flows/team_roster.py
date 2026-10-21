@@ -48,7 +48,7 @@ from pathlib import Path
 
 from .. import sword_db
 from ..formation_identity import GROWTH_STATS, growth_stats_match
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from ..roi_overrides import get_roi
 from ..roi_registry import FORMATION_ROW_DEFAULTS
 from ..team_state import injury_from_ocr_tokens
@@ -495,7 +495,7 @@ def _roster_facts_from_events(events, team_no, *, now=None):
 
 
 class TeamRosterMixin:
-    """编队页只读点名。依赖宿主类的 navigate_to_stream、maa、config、record_event。"""
+    """编队页只读点名。依赖宿主类的 navigate_to_stream、device、config、record_event。"""
 
     def team_roster_stream(self, teams=None):
         """流式只读点名：逐部队切标签读六槽，落 team_roster.observed 事实。
@@ -530,9 +530,9 @@ class TeamRosterMixin:
             confirmed = False
             for attempt in (1, 2, 3):
                 yield f"[点名] 部队{team_no}：切标签（第 {attempt}/3 次）…"
-                self.maa.click(Point(*_TEAM_TAB[team_no]))
+                self.device.click(Point(*_TEAM_TAB[team_no]))
                 time.sleep(1.2)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 label_seen = (self._read_row_label(_ROW_CY[0]),
                               self._read_row_label(_ROW_CY[5]))
                 if label_seen == (team_no, team_no):
@@ -576,7 +576,7 @@ class TeamRosterMixin:
     def _roster_game_events(self):
         """JSON 事实事件源（注入缝：无 ADB 环境/测试可覆写）。"""
         from ..game_state import available_events
-        return available_events(self.maa)
+        return available_events(self.device)
 
     def _roster_facts_by_slot(self):
         """当前页六槽的 JSON 事实 {槽号: 事实}；不可用返回 None。
@@ -619,7 +619,7 @@ class TeamRosterMixin:
                           for s in slots):
             for _attempt in range(2):
                 time.sleep(0.6)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 for s in slots:
                     if s["slot_status"] == "occupied" and s["injury"] is None:
                         cy = _ROW_CY[s["slot"] - 1]
@@ -816,7 +816,7 @@ class TeamRosterMixin:
             self._roster_ocr_tokens(_shift(_INJURY_ROI, cy)))
         if hit:
             return _INJURY_ENUM[hit]
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         if img is not None and stamps:
             scores = {}
             for key, stamp in stamps.items():
@@ -824,7 +824,7 @@ class TeamRosterMixin:
                 if not tpl:
                     continue
                 enum = _INJURY_ENUM.get(key, key)
-                scores[enum] = self.maa.template_match_score(
+                scores[enum] = self.device.template_match_score(
                     tpl, roi=roi_4to4(*_shift(_INJURY_ROI, cy)))
             ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
             if ranked and ranked[0][1] >= _ROSTER_STAMP_THRESHOLD:
@@ -841,7 +841,7 @@ class TeamRosterMixin:
 
     def _sakura_hit(self, cy):
         """白樱花（极化标记）编队页同源模板命中检测。"""
-        return bool(self.maa.template_match(
+        return bool(self.device.template_match(
             _SAKURA_TEMPLATE, roi=roi_4to4(*_shift(_SAKURA_ROI, cy)),
             threshold=_SAKURA_THRESHOLD))
 
@@ -855,7 +855,7 @@ class TeamRosterMixin:
         返回 False → 走 unknown，绝不判空。
         """
         import cv2
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         if img is None:
             return False
         x0, y0, x1, y1 = _shift(_CARD_REGION, cy)
@@ -878,10 +878,10 @@ class TeamRosterMixin:
              "top_type": None, "top_score": None, "conclusion": "char_only"}
             花数通道由 _match_slot_flowers 在确认刀种后补齐。
         """
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         type_raw = None
         if img is not None:
-            for text, _pt in self.maa.ocr_all(
+            for text, _pt in self.device.ocr_all(
                     roi_4to4(*_badge_cell(cy)), img) or []:
                 for ch in _BADGE_TYPE_OF:
                     if ch in text:
@@ -901,7 +901,7 @@ class TeamRosterMixin:
         load_flower_templates（一览盘点复用同一套模板库）。
         """
         return load_flower_templates(
-            getattr(self.maa, "resource_dir", "resource/base"))
+            getattr(self.device, "resource_dir", "resource/base"))
 
     def _match_slot_flowers(self, cy, badge, sword_type):
         """花瓣数量通道：在确认刀种的模板子集里匹配当前花数。
@@ -921,7 +921,7 @@ class TeamRosterMixin:
             badge["top_type"] = char_type
             return badge
         confirmed_type = sword_type or char_type
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         region = None
         if img is not None:
             x0, y0, x1, y1 = _badge_cell(cy)
@@ -964,10 +964,10 @@ class TeamRosterMixin:
 
     def _roster_ocr_tokens(self, roi):
         """本链路专用 OCR token 入口（保留坐标，供按 y 位置取数）。"""
-        img = self.maa.screenshot()
+        img = self.device.screenshot()
         if img is None:
             return []
-        return self.maa.ocr_all(roi_4to4(*roi), img) or []
+        return self.device.ocr_all(roi_4to4(*roi), img) or []
 
 
 def _unknown_fields(name_status, sid, sword_type, level, fatigue, survival,

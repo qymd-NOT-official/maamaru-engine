@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from touken.flows.login import LoginMixin
 from touken.flows.daily import DailyMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 class UpdateMaa:
@@ -46,14 +46,14 @@ class UpdateMaa:
 
 
 class UpdateFlow(LoginMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.current_location = None
 
 
 class DailyUpdateFlow(DailyMixin, LoginMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.current_location = None
         self.sweeps = 0
 
@@ -107,8 +107,8 @@ class GameLaunchMaa:
 
 
 class GameLaunchFlow(DailyMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {"daily": {"logout": {"package": "com.youzu.djlw"}}}
 
 
@@ -146,39 +146,39 @@ def generator_result(generator):
 
 class GameUpdateRecoveryTests(unittest.TestCase):
     def test_prompt_guard_requires_update_and_restart_words(self):
-        maa = UpdateMaa()
-        flow = UpdateFlow(maa)
+        device = UpdateMaa()
+        flow = UpdateFlow(device)
         self.assertTrue(flow._game_update_prompt_visible())
-        maa.stage = "login"
+        device.stage = "login"
         self.assertFalse(flow._game_update_prompt_visible())
 
     def test_recovers_through_login_and_primary_line(self):
-        maa = UpdateMaa("线路一")
-        flow = UpdateFlow(maa)
+        device = UpdateMaa("线路一")
+        flow = UpdateFlow(device)
         with patch("touken.flows.login.time.sleep"):
             self.assertTrue(generator_result(flow.recover_game_update_stream()))
-        self.assertEqual(len(maa.clicks), 3)
+        self.assertEqual(len(device.clicks), 3)
         self.assertEqual(flow.current_location, "本丸")
 
     def test_falls_back_to_secondary_line(self):
-        maa = UpdateMaa("线路二")
-        flow = UpdateFlow(maa)
+        device = UpdateMaa("线路二")
+        flow = UpdateFlow(device)
         with patch("touken.flows.login.time.sleep"):
             self.assertTrue(generator_result(flow.recover_game_update_stream()))
-        self.assertEqual(len(maa.clicks), 3)
+        self.assertEqual(len(device.clicks), 3)
         self.assertEqual(flow.current_location, "本丸")
 
     def test_daily_gate_recovers_before_navigation_and_cleans_popups(self):
-        maa = UpdateMaa("线路一")
-        flow = DailyUpdateFlow(maa)
+        device = UpdateMaa("线路一")
+        flow = DailyUpdateFlow(device)
         with patch("touken.flows.login.time.sleep"):
             self.assertTrue(generator_result(flow._daily_update_gate()))
         self.assertEqual(flow.sweeps, 1)
         self.assertEqual(flow.current_location, "本丸")
 
     def test_game_launch_prefers_adb_and_never_clicks_desktop(self):
-        maa = GameLaunchMaa(adb_ok=True, safe_icon=True)
-        flow = GameLaunchFlow(maa)
+        device = GameLaunchMaa(adb_ok=True, safe_icon=True)
+        flow = GameLaunchFlow(device)
         with patch("touken.flows.daily.time.sleep"):
             messages = []
             generator = flow._ensure_game_started()
@@ -189,32 +189,32 @@ class GameUpdateRecoveryTests(unittest.TestCase):
                     result = stop.value
                     break
         self.assertTrue(result)
-        self.assertFalse(maa.clicks)
-        self.assertTrue(any("resolve-activity" in call for call in maa.adb_calls))
-        self.assertTrue(any("start" in call for call in maa.adb_calls))
+        self.assertFalse(device.clicks)
+        self.assertTrue(any("resolve-activity" in call for call in device.adb_calls))
+        self.assertTrue(any("start" in call for call in device.adb_calls))
         self.assertTrue(any("绕过 MuMu 桌面遮挡" in msg for msg in messages))
 
     def test_game_launch_accepts_existing_login_page_without_adb(self):
-        maa = GameLaunchMaa(adb_ok=True, safe_icon=False)
-        maa.stage = "login"
-        flow = GameLaunchFlow(maa)
+        device = GameLaunchMaa(adb_ok=True, safe_icon=False)
+        device.stage = "login"
+        flow = GameLaunchFlow(device)
         self.assertTrue(generator_result(flow._ensure_game_started()))
-        self.assertFalse(maa.adb_calls)
-        self.assertFalse(maa.clicks)
+        self.assertFalse(device.adb_calls)
+        self.assertFalse(device.clicks)
 
     def test_game_launch_falls_back_only_to_verified_icon(self):
-        maa = GameLaunchMaa(adb_ok=False, safe_icon=True)
-        flow = GameLaunchFlow(maa)
+        device = GameLaunchMaa(adb_ok=False, safe_icon=True)
+        flow = GameLaunchFlow(device)
         with patch("touken.flows.daily.time.sleep"):
             result = generator_result(flow._ensure_game_started())
         self.assertTrue(result)
-        self.assertEqual(maa.clicks, [Point(220, 220)])
+        self.assertEqual(device.clicks, [Point(220, 220)])
 
     def test_game_launch_stops_safely_when_ad_covers_icon(self):
-        maa = GameLaunchMaa(adb_ok=False, safe_icon=False)
-        flow = GameLaunchFlow(maa)
+        device = GameLaunchMaa(adb_ok=False, safe_icon=False)
+        flow = GameLaunchFlow(device)
         messages = list(flow._ensure_game_started())
-        self.assertFalse(maa.clicks)
+        self.assertFalse(device.clicks)
         self.assertTrue(any("没有在当前画面盲点" in msg for msg in messages))
 
     def test_daily_stops_before_login_when_game_did_not_start(self):

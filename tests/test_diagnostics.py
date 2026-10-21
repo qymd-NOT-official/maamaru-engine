@@ -88,7 +88,7 @@ class DiagnosticBundleTests(unittest.TestCase):
             connection.execute("INSERT INTO chat_history VALUES (1, 'private chat must stay out')")
             connection.commit()
         (debug / "asst.log").write_text(
-            "maa api_key=debug-secret Authorization: Bearer bearer-secret sk-1234567890abcdef",
+            "device api_key=debug-secret Authorization: Bearer bearer-secret sk-1234567890abcdef",
             encoding="utf-8",
         )
         (data / "config").mkdir()

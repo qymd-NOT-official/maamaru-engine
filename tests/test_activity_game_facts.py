@@ -66,12 +66,12 @@ def test_activity_reader_prefers_game_points_even_when_no_ocr_config(monkeypatch
     from touken.flows.raid import RaidMixin
     from touken.flows.hanafuda import HanafudaMixin
     host=RaidMixin() if mechanic=="raid" else HanafudaMixin()
-    host.maa=Mock()
+    host.device=Mock()
     es=[*binding("allout" if mechanic=="raid" else "koikoi"),
         event("/sally",{"status":0,"point":{"123":600}},1002)]
     monkeypatch.setattr(gs,"available_events",lambda _:es)
     monkeypatch.setattr(gs.time,"time",lambda:1003)
-    host.maa.ocr_all.side_effect=AssertionError("known points require no OCR")
+    host.device.ocr_all.side_effect=AssertionError("known points require no OCR")
     reader=host._read_shells_total if mechanic=="raid" else host._read_tama_total
     assert reader({})==600
 
@@ -83,7 +83,7 @@ def test_edo_missing_key_readings_never_block_departure_or_publish_estimates(mon
     host.config={"edocastle":{"map_archive":str(Path("resource/base/maps/edocastle-4.json").resolve()),
         "ui_title":{"template":"title"},"activity_entry":{"template":"entry"}},
         "team_select":{"teams":{"3":[1,1]}}}
-    host.maa=Mock()
+    host.device=Mock()
     host.current_location="出阵"
     host.navigate_to_stream=lambda _:iter(())
     host.set_progress=Mock()
@@ -113,7 +113,7 @@ def test_edo_missing_key_readings_never_block_departure_or_publish_estimates(mon
 @pytest.mark.parametrize("receipt",[False,{"count":1,"spent":900},{"count":1,"spent":None}])
 def test_refill_game_result_overrides_sticky_button_and_config_price(monkeypatch,receipt):
     from test_battle_components import Flow,FakeMaa
-    from touken.maa_adapter import Point
+    from touken.device_adapter import Point
     from touken.flows import battle as module
     host=Flow(FakeMaa(templates={"refill":Point(100,100),"recover":Point(200,200),"confirm":Point(300,300)}))
     host.record_event=Mock(return_value=1)
@@ -138,11 +138,11 @@ def test_refill_game_result_overrides_sticky_button_and_config_price(monkeypatch
 def test_single_popup_game_rejection_cannot_be_overridden_by_disappearance(monkeypatch):
     from test_battle_components import _RefillMaa,_SafeDepartHost,_REFILL_CFG,_drain_chain
     from touken.flows import battle as module
-    maa=_RefillMaa()
-    host=_SafeDepartHost(maa=maa)
+    device=_RefillMaa()
+    host=_SafeDepartHost(device=device)
     monkeypatch.setattr(gs,"confirm_ticket",lambda *_:False)
     monkeypatch.setattr(module.time,"sleep",lambda _:None)
     messages,result=_drain_chain(host,_REFILL_CFG,auto_refill=True)
     assert result==(False,False)
-    assert maa.clicked.count(_RefillMaa.CONFIRM)==1
+    assert device.clicked.count(_RefillMaa.CONFIRM)==1
     assert any("未受理" in m for m in messages)

@@ -13,14 +13,14 @@
   signin.py:78-84  _close_all：点公告 X (1195,30) → 睡 1.5s → current_location=None
 
 本测试对**新实现**（signin_stream 薄壳 → run_flow 跑 resource/base/flows/signin.json）
-断言 maa 调用序列与上面旧实现完全一致（五个分支全覆）。
+断言 device 调用序列与上面旧实现完全一致（五个分支全覆）。
 """
 
 import unittest
 from unittest.mock import patch
 
 from touken.flows.signin import SigninMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.navigator import NavigationMixin
 
 ANNOUNCE = Point(1150, 300)   # OCR「公告」认到的入口
@@ -34,7 +34,7 @@ OPEN_MENU_CALLS = [
 
 
 class ScriptedMaa:
-    """按剧本回应识别的假 MAAAdapter，同时记录每次调用。"""
+    """按剧本回应识别的假 DeviceAdapter，同时记录每次调用。"""
 
     def __init__(self, ocr_plan):
         self.calls = []
@@ -71,18 +71,18 @@ class ScriptedMaa:
 class SigninAgent(NavigationMixin, SigninMixin):
     """真导航层 + 薄壳签到的最小宿主。"""
 
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {}
         self.current_location = None
 
 
 def run_signin(plan):
-    maa = ScriptedMaa(plan)
-    agent = SigninAgent(maa)
+    device = ScriptedMaa(plan)
+    agent = SigninAgent(device)
     with patch("touken.flow_engine._sleep"):
         messages = list(agent.signin_stream())
-    return maa.calls, messages, agent
+    return device.calls, messages, agent
 
 
 class SigninFlowParityTests(unittest.TestCase):
@@ -174,16 +174,16 @@ class SigninFlowParityTests(unittest.TestCase):
         # 目录没打开：旧 :28-30 放弃。exists/模板全 False 让 _open_menu
         # 转满 10 圈自救（期间的救援点击新旧完全一致，同属 _open_menu），
         # 关键是：从没 OCR 过公告 = 流程停在开目录这一步
-        maa = ScriptedMaa([])
-        maa.exists = lambda template, roi=None, threshold=0.7: (
-            maa.calls.append(("exists", template)), False)[1]
-        maa.template_match = lambda template, roi=None, threshold=0.7: (
-            maa.calls.append(("template_match", template)), None)[1]
-        agent = SigninAgent(maa)
+        device = ScriptedMaa([])
+        device.exists = lambda template, roi=None, threshold=0.7: (
+            device.calls.append(("exists", template)), False)[1]
+        device.template_match = lambda template, roi=None, threshold=0.7: (
+            device.calls.append(("template_match", template)), None)[1]
+        agent = SigninAgent(device)
         with patch("touken.flow_engine._sleep"):
             messages = list(agent.signin_stream())
-        self.assertEqual(maa.calls[0], ("screenshot", True))
-        self.assertFalse(any(c[0] == "ocr" for c in maa.calls))
+        self.assertEqual(device.calls[0], ("screenshot", True))
+        self.assertFalse(any(c[0] == "ocr" for c in device.calls))
         self.assertTrue(any("目录没打开" in m for m in messages))
 
 

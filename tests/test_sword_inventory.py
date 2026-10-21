@@ -30,7 +30,7 @@ def _tok(text, x, y):
 
 
 class _Pt:
-    """仿 maa.ocr_all 结果里的点（.x/.y 属性）"""
+    """仿 device.ocr_all 结果里的点（.x/.y 属性）"""
     def __init__(self, x, y):
         self.x, self.y = x, y
 
@@ -674,39 +674,39 @@ class ScanListPageGateTests(unittest.TestCase):
             return object() if self._title_hit else None
 
     def _scan(self, cell_map, legacy_tokens, title_hit):
-        maa = self._FakeMaa(_inv_mod._LIST_ROI, cell_map, legacy_tokens,
+        device = self._FakeMaa(_inv_mod._LIST_ROI, cell_map, legacy_tokens,
                             title_hit)
         inst = _inv_mod.SwordInventoryMixin.__new__(_inv_mod.SwordInventoryMixin)
-        inst.maa = maa
-        return inst._scan_list_page(img=None), maa
+        inst.device = device
+        return inst._scan_list_page(img=None), device
 
     def test_named_cells_skip_legacy_entirely(self):
         # 逐格有名字命中：不碰整列 OCR，不兜底
-        (parsed, fell_back), maa = self._scan(
+        (parsed, fell_back), device = self._scan(
             {_inv_mod.ROW_CELL_ROIS[1]["name"]: [_tok("安宅切", 280, 217)]},
             ROW_ATAGI, title_hit=True)
         self.assertFalse(fell_back)
-        self.assertEqual(maa.list_ocr_calls, 0)
+        self.assertEqual(device.list_ocr_calls, 0)
         self.assertEqual([r["sword_id"] for r in parsed["rows"]],
                          ["touken_250_atagi_kiri"])
 
     def test_blank_cells_with_title_fall_back_to_legacy(self):
         # 逐格全落空 + fail 行 + 标题在 → 退回整列老路径
-        (parsed, fell_back), maa = self._scan(
+        (parsed, fell_back), device = self._scan(
             {_inv_mod.ROW_CELL_ROIS[2]["name"]: [_tok("选择部队", 280, 420)]},
             ROW_ATAGI, title_hit=True)
         self.assertTrue(fell_back)
-        self.assertEqual(maa.list_ocr_calls, 1)
+        self.assertEqual(device.list_ocr_calls, 1)
         self.assertEqual([r["sword_id"] for r in parsed["rows"]],
                          ["touken_250_atagi_kiri"])
 
     def test_blank_cells_without_title_stay_blank(self):
         # 部队选择页情形：标题不在，整列读出的刀名是假行，不得采纳
-        (parsed, fell_back), maa = self._scan(
+        (parsed, fell_back), device = self._scan(
             {_inv_mod.ROW_CELL_ROIS[2]["name"]: [_tok("选择部队", 280, 420)]},
             ROW_ATAGI, title_hit=False)
         self.assertFalse(fell_back)
-        self.assertEqual(maa.list_ocr_calls, 1)   # 整列读了但结果被门禁挡下
+        self.assertEqual(device.list_ocr_calls, 1)   # 整列读了但结果被门禁挡下
         self.assertEqual([r["sword_id"] for r in parsed["rows"]], [None])
 
     def test_double_blank_is_quiet_empty(self):
@@ -746,35 +746,35 @@ class RetryMissingDatesTests(unittest.TestCase):
         return row
 
     def _run(self, rows, batches):
-        maa = self._FakeMaa(batches)
+        device = self._FakeMaa(batches)
         inst = _inv_mod.SwordInventoryMixin.__new__(_inv_mod.SwordInventoryMixin)
-        inst.maa = maa
+        inst.device = device
         with patch("touken.flows.sword_inventory.time.sleep"):
             inst._retry_missing_dates(rows)
-        return maa
+        return device
 
     def test_first_attempt_success_no_retry(self):
         row = self._row()
-        maa = self._run([row], [[_tok("20262/12", 1062, 200)]])
+        device = self._run([row], [[_tok("20262/12", 1062, 200)]])
         self.assertEqual(row["kiwame_date"], "2026-2-12")
-        self.assertEqual(len(maa.rois), 1)
-        self.assertEqual(maa.rois[0], self.DATE_ROI)
+        self.assertEqual(len(device.rois), 1)
+        self.assertEqual(device.rois[0], self.DATE_ROI)
 
     def test_second_attempt_widens_roi(self):
         row = self._row()
-        maa = self._run([row], [[],
+        device = self._run([row], [[],
                                 [_tok("2026", 1062, 193),
                                  _tok("2/12", 1061, 216)]])
         self.assertEqual(row["kiwame_date"], "2026-2-12")
-        self.assertEqual(maa.force_shots, 2)   # 每次都强制刷帧
-        self.assertEqual(maa.rois[0], self.DATE_ROI)
-        self.assertEqual(maa.rois[1], (1017, 135, 1109, 238))  # 四边放宽 6px
+        self.assertEqual(device.force_shots, 2)   # 每次都强制刷帧
+        self.assertEqual(device.rois[0], self.DATE_ROI)
+        self.assertEqual(device.rois[1], (1017, 135, 1109, 238))  # 四边放宽 6px
 
     def test_gives_up_after_two_attempts(self):
         row = self._row()
-        maa = self._run([row], [[], []])
+        device = self._run([row], [[], []])
         self.assertIsNone(row["kiwame_date"])
-        self.assertEqual(len(maa.rois), 2)
+        self.assertEqual(len(device.rois), 2)
 
     def test_rows_without_date_roi_are_skipped(self):
         # 整列兜底行没有 _date_roi、已有日期的行、fail 行：都不重读
@@ -782,8 +782,8 @@ class RetryMissingDatesTests(unittest.TestCase):
         dated_row = self._row(kiwame_date="2026-2-12")
         fail_row = {"sword_id": None, "kiwame_date": None,
                     "_date_roi": self.DATE_ROI}
-        maa = self._run([legacy_row, dated_row, fail_row], [])
-        self.assertEqual(maa.rois, [])
+        device = self._run([legacy_row, dated_row, fail_row], [])
+        self.assertEqual(device.rois, [])
 
 
 class AvatarVerifyTests(unittest.TestCase):

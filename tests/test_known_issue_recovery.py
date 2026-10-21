@@ -11,7 +11,7 @@ from touken.flows.daily import (
     _shop_report_status,
 )
 from touken.flows.rewards import RewardsMixin
-from touken.maa_adapter import Point, _ocr_text_matches
+from touken.device_adapter import Point, _ocr_text_matches
 
 
 class FakeMaa:
@@ -39,11 +39,11 @@ class EquipWarningTests(unittest.TestCase):
     def test_warning_uses_prepare_and_returns_to_team_select(self):
         flow = BattleMixin()
         prepare = Point(420, 500)
-        flow.maa = FakeMaa({
+        flow.device = FakeMaa({
             "team/继续出阵.png": [Point(850, 500)],
             "team/整备刀装.png": [prepare],
         })
-        flow.maa.ocr_results = [Point(640, 29)]
+        flow.device.ocr_results = [Point(640, 29)]
 
         with patch("touken.flows.battle.time.sleep"):
             result = flow._cancel_equip_warning({
@@ -55,16 +55,16 @@ class EquipWarningTests(unittest.TestCase):
             })
 
         self.assertTrue(result)
-        self.assertEqual(flow.maa.clicked, [prepare])
+        self.assertEqual(flow.device.clicked, [prepare])
 
     def test_no_warning_does_nothing(self):
         flow = BattleMixin()
-        flow.maa = FakeMaa({})
+        flow.device = FakeMaa({})
         result = flow._cancel_equip_warning({
             "equip_warning_button": {"template": "team/继续出阵.png"}
         })
         self.assertIsNone(result)
-        self.assertEqual(flow.maa.clicked, [])
+        self.assertEqual(flow.device.clicked, [])
 
 
 class DailyReportTests(unittest.TestCase):
@@ -241,7 +241,7 @@ class ShopGiftTests(unittest.TestCase):
         class Flow(RewardsMixin):
             def __init__(self):
                 self.current_location = "万屋"
-                self.maa = Maa()
+                self.device = Maa()
                 self.config = {"shop": {"free_gift": {
                     "find_text": {"expected": "暖心", "roi": [0, 100, 700, 650]},
                     "claim_button": {"template": "领取.png"},
@@ -253,7 +253,7 @@ class ShopGiftTests(unittest.TestCase):
 
         flow = Flow()
         list(flow.claim_free_gift_stream())
-        rois = [roi for template, roi in flow.maa.template_rois
+        rois = [roi for template, roi in flow.device.template_rois
                 if template == "领取.png"]
         self.assertTrue(rois)
         for roi in rois:
@@ -282,7 +282,7 @@ class ShopGiftTests(unittest.TestCase):
         class Flow(RewardsMixin):
             def __init__(self):
                 self.current_location = "万屋"
-                self.maa = Maa()
+                self.device = Maa()
                 self.config = {"shop": {"free_gift": {
                     "find_text": {
                         "expected": "暖心",
@@ -296,12 +296,12 @@ class ShopGiftTests(unittest.TestCase):
 
         flow = Flow()
         list(flow.claim_free_gift_stream())
-        rois = [roi for template, roi in flow.maa.template_rois
+        rois = [roi for template, roi in flow.device.template_rois
                 if template == "领取.png"]
         self.assertTrue(rois)
         self.assertEqual((rois[0].x, rois[0].y, rois[0].w, rois[0].h),
                          (885, 265, 330, 95))
-        self.assertEqual([roi.x for expected, roi in flow.maa.ocr_rois
+        self.assertEqual([roi.x for expected, roi in flow.device.ocr_rois
                           if expected == "暖心"], [0, 700])
 
     class _ShopMaa:
@@ -339,11 +339,11 @@ class ShopGiftTests(unittest.TestCase):
             return False
 
     @staticmethod
-    def _shop_flow(maa):
+    def _shop_flow(device):
         class Flow(RewardsMixin):
             def __init__(self):
                 self.current_location = "万屋"
-                self.maa = maa
+                self.device = device
                 self.config = {"shop": {"free_gift": {
                     "find_text": {"expected": "暖心", "roi": [0, 100, 700, 650]},
                     "claim_button": {"template": "领取.png"},
@@ -367,8 +367,8 @@ class ShopGiftTests(unittest.TestCase):
             logs = list(flow.claim_free_gift_stream())
 
         self.assertTrue(any("本次未购买" in m for m in logs))
-        self.assertEqual(flow.maa.clicks, [(400, 300)])  # 只点过领取
-        self.assertNotIn((638, 502), flow.maa.clicks)    # 旧盲点坐标不许碰
+        self.assertEqual(flow.device.clicks, [(400, 300)])  # 只点过领取
+        self.assertNotIn((638, 502), flow.device.clicks)    # 旧盲点坐标不许碰
 
     def test_ocr_fallback_buy_confirmed_by_price_vanishing(self):
         # 模板认不出购买按钮 → 文字兜底点 (500,500)；0价标签消失才算买成
@@ -376,7 +376,7 @@ class ShopGiftTests(unittest.TestCase):
         with patch("touken.flows.rewards.time.sleep"):
             logs = list(flow.claim_free_gift_stream())
 
-        self.assertIn((500, 500), flow.maa.clicks)
+        self.assertIn((500, 500), flow.device.clicks)
         self.assertTrue(any("领取成功" in m for m in logs))
 
 
@@ -405,9 +405,9 @@ class TaskRewardTests(unittest.TestCase):
         def click(self, point):
             self.clicked.append(point)
 
-    def _flow(self, maa):
+    def _flow(self, device):
         flow = RewardsMixin()
-        flow.maa = maa
+        flow.device = device
         flow.current_location = "任务"
         flow.config = {"task_reward": {
             "tabs": {"日常": [48, 204]},
@@ -449,9 +449,9 @@ class TaskRewardTests(unittest.TestCase):
 
     def test_late_reward_popup_still_confirms_claim(self):
         """弹窗比首次读取慢（安装版实测月常/活动）：等待窗口里弹出来也算领到。"""
-        maa = self.Maa(active_first=True, inactive=False)
-        maa.exists = lambda template: template == "ui完成任务.png"
-        flow = self._flow(maa)
+        device = self.Maa(active_first=True, inactive=False)
+        device.exists = lambda template: template == "ui完成任务.png"
+        flow = self._flow(device)
         reads = []
 
         def fake_read():
@@ -468,15 +468,15 @@ class TaskRewardTests(unittest.TestCase):
         self.assertFalse(any("未确认领取成功" in msg for msg in messages))
 
     def test_unknown_button_state_is_not_clicked_or_counted(self):
-        maa = self.Maa()
-        flow = self._flow(maa)
+        device = self.Maa()
+        flow = self._flow(device)
         with patch("touken.flows.rewards.time.sleep"):
             messages = list(flow.claim_task_rewards_stream())
 
         self.assertEqual(flow.events, [("task_rewards.unconfirmed", {
             "tab": "日常", "stage": "before_click",
         })])
-        self.assertFalse(maa.clicked)
+        self.assertFalse(device.clicked)
         self.assertTrue(any("不点击也不计成绩" in msg for msg in messages))
 
 

@@ -11,7 +11,7 @@ import numpy as np
 from touken.flows import naihanka_report as nr
 from touken.flows.daily import DailyMixin
 from touken.flows.naihanka import NaihankaMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 FIXTURE = Path(__file__).parent / "fixtures" / "naihanka_report.png"
 
@@ -111,7 +111,7 @@ class DiffSnapshotTests(unittest.TestCase):
 
 class TableDuplicateNameTests(unittest.TestCase):
     def test_same_name_in_two_slots_is_not_overwritten_as_one_person(self):
-        from touken.maa_adapter import roi_4to4
+        from touken.device_adapter import roi_4to4
         farm_roi = roi_4to4(*nr.TABLE_OCR_REGIONS[1]).to_tuple()
 
         def ocr(roi):
@@ -155,8 +155,8 @@ class _FakeMaa:
 
 
 class _Flow(NaihankaMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.config = {"naihanka": {
             "running_marker": {"template": "内番中.png"},
             "ui_title": {"template": "ui内番.png"},
@@ -177,8 +177,8 @@ class _Flow(NaihankaMixin):
 class ObserveStreamTests(unittest.TestCase):
     def test_report_read_then_tapped_through(self):
         img = cv2.imread(str(FIXTURE))
-        maa = _FakeMaa(img, report_frames=1)
-        flow = _Flow(maa)
+        device = _FakeMaa(img, report_frames=1)
+        flow = _Flow(device)
         with tempfile.TemporaryDirectory() as td, \
                 patch("touken.flows.naihanka.STATUS_DIR", Path(td)), \
                 patch("touken.flows.naihanka.time.sleep"):
@@ -189,8 +189,8 @@ class ObserveStreamTests(unittest.TestCase):
         self.assertIn([993, 690], flow.clicks)  # 点穿动画回表屏
 
     def test_plain_table_exits_immediately_without_clicks(self):
-        maa = _FakeMaa(None, report_frames=0)
-        flow = _Flow(maa)
+        device = _FakeMaa(None, report_frames=0)
+        flow = _Flow(device)
         with patch("touken.flows.naihanka.time.sleep"):
             messages = list(flow.naihanka_observe_stream())
         self.assertEqual(messages, [])
@@ -227,7 +227,7 @@ class _LoginPopupMaa:
 
 class _LoginPopupFlow(DailyMixin):
     def __init__(self):
-        self.maa = _LoginPopupMaa()
+        self.device = _LoginPopupMaa()
         self.report_reads = 0
 
     # 生产上由 LoginMixin 提供；扫地测试默认没有续打弹窗
@@ -239,7 +239,7 @@ class _LoginPopupFlow(DailyMixin):
         return ["[内番] 测试刀剑男士 机动+1"]
 
     def _probe_nav_ready(self):
-        return self.maa.stage == "home"
+        return self.device.stage == "home"
 
 
 class LoginPopupSweepTests(unittest.TestCase):
@@ -251,7 +251,7 @@ class LoginPopupSweepTests(unittest.TestCase):
 
         self.assertTrue(arrived)
         self.assertEqual(flow.report_reads, 1)
-        self.assertEqual(flow.maa.clicks, [Point(993, 690)])
+        self.assertEqual(flow.device.clicks, [Point(993, 690)])
 
     def test_late_login_button_is_clicked_before_waiting_for_home(self):
         class Maa(_LoginPopupMaa):
@@ -272,13 +272,13 @@ class LoginPopupSweepTests(unittest.TestCase):
                 return True
 
         flow = _LoginPopupFlow()
-        flow.maa = Maa()
+        flow.device = Maa()
 
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=5)
 
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [flow.maa.login_point])
+        self.assertEqual(flow.device.clicks, [flow.device.login_point])
 
     def test_stale_resume_popup_is_dismissed_with_no(self):
         # 隔夜中断的续打弹窗：脚本对断点没记忆，点【否】清掉回本丸，
@@ -302,16 +302,16 @@ class LoginPopupSweepTests(unittest.TestCase):
 
         class Flow(_LoginPopupFlow):
             def _network_resume_visible(self):
-                return self.maa.stage == "resume"
+                return self.device.stage == "resume"
 
         flow = Flow()
-        flow.maa = Maa()
+        flow.device = Maa()
 
         with patch("touken.flows.daily.time.sleep"):
             arrived = flow._popup_sweep(max_rounds=5)
 
         self.assertTrue(arrived)
-        self.assertEqual(flow.maa.clicks, [flow.maa.no_point])
+        self.assertEqual(flow.device.clicks, [flow.device.no_point])
 
 
 class DailyLoginGateTests(unittest.TestCase):
@@ -400,7 +400,7 @@ class CollectReportGainsTests(unittest.TestCase):
 
 class SnapshotStreamTests(unittest.TestCase):
     def _maa_with_table(self):
-        from touken.maa_adapter import roi_4to4
+        from touken.device_adapter import roi_4to4
         col0 = roi_4to4(*nr.TABLE_OCR_REGIONS[0]).to_tuple()
 
         class Maa(_FakeMaa):
@@ -458,7 +458,7 @@ class SnapshotStreamTests(unittest.TestCase):
             self.assertTrue((Path(td) / "naihanka.json").exists())
 
     def test_cultivation_gain_keeps_unique_instance_evidence(self):
-        from touken.maa_adapter import roi_4to4
+        from touken.device_adapter import roi_4to4
         farm_roi = roi_4to4(*nr.TABLE_OCR_REGIONS[1]).to_tuple()
 
         class Maa(_FakeMaa):

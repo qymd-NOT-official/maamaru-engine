@@ -28,17 +28,17 @@ def read_team_snapshot(agent, team_no, *, cache=None, max_age=600, now=None,
             snapshot = snapshots[key]
         else:
             from . import game_state
-            maa = getattr(agent, "maa", None)
-            if maa is None:
+            device = getattr(agent, "device", None)
+            if device is None:
                 return None
             if "events" not in cache:
                 if default_connection:
                     from .youzu_log import DEFAULT_ADB, DEFAULT_ADDRESS
                     cache["events"] = game_state.read_events(
-                        getattr(maa, "adb_path", "") or DEFAULT_ADB,
-                        getattr(maa, "adb_address", "") or DEFAULT_ADDRESS)
+                        getattr(device, "adb_path", "") or DEFAULT_ADB,
+                        getattr(device, "adb_address", "") or DEFAULT_ADDRESS)
                 else:
-                    cache["events"] = game_state.available_events(maa)
+                    cache["events"] = game_state.available_events(device)
             snapshot = game_state.team_snapshot(cache["events"], team_no, max_age=max_age, now=now)
         if not isinstance(snapshot, TeamSnapshot) or snapshot.team_no != team_no:
             return None

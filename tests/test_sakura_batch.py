@@ -3,7 +3,7 @@ from unittest.mock import patch
 import numpy as np
 
 from touken.flows.sakura import SakuraMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 
 def test_sakura_requires_confirmed_lock_and_sword_level_above_one():
@@ -12,13 +12,13 @@ def test_sakura_requires_confirmed_lock_and_sword_level_above_one():
         text = '刀剑39级'
         def ocr_all(self, roi):
             return [(self.text, Point(530, 135))]
-    host.maa = Maa()
+    host.device = Maa()
     for lock, text, expected in (
             ('locked', '刀剑39级', True), ('locked', '刀剑1级', False),
             ('unlocked', '刀剑39级', False), ('unknown', '刀剑39级', False),
             ('locked', '乱舞9级', False), ('locked', '', False),
             ('locked', '刀剑39级刀剑40级', False)):
-        host.maa.text = text
+        host.device.text = text
         with patch('touken.flows.formation_editor.recognize_selection_lock', return_value=lock):
             assert host._sakura_candidate_eligible(None, 200) is expected
 
@@ -30,7 +30,7 @@ def test_prepare_team_uses_client_clear_confirmation_not_empty_slot_ocr():
         def ocr(self, *args, **kwargs): return Point(640, 29)
         def click(self, point): pass
     host = SakuraMixin()
-    host.maa = Maa()
+    host.device = Maa()
     host.current_location = '编队'
     def done(value):
         if False: yield
@@ -68,14 +68,14 @@ def test_sakura_skips_ineligible_row_before_deciding():
         def template_match(self, *args, **kwargs):
             return None
     host = SakuraMixin()
-    host.maa = Maa()
+    host.device = Maa()
     with patch.object(host, '_sakura_sort_list', return_value=True), \
             patch.object(host, '_sakura_candidate_eligible', side_effect=[False, True]), \
             patch.object(host, '_wait_list_closed', return_value=True, create=True), \
             patch('touken.flows.sakura.time.sleep'):
         list(host._swap_tired_in(1, 50))
-    assert (1197, 160) not in host.maa.clicks
-    assert (1197, 260) in host.maa.clicks
+    assert (1197, 160) not in host.device.clicks
+    assert (1197, 260) in host.device.clicks
 
 
 def test_selected_captain_fatigue_is_read_without_navigation_or_team_clicks():
@@ -90,7 +90,7 @@ def test_selected_captain_fatigue_is_read_without_navigation_or_team_clicks():
             return [('疲劳49/100', Point(350, 196))]
 
     host = SakuraMixin()
-    host.maa = Maa()
+    host.device = Maa()
     # 没有导航和点击接口：选人后应只观察当前编队页。
     stream = host._check_fatigue(1, 1, in_place=True)
     try:
@@ -228,10 +228,10 @@ def test_equipment_filters_only_click_checked_boxes():
             self.checked[point.x] = False
 
     host = SakuraMixin()
-    host.maa = Maa()
+    host.device = Maa()
     with patch('touken.flows.sakura.time.sleep'):
         list(host._sakura_clear_equipment_filters())
-    assert host.maa.clicks == [296]
+    assert host.device.clicks == [296]
     assert not host._sakura_blank_checkbox(None, (296, 81, 327, 112))
 
 
@@ -270,7 +270,7 @@ def test_fresh_setsword_response_supplies_serial_but_old_roster_does_not(tmp_pat
     from touken import youzu_log
 
     host = SakuraMixin()
-    host.maa = type('Maa', (), {'adb_path': 'unused', 'adb_address': 'unused'})()
+    host.device = type('Maa', (), {'adb_path': 'unused', 'adb_address': 'unused'})()
     host._sakura_selection_at = 100
     event = {'direction': 'S->C', 'status': 200, 'endpoint': '/party/setsword',
              'payload': {'status': 0, '1': {'slot': {'1': {'serial_id': '456'}}}}}

@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.flows import formation_troops as ft
 
 
@@ -56,8 +56,8 @@ class FakeMaa:
         pass
 
 
-def run(maa):
-    agent = type("Agent", (), {"maa": maa})()
+def run(device):
+    agent = type("Agent", (), {"device": device})()
     gen = ft.equip_preset_troop_stream(agent, 1, 1, NAME)
     messages = []
     while True:
@@ -70,27 +70,27 @@ def run(maa):
 class TroopTests(unittest.TestCase):
     @patch.object(ft.time, "sleep")
     def test_exact_name_equips_and_verifies_slot(self, _sleep):
-        maa = FakeMaa()
-        ok, _messages = run(maa)
+        device = FakeMaa()
+        ok, _messages = run(device)
         self.assertTrue(ok)
-        self.assertEqual(maa.slot_name, NAME)
-        self.assertEqual(maa.state, "formation")
+        self.assertEqual(device.slot_name, NAME)
+        self.assertEqual(device.state, "formation")
 
     @patch.object(ft.time, "sleep")
     def test_unknown_name_never_confirms(self, _sleep):
-        maa = FakeMaa(item=False)
-        ok, _messages = run(maa)
+        device = FakeMaa(item=False)
+        ok, _messages = run(device)
         self.assertFalse(ok)
-        self.assertNotIn((1051, 177), maa.clicks)
-        self.assertEqual(maa.state, "formation")
+        self.assertNotIn((1051, 177), device.clicks)
+        self.assertEqual(device.state, "formation")
 
     @patch.object(ft.time, "sleep")
     def test_missing_slot_stops(self, _sleep):
-        maa = FakeMaa(slot=False)
-        ok, _messages = run(maa)
+        device = FakeMaa(slot=False)
+        ok, _messages = run(device)
         self.assertFalse(ok)
-        self.assertNotIn((1023, 144), maa.clicks)
-        self.assertEqual(maa.state, "formation")
+        self.assertNotIn((1023, 144), device.clicks)
+        self.assertEqual(device.state, "formation")
 
 
 if __name__ == "__main__":

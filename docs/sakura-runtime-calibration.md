@@ -1,6 +1,6 @@
 # 刷花运行帧校准（2026-10-04）
 
-验证使用 `MAAAdapter.screenshot(force=True)` 的 MuMu 显存帧，1280×720、BGR。
+验证使用 `DeviceAdapter.screenshot(force=True)` 的 MuMu 显存帧，1280×720、BGR。
 现场原图存于用户数据目录 `debug/sakura-*.png`，不进入仓库或发布包。
 
 本次使用玩家提供的 `team/部队解散.png`、`team/自动装备刀装.png`、

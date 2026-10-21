@@ -109,9 +109,9 @@ class CollectionHost(ExpeditionMixin):
             "return_banner_ocr": {"expected": "banner", "roi": [0, 0, 100, 100]},
             "result_title_ocr": {"expected": "result", "roi": [0, 0, 100, 100]},
             "collect_tap": [100, 100], "home_ui": {"template": "home"}}}
-        self.maa = Mock()
-        self.maa.ocr.return_value = None
-        self.maa.template_match.return_value = home
+        self.device = Mock()
+        self.device.ocr.return_value = None
+        self.device.template_match.return_value = home
         self._click_point = Mock()
         self._record_visual_settlement = Mock()
         self._forget_collected_records = Mock()
@@ -199,7 +199,7 @@ def test_non_hp_update_cannot_refresh_old_health_time():
 
 def test_storage_failure_does_not_overrule_confirmed_collection(monkeypatch):
     host = CollectionHost()
-    host.maa.adb_path, host.maa.adb_address = "adb", "address"
+    host.device.adb_path, host.device.adb_address = "adb", "address"
     proof = event({"party_no": 2, "field_id": 1}, "/conquest/complete", at=1001)
     monkeypatch.setattr(game_state, "read_events", Mock(return_value=[proof]))
     monkeypatch.setattr("touken.record_sync.consume_game_records", Mock(side_effect=OSError("storage")))

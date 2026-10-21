@@ -23,7 +23,7 @@ import re
 import time
 
 from .. import sword_db
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 from .battle import find_deploy_button
 from ..injury_recovery import recover_injury_stream
 from ..flow_control import BattleProgress
@@ -73,7 +73,7 @@ class SortieMixin:
         roi_raw = ocr_cfg.get("roi")
         if not roi_raw:
             return False
-        return bool(self.maa.ocr(expected=ocr_cfg.get("expected", "部队选择"),
+        return bool(self.device.ocr(expected=ocr_cfg.get("expected", "部队选择"),
                                  roi=roi_4to4(*roi_raw)))
 
     def sortie_stream(self, chapter: int, map_no: int, team_no: int = 3,
@@ -270,27 +270,27 @@ class SortieMixin:
                 nav_tapped = False
                 last_nav_tap = 0.0
                 for _ in range(25):  # 约 20~25 秒预算
-                    self.maa.screenshot(force=True)
+                    self.device.screenshot(force=True)
                     if self._on_team_select_page(cfg):
                         jumped = True
                         break
-                    if find_deploy_button(self.maa, cfg):
+                    if find_deploy_button(self.device, cfg):
                         area_ok = True
                         break
                     now = time.monotonic()
                     if now - last_nav_tap >= 2.0:
-                        decide = self.maa.template_match(
+                        decide = self.device.template_match(
                             cfg["decide_button"]["template"])
                         if decide:
                             if nav_tapped:
                                 yield "[出阵] 章节页没点动，再补一次章节+决定"
                             self._click_point(map_cfg["chapters"][str(chapter)])
                             time.sleep(0.5)
-                            self.maa.screenshot(force=True)
-                            decide = self.maa.template_match(
+                            self.device.screenshot(force=True)
+                            decide = self.device.template_match(
                                 cfg["decide_button"]["template"])
                             if decide:
-                                self.maa.click(decide)
+                                self.device.click(decide)
                             nav_tapped = True
                             last_nav_tap = now
                     time.sleep(0.7)
@@ -434,7 +434,7 @@ class SortieMixin:
             # 掉落认人去重：获得画面会等戳、连帧都在，只在「刚出现」时记一次
             drop_credit = None
             for _ in range(300):  # 安全上限
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if watch_dir is not None:
                     watch_seq += 1
                     self._dump_watch_frame(watch_dir, loop_no, watch_seq)
@@ -445,7 +445,7 @@ class SortieMixin:
 
                 if self._deny_heavy_injury_warning(cfg):
                     yield "[出阵] 🛑 出现重伤行军警告，已点【否】，准备返回本丸"
-                    self.maa.screenshot(force=True)
+                    self.device.screenshot(force=True)
                     if not self._return_home_from_march(cfg):
                         end_loop("sortie.interrupted", "unknown",
                                  reason="heavy_injury_denied_return_failed")
@@ -462,7 +462,7 @@ class SortieMixin:
                     break
 
                 # 普通合战场打完一圈会自动回本丸。
-                if self.maa.template_match(cfg["home_ui"]["template"]):
+                if self.device.template_match(cfg["home_ui"]["template"]):
                     march_done = True
                     break
 
@@ -472,7 +472,7 @@ class SortieMixin:
                 if delegated_march:
                     stop_ocr = cfg["march_stop_ocr"]
                     stop_roi = roi_4to4(*stop_ocr["roi"])
-                    if self.maa.ocr(expected=stop_ocr["expected"], roi=stop_roi):
+                    if self.device.ocr(expected=stop_ocr["expected"], roi=stop_roi):
                         field_injury = self._team_injury_status(cfg)
                         detail = f"（检测到{field_injury}）" if field_injury else ""
                         yield f"[出阵] ⚠️ 游戏自动行军已经停止{detail}，准备安全返回本丸"
@@ -506,7 +506,7 @@ class SortieMixin:
                     # 阵形确认后的转场略慢；等页面真正消失，避免下一轮重复点阵。
                     for _ in range(8):
                         time.sleep(0.4)
-                        self.maa.screenshot(force=True)
+                        self.device.screenshot(force=True)
                         if self._formation_mode_state() is None:
                             break
                     continue
@@ -538,7 +538,7 @@ class SortieMixin:
                             retreat_before_boss = False
                         else:
                             boss_dist = boss_distance_from_image(
-                                self.maa.screenshot())
+                                self.device.screenshot())
                             if boss_dist == 1:
                                 yield "[出阵] 🏳️ 小地图看明白了：下一脚就是王点，按约定撤退回本丸"
                                 if not self._return_home_from_march(cfg):
@@ -566,7 +566,7 @@ class SortieMixin:
                                 boss_track = (boss_dist, 0)
                                 yield f"[出阵] 🗺️ 距王点还有 {boss_dist} 步，继续行军"
                     yield "[出阵] 🚩 岔路口问我话呢，点「行军」继续"
-                    self.maa.click(march_button)
+                    self.device.click(march_button)
                     if boss_track is not None:
                         boss_track = (boss_track[0], boss_track[1] + 1)
                     time.sleep(1.0)
@@ -671,7 +671,7 @@ class SortieMixin:
         watch = getattr(self, "_battle_watch", None)
         if watch is None:
             return
-        if self.maa.template_match("battle/ui战斗结果.png"):
+        if self.device.template_match("battle/ui战斗结果.png"):
             if not watch["visible"]:
                 watch["battles"] += 1
             watch["visible"] = True
@@ -785,13 +785,13 @@ class SortieMixin:
         try:
             def _grab():
                 # 内部取的每一张新帧也是行军观察帧，必须过战斗计数入口
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 self._watch_battle_frame()
 
             evidence = False  # 见过横幅/刀种前缀/立牌徽章 = 确知掉刀
             patient = False
             for attempt in range(10):  # 耐心模式覆盖横幅→名牌约 5 秒，余量翻倍
-                tokens = self.maa.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
+                tokens = self.device.ocr_all(roi_4to4(*self._NAME_PLATE_ROI))
                 saw_prefix = False
                 for text, _pt in tokens:
                     m = self._STRIP_RE.match(text)
@@ -816,7 +816,7 @@ class SortieMixin:
                     _grab()
                     continue
                 # 名牌区空空：横幅在 = 掉刀预告，转耐心模式等获得画面到位
-                if not patient and self.maa.ocr(
+                if not patient and self.device.ocr(
                         self._OBTAIN_BANNER_TEXT,
                         roi_4to4(*self._OBTAIN_BANNER_ROI)):
                     evidence = True
@@ -827,7 +827,7 @@ class SortieMixin:
                     continue
                 # 没横幅：有立牌=获得画面，等对话框滑入重读；
                 # 没立牌先给一拍（对话框可能还在路上），第二拍还空就不是获得画面
-                if self.maa.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
+                if self.device.ocr("刀派", roi_4to4(*self._OBTAIN_BADGE_ROI)):
                     evidence = True
                     time.sleep(0.8)
                     _grab()
@@ -861,13 +861,13 @@ class SortieMixin:
         full = roi_4to4(0, 0, 1280, 720)
         handled = False
         for _ in range(3):
-            self.maa.screenshot(force=True)
-            confirm = self.maa.template_match("通用_确定.png")
+            self.device.screenshot(force=True)
+            confirm = self.device.template_match("通用_确定.png")
             if not confirm:
                 break
-            if not (self.maa.ocr("奖励", full) or self.maa.ocr("火车切", full)):
+            if not (self.device.ocr("奖励", full) or self.device.ocr("火车切", full)):
                 break
-            self.maa.click(confirm)
+            self.device.click(confirm)
             handled = True
             time.sleep(1.2)
         if handled:
@@ -881,16 +881,16 @@ class SortieMixin:
         entry = cfg.get("entry", {})
         roi = roi_4to4(*entry.get("verify_roi", [285, 50, 850, 145]))
         expected = entry.get("expected", "归城提灯")
-        self.maa.screenshot(force=True)
-        if self.maa.ocr(expected, roi):
+        self.device.screenshot(force=True)
+        if self.device.ocr(expected, roi):
             return True
         self._click_point(entry.get("target", [978, 93]))
         # 异去是渐入进场的动画演出：进场途中归城提灯会被盖住/误认，
         # 先等 2 秒让页面稳定再认，别在动画里乱判
         time.sleep(2.0)
         for _ in range(6):
-            self.maa.screenshot(force=True)
-            if self.maa.ocr(expected, roi):
+            self.device.screenshot(force=True)
+            if self.device.ocr(expected, roi):
                 return True
             time.sleep(0.5)
         return False
@@ -913,11 +913,11 @@ class SortieMixin:
             # 只是文字没认到，按钮被遮罩盖住匹配不上，不会误点。
             depart_cfg = cfg.get("depart_button", {})
             template = depart_cfg.get("template")
-            depart = self.maa.template_match(template) if template else None
+            depart = self.device.template_match(template) if template else None
             if not depart:
                 break
             yield "[异去] 确认框没出现但即刻出阵还亮着，刚才的点击可能被动画吞了，补点一次"
-            self.maa.click(depart)
+            self.device.click(depart)
             time.sleep(1.5)
         if not confirmed:
             yield "[异去] 没看到归城提灯出阵确认框；停止"
@@ -929,8 +929,8 @@ class SortieMixin:
             text = step.get("expected", fallback_expected)
             text_roi = roi_4to4(*step.get("roi", fallback_roi))
             for _ in range(8):
-                self.maa.screenshot(force=True)
-                if self.maa.ocr(text, text_roi):
+                self.device.screenshot(force=True)
+                if self.device.ocr(text, text_roi):
                     return True
                 time.sleep(0.4)
             return False
@@ -995,7 +995,7 @@ class SortieMixin:
 
     def _read_yosari_koban_purchase(self, purchase_screen: dict):
         """读取购买页展示的购买前/后小判；读不全时不猜金额。"""
-        ocr_all = getattr(self.maa, "ocr_all", None)
+        ocr_all = getattr(self.device, "ocr_all", None)
         if not callable(ocr_all):
             return None
 
@@ -1020,9 +1020,9 @@ class SortieMixin:
         marker = cfg.get("round_end_ocr", cfg.get("entry", {}))
         roi_raw = marker.get("roi", marker.get("verify_roi", [285, 50, 850, 145]))
         expected = marker.get("expected", "归城提灯")
-        if not self.maa.ocr(expected, roi_4to4(*roi_raw)):
+        if not self.device.ocr(expected, roi_4to4(*roi_raw)):
             return False
-        return bool(find_deploy_button(self.maa, cfg))
+        return bool(find_deploy_button(self.device, cfg))
 
     def _yosari_watch_dir(self, cfg_key: str):
         """蹲点目录：仅异去且显式开环境变量才启用，返回 None 表示不蹲。"""
@@ -1039,7 +1039,7 @@ class SortieMixin:
     def _dump_watch_frame(self, folder, loop_no: int, seq: int):
         """把行军监控刚取的帧存成 JPEG；任何异常都不许打断行军。"""
         try:
-            image = self.maa.screenshot(force=False)
+            image = self.device.screenshot(force=False)
             if image is None:
                 return
             from PIL import Image as _PILImage
@@ -1062,8 +1062,8 @@ class SortieMixin:
         roi = roi_4to4(*popup.get("ocr_roi", [30, 30, 1230, 500]))
 
         def _popup_tokens() -> list:
-            self.maa.screenshot(force=True)
-            return [(text, pt.x, pt.y) for text, pt in self.maa.ocr_all(roi)]
+            self.device.screenshot(force=True)
+            return [(text, pt.x, pt.y) for text, pt in self.device.ocr_all(roi)]
 
         try:
             self._click_point(button)
@@ -1095,7 +1095,7 @@ class SortieMixin:
             folder.mkdir(parents=True, exist_ok=True)
             name = (f"miss_{chapter}-{map_no}_loop{loop_no}_"
                     f"{time.strftime('%H%M%S')}.png")
-            if self.maa.save_screenshot(str(folder / name), force=False):
+            if self.device.save_screenshot(str(folder / name), force=False):
                 self._map_miss_count += 1
         except Exception:
             pass
@@ -1105,4 +1105,4 @@ class SortieMixin:
         march_cfg = cfg.get("march_continue_button", {})
         roi = roi_4to4(*march_cfg.get("roi", [990, 510, 1280, 720]))
         template = march_cfg.get("template", "battle/行军.png")
-        return self.maa.template_match(template, roi)
+        return self.device.template_match(template, roi)

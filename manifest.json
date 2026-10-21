@@ -1549,13 +1549,7 @@
                       "size":  9642,
                       "sha256":  "28caa937ac9925824be1e375585ca3862c5a73a903b07146cf74d51cf584b976"
                   },
-                  {
-                      "path":  "resource/base/default_pipeline.json",
-                      "size":  890,
-                      "sha256":  "89e0c16f7e9fea51f3e95f6a9fdcd92780bc5d2e74d909bab66514b5f2ac9150"
-                  },
-                  {
-                      "path":  "resource/base/image/empty.png",
+                  {                      "path":  "resource/base/image/empty.png",
                       "size":  68,
                       "sha256":  "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460"
                   },
@@ -2039,13 +2033,7 @@
                       "size":  21146753,
                       "sha256":  "7dcf6298d77d2a6eb44c1ebeed990826ca895a9c68d955a3eace00763d052949"
                   },
-                  {
-                      "path":  "resource/base/pipeline/tutorial.json",
-                      "size":  212,
-                      "sha256":  "57879ba7e8b58429ebc688fba6d5dd4fa5d4d7d6159581ea04293131fbfc0348"
-                  },
-                  {
-                      "path":  "profiles/00003_三日月宗近_foot.png",
+                  {                      "path":  "profiles/00003_三日月宗近_foot.png",
                       "size":  8589,
                       "sha256":  "7e91cb9dcae57ab71033aa0b994a7c79f7064437ec0bbdf87bfb7f078033bde7"
                   },

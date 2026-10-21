@@ -22,7 +22,7 @@ import uuid
 from pathlib import Path
 
 from .flows.report_judge import _is_fail
-from .maa_adapter import Point, Region, roi_4to4
+from .device_adapter import Point, Region, roi_4to4
 from .runtime_paths import RESOURCE_DIR, STATUS_DIR
 
 MAX_STEPS = 50            # 单流程最多步数（保存时校验）
@@ -155,7 +155,7 @@ def _optional_roi(params: dict) -> list | None:
 
 
 def params_to_region(params: dict) -> Region | None:
-    """JSON 里的 xyxy ROI → MaaFW Region；没有 ROI 返回 None（全屏）。"""
+    """JSON 里的 xyxy ROI → Region；没有 ROI 返回 None（全屏）。"""
     roi = (params or {}).get("roi")
     if not roi:
         return None
@@ -232,12 +232,12 @@ def _run_wait_landmark(agent, params, ctx):
     hits = 0
     need = max(1, int(stable_hits))
     while time.monotonic() < deadline:
-        agent.maa.screenshot(force=True)
+        agent.device.screenshot(force=True)
         found = False
-        if template and agent.maa.template_match(template, roi=roi,
+        if template and agent.device.template_match(template, roi=roi,
                                                  threshold=threshold):
             found = True
-        if not found and ocr_expected and agent.maa.ocr(
+        if not found and ocr_expected and agent.device.ocr(
                 expected=ocr_expected, roi=roi):
             found = True
         if found:
@@ -248,7 +248,7 @@ def _run_wait_landmark(agent, params, ctx):
             _sleep(0.8)
             continue
         hits = 0
-        agent.maa.click(Point(skip_pt[0], skip_pt[1]))
+        agent.device.click(Point(skip_pt[0], skip_pt[1]))
         _sleep(0.8)
     yield f"✗ 没等到地标：{found_desc}（等了 {timeout_s} 秒）"
     return False, None
@@ -289,16 +289,16 @@ def _run_check(agent, params, ctx):
     ocr_expected = params.get("ocr_expected")
     roi = params_to_region(params)
     threshold = params.get("threshold", 0.7)
-    agent.maa.screenshot(force=True)
+    agent.device.screenshot(force=True)
     hit = False
     detail = ""
     if template:
-        pt = agent.maa.template_match(template, roi=roi, threshold=threshold)
+        pt = agent.device.template_match(template, roi=roi, threshold=threshold)
         hit = pt is not None
         detail = (f"模板 {template} 命中 @({pt.x}, {pt.y})" if pt
                   else f"模板 {template} 未命中")
     if not hit and ocr_expected:
-        pt = agent.maa.ocr(expected=ocr_expected, roi=roi)
+        pt = agent.device.ocr(expected=ocr_expected, roi=roi)
         hit = pt is not None
         detail = (f"认到「{ocr_expected}」@({pt.x}, {pt.y})" if pt
                   else f"没认到「{ocr_expected}」")
@@ -328,7 +328,7 @@ def _run_click_hit(agent, params, ctx):
         yield "✗ 上一步「认一下」没有认到可点的位置，没点"
         return False, None
     pt = Point(int(point[0]), int(point[1]))
-    if agent.maa.click(pt):
+    if agent.device.click(pt):
         yield f"✓ 已点击上一步认到的位置 ({pt.x}, {pt.y})"
         return True, None
     yield f"✗ 点击 ({pt.x}, {pt.y}) 失败，没点成"
@@ -351,7 +351,7 @@ def _validate_click_point(params: dict, i: int) -> dict:
 
 def _run_click_point(agent, params, ctx):
     x, y = params["x"], params["y"]
-    if agent.maa.click(Point(x, y)):
+    if agent.device.click(Point(x, y)):
         yield f"✓ 已点击 ({x}, {y})"
         return True, None
     yield f"✗ 点击 ({x}, {y}) 失败，没点成"
@@ -379,17 +379,17 @@ def _validate_click_template(params: dict, i: int) -> dict:
 def _click_recognized(agent, params, mode: str):
     roi = params_to_region(params)
     if mode == "template":
-        pt = agent.maa.template_match(params["template"], roi=roi,
+        pt = agent.device.template_match(params["template"], roi=roi,
                                       threshold=params.get("threshold", 0.7))
         desc = f"模板 {params['template']}"
     else:
-        pt = agent.maa.ocr(expected=params["ocr_expected"], roi=roi,
+        pt = agent.device.ocr(expected=params["ocr_expected"], roi=roi,
                            match_mode=params.get("match_mode", "contains"))
         desc = f"「{params['ocr_expected']}」"
     if not pt:
         yield f"✗ 没找到可点的{desc}，没点"
         return False, None
-    if not agent.maa.click(pt):
+    if not agent.device.click(pt):
         yield f"✗ 认到{desc} @({pt.x}, {pt.y}) 但点击失败"
         return False, None
     yield f"✓ 认到并点击{desc} @({pt.x}, {pt.y})"
@@ -451,7 +451,7 @@ def _validate_swipe(params: dict, i: int) -> dict:
 
 
 def _run_swipe(agent, params, ctx):
-    ok = agent.maa.swipe(params["x1"], params["y1"], params["x2"], params["y2"],
+    ok = agent.device.swipe(params["x1"], params["y1"], params["x2"], params["y2"],
                          duration_ms=params.get("duration_ms", 400))
     if ok:
         yield (f"✓ 已滑动 ({params['x1']}, {params['y1']}) → "
@@ -1046,7 +1046,7 @@ def run_flow(agent, flow):
     """流式跑一条自定义流程。
 
     Args:
-        agent: ToukenAgent（含 maa/config/navigate_to_stream 那套）
+        agent: ToukenAgent（含 device/config/navigate_to_stream 那套）
         flow: {"name", "steps": [...]}，会先过 normalize_flow 校验
 
     Yields:

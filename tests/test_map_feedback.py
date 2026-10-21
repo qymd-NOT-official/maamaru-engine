@@ -20,16 +20,16 @@ class MapFeedbackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
                 patch("touken.runtime_paths.STATUS_DIR", Path(tmp)):
             flow = SortieMixin()
-            flow.maa = _ScreenshotRecorder()
+            flow.device = _ScreenshotRecorder()
             flow._map_miss_count = 0
 
             for loop_no in range(1, 8):
                 flow._save_map_miss(7, 4, loop_no)
 
-            self.assertEqual(len(flow.maa.paths), 5)
-            self.assertTrue(all(path.parent.name == "map_miss" for path, _ in flow.maa.paths))
-            self.assertTrue(all(path.name.startswith("miss_7-4_") for path, _ in flow.maa.paths))
-            self.assertTrue(all(force is False for _, force in flow.maa.paths))
+            self.assertEqual(len(flow.device.paths), 5)
+            self.assertTrue(all(path.parent.name == "map_miss" for path, _ in flow.device.paths))
+            self.assertTrue(all(path.name.startswith("miss_7-4_") for path, _ in flow.device.paths))
+            self.assertTrue(all(force is False for _, force in flow.device.paths))
 
     def test_sortie_has_no_automatic_success_or_retreat_frame_capture(self):
         source = Path(__file__).resolve().parents[1] / "touken" / "flows" / "sortie.py"

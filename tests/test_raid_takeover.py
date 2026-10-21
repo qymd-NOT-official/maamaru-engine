@@ -13,8 +13,8 @@ def test_takeover_counts_only_confirmed_rounds(completed, monkeypatch):
     agent = RaidMixin()
     agent.config = {"raid": {"ui_title": {"template": "title"},
         "difficulty_target": [1, 1]}, "team_select": {"teams": {"3": {}}}}
-    agent.maa = Mock()
-    agent.maa.template_match.return_value = (1, 1)
+    agent.device = Mock()
+    agent.device.template_match.return_value = (1, 1)
     agent.current_location = "出阵"
     agent.navigate_to_stream = lambda _: iter(())
     agent.set_progress = Mock()

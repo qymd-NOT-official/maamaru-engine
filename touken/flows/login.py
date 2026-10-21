@@ -6,7 +6,7 @@
 
 import time
 
-from ..maa_adapter import roi_4to4
+from ..device_adapter import roi_4to4
 
 
 class LoginMixin:
@@ -24,7 +24,7 @@ class LoginMixin:
 
     def _ocr_text(self, roi) -> str:
         """把 roi 里 OCR 出的所有文字拼成一串（判断弹窗正文用）"""
-        results = self.maa.ocr_all(roi)
+        results = self.device.ocr_all(roi)
         return "".join(str(item[0]) for item in results if item)
 
     def _network_timeout_visible(self) -> bool:
@@ -57,15 +57,15 @@ class LoginMixin:
         restarts = getattr(self, "_net_restart_count", 0)
 
         yield "[断网] 检测到「网络请求超时」弹窗，先点确定试试水..."
-        confirm = self.maa.template_match(
+        confirm = self.device.template_match(
             "通用_确定.png", roi=self.NET_CONFIRM_ROI, threshold=0.7)
         if not confirm:
-            confirm = self.maa.ocr("确定", self.NET_CONFIRM_ROI,
+            confirm = self.device.ocr("确定", self.NET_CONFIRM_ROI,
                                    match_mode="exact")
         if confirm:
-            self.maa.click(confirm)
+            self.device.click(confirm)
             time.sleep(10.0)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if not self._network_timeout_visible():
                 yield "[断网] 虚惊一场，点确定重连上了，继续"
                 return "resumed"
@@ -125,12 +125,12 @@ class LoginMixin:
         # 或者直接被清回本丸（中断数据没保住/当时不在出阵）。
         deadline = time.time() + 180
         while time.time() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._network_resume_visible():
                 yield "[断网] 游戏问要不要续打，点【是】从中断处继续"
                 self._click_point(self.NET_RESUME_YES_POINT)
                 time.sleep(3.0)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if not self._network_resume_visible():
                     yield "[断网] ✓ 续打成功，战斗画面接回来了"
                     if hasattr(self, "record_event"):
@@ -138,16 +138,16 @@ class LoginMixin:
                     return "resumed"
                 yield "[断网] 点了【是】弹窗还在，不再盲点，停"
                 return None
-            if self.maa.exists("目录.png", threshold=0.7):
+            if self.device.exists("目录.png", threshold=0.7):
                 yield "[断网] 重登后落在本丸，没有续打弹窗（原战斗状态作废）"
                 self.current_location = "本丸"
                 if hasattr(self, "record_event"):
                     self.record_event("network.recovered", mode="home")
                 return "home"
             # 登录页可能迟到，看到了就再点一次
-            login = self.maa.template_match("登录.png", threshold=0.7)
+            login = self.device.template_match("登录.png", threshold=0.7)
             if login:
-                self.maa.click(login)
+                self.device.click(login)
                 time.sleep(2.0)
             time.sleep(3.0)
 
@@ -156,7 +156,7 @@ class LoginMixin:
 
     def _game_update_prompt_visible(self) -> bool:
         """只在更新正文明确出现时才允许点弹窗，避免把普通「确定」误点掉。"""
-        results = self.maa.ocr_all(self.UPDATE_TEXT_ROI)
+        results = self.device.ocr_all(self.UPDATE_TEXT_ROI)
         text = "".join(str(item[0]) for item in results if item)
         return "检测到更新" in text and ("重新启动" in text or "进行更新" in text)
 
@@ -173,25 +173,25 @@ class LoginMixin:
         if hasattr(self, "record_event"):
             self.record_event("game_update.detected")
         yield "[更新] 检测到游戏强制更新，暂停当前玩法"
-        confirm = self.maa.template_match(
+        confirm = self.device.template_match(
             "通用_确定.png", roi=self.UPDATE_CONFIRM_ROI, threshold=0.7)
         if not confirm:
-            confirm = self.maa.ocr("确定", self.UPDATE_CONFIRM_ROI,
+            confirm = self.device.ocr("确定", self.UPDATE_CONFIRM_ROI,
                                    match_mode="exact")
         if not confirm:
             yield "[更新] 看到了更新提示，但没能安全找到【确定】，停止点击"
             return None
-        self.maa.click(confirm)
+        self.device.click(confirm)
         time.sleep(2.0)
 
         deadline = time.time() + max(60, int(timeout))
         last_notice = 0.0
         line_selected = False
         while time.time() < deadline:
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
 
             # 更新完成后可能先回登录，也可能自动进入本丸。
-            if (self.maa.exists("目录.png", threshold=0.7)
+            if (self.device.exists("目录.png", threshold=0.7)
                     and not self._game_update_prompt_visible()):
                 yield "[更新] ✓ 游戏已更新并重新回到本丸"
                 self.current_location = "本丸"
@@ -199,22 +199,22 @@ class LoginMixin:
                     self.record_event("game_update.recovered")
                 return True
 
-            login = self.maa.template_match("登录.png", threshold=0.7)
+            login = self.device.template_match("登录.png", threshold=0.7)
             if login:
                 yield "[更新] 登录页已出现，点击登录"
-                self.maa.click(login)
+                self.device.click(login)
                 time.sleep(2.0)
                 continue
 
             # 登录后若客户端需要下载资源，会要求选线路。优先线路一；线路一
             # 没识别到才用线路二。点击一次后只等待，避免下载页反复误触。
             if not line_selected:
-                line = (self.maa.ocr("线路一", self.UPDATE_LINE_ROI,
+                line = (self.device.ocr("线路一", self.UPDATE_LINE_ROI,
                                      match_mode="contains")
-                        or self.maa.ocr("线路二", self.UPDATE_LINE_ROI,
+                        or self.device.ocr("线路二", self.UPDATE_LINE_ROI,
                                         match_mode="contains"))
                 if line:
-                    self.maa.click(line)
+                    self.device.click(line)
                     line_selected = True
                     yield "[更新] 已选择更新线路，等待游戏下载资源（最长 30 分钟）"
                     time.sleep(3.0)
@@ -246,7 +246,7 @@ class LoginMixin:
                     else:
                         roi = None
 
-                    if not self.maa.exists(step_config["template"], roi):
+                    if not self.device.exists(step_config["template"], roi):
                         break
                     self._click_template_config(step_config)
                     time.sleep(0.5)

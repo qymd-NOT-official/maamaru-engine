@@ -18,7 +18,7 @@ SIGNIN_FLOW_ID = "builtin-signin"
 
 
 class SigninMixin:
-    """签到。依赖宿主类的 _open_menu、maa、current_location（经流程引擎调用）。"""
+    """签到。依赖宿主类的 _open_menu、device、current_location（经流程引擎调用）。"""
 
     def signin_stream(self):
         """

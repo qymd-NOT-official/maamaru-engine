@@ -23,7 +23,7 @@
 import re
 import time
 
-from ..maa_adapter import roi_4to4, Point
+from ..device_adapter import roi_4to4, Point
 from .. import sword_db
 from ..game_state import available_events, begin_operation, practice_list, practice_rank, practice_receipt, practice_members
 
@@ -39,7 +39,7 @@ _ICON_TEMPLATES = ["短_银", "打_银", "太_金"]
 
 
 class PracticeMixin:
-    """演练。依赖宿主类的 navigate_to_stream、maa、config。"""
+    """演练。依赖宿主类的 navigate_to_stream、device、config。"""
 
     def practice_stream(self, dry_run: bool = True, max_wins: int = None,
                         team_no: int = None, formation_mode: str = None,
@@ -78,12 +78,12 @@ class PracticeMixin:
             yield "[演练] 到达演练失败"
             return
         time.sleep(1.0)
-        self.maa.screenshot(force=True)
+        self.device.screenshot(force=True)
 
         # 游戏会把本轮已经打过的结果章一直留在五名对手的行末。它比本地
         # 时间/进程记录更可靠：3 点、15 点换一批对手时，章也会自然清空。
         # 先把已有胜场算进去，避免同一刷新周期内二次触发又从 0 开始打。
-        self._practice_rows = practice_list(available_events(self.maa))
+        self._practice_rows = practice_list(available_events(self.device))
         existing_results = self._scan_existing_results()
         existing_wins = sum(result.startswith("win")
                             for result in existing_results.values())
@@ -190,7 +190,7 @@ class PracticeMixin:
                 if known is not None:
                     results[i] = known
                     continue
-            tokens = self.maa.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
+            tokens = self.device.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
             text = "".join(t for t, _ in tokens)
             if "胜利" in text:
                 results[i] = "win"
@@ -206,17 +206,17 @@ class PracticeMixin:
         no_sakura, has_sakura = [], []
         for i, cy in enumerate(_LIST_CY):
             # 打过的行没有挑战按钮（盖着结算章），直接跳过
-            if not self.maa.ocr("挑战", roi_4to4(1110, cy - 30, 1275, cy + 30)):
+            if not self.device.ocr("挑战", roi_4to4(1110, cy - 30, 1275, cy + 30)):
                 continue
             y1, y2 = cy - 60, cy + 55
-            pt = self.maa.template_match("极化樱花.png", roi=roi_4to4(0, y1, 500, y2),
+            pt = self.device.template_match("极化樱花.png", roi=roi_4to4(0, y1, 500, y2),
                                          threshold=0.9)
             (has_sakura if pt else no_sakura).append(i)
         return no_sakura + has_sakura
 
     def _on_list(self) -> bool:
-        self.maa.screenshot(force=True)
-        return bool(self.maa.ocr("演练对手选择", roi_4to4(450, 60, 830, 110)))
+        self.device.screenshot(force=True)
+        return bool(self.device.ocr("演练对手选择", roi_4to4(450, 60, 830, 110)))
 
     def _ensure_on_list(self) -> bool:
         for _ in range(3):
@@ -228,7 +228,7 @@ class PracticeMixin:
     def _back_to_list(self):
         """从情报界面返回对手列表"""
         for _ in range(3):
-            self.maa.click(Point(150, 38))
+            self.device.click(Point(150, 38))
             time.sleep(2.0)
             if self._on_list():
                 return
@@ -243,16 +243,16 @@ class PracticeMixin:
             {"title": 对手名, "members": [...]} 或 None（没进去）
         """
         cy = _LIST_CY[row_idx]
-        boundary = begin_operation(self.maa)
-        self.maa.click(Point(190, cy))  # 队长卡
+        boundary = begin_operation(self.device)
+        self.device.click(Point(190, cy))  # 队长卡
         time.sleep(2.5)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("演练对手情报", roi_4to4(450, 10, 830, 60)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("演练对手情报", roi_4to4(450, 10, 830, 60)):
             return None
 
         rows = getattr(self, "_practice_rows", None)
         enemy = rows[row_idx]["enemy_id"] if rows else None
-        body = practice_receipt(available_events(self.maa), boundary, "/practice/offer", enemy, "enemy_id")
+        body = practice_receipt(available_events(self.device), boundary, "/practice/offer", enemy, "enemy_id")
         if body is False:
             return None
         if isinstance(body, dict):
@@ -263,7 +263,7 @@ class PracticeMixin:
                         "source": "data"}
         self._practice_enemy_id = boundary.get("practice_enemy_id", enemy)
         # 对手名（审神者 xxx级 名字）
-        title_tokens = self.maa.ocr_all(roi_4to4(400, 90, 750, 120))
+        title_tokens = self.device.ocr_all(roi_4to4(400, 90, 750, 120))
         title = " ".join(t for t, _ in title_tokens)
 
         members = []
@@ -280,7 +280,7 @@ class PracticeMixin:
         Returns:
             {"name", "type", "mobility"或None, "id"} 或 None（空位/认不出）
         """
-        name_tokens = self.maa.ocr_all(roi_4to4(95, cy + 38, 250, cy + 65))
+        name_tokens = self.device.ocr_all(roi_4to4(95, cy + 38, 250, cy + 65))
         if not name_tokens:
             return {"name": "未识别成员", "type": "未知", "mobility": None, "id": None}
         # 取最长 token 当名字（防碎字）
@@ -308,23 +308,23 @@ class PracticeMixin:
     def _read_level(self, cy: int):
         """读取成员头像右侧的“刀剑 xx 级”数字。"""
         for _ in range(2):
-            tokens = self.maa.ocr_all(roi_4to4(455, cy - 28, 570, cy + 5))
+            tokens = self.device.ocr_all(roi_4to4(455, cy - 28, 570, cy + 5))
             for text, _ in tokens:
                 match = re.search(r"(\d{1,3})", text)
                 if match:
                     return int(match.group(1))
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
         return None
 
     def _read_mobility(self, cy: int):
         """读机动格数字（第 4 格，x[754,806]——别动窗口）"""
         for _ in range(2):  # OCR 偶尔翻车，给两次机会
-            tokens = self.maa.ocr_all(roi_4to4(754, cy + 26, 806, cy + 48))
+            tokens = self.device.ocr_all(roi_4to4(754, cy + 26, 806, cy + 48))
             for t, _ in tokens:
                 t = t.strip()
                 if t.isdigit():
                     return int(t)
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
         return None
 
     # ========== 决策 ==========
@@ -405,24 +405,24 @@ class PracticeMixin:
         formation_mode = cfg.get("formation_mode", "manual")
         yield f"[演练] 动手！（部队{_CN_NUM.get(team_no, team_no)}，{formation}）"
 
-        boundary = begin_operation(self.maa)
+        boundary = begin_operation(self.device)
         # ---- 部队选择 ----
-        self.maa.click(Point(1200, 630))  # 进入演练
+        self.device.click(Point(1200, 630))  # 进入演练
         time.sleep(2.5)
-        self.maa.screenshot(force=True)
-        if not self.maa.ocr("部队选择", roi_4to4(500, 10, 780, 60)):
+        self.device.screenshot(force=True)
+        if not self.device.ocr("部队选择", roi_4to4(500, 10, 780, 60)):
             yield "[演练] 没进到部队选择界面，放弃这场"
             return "unknown"
 
-        self.maa.click(Point(self._TEAM_TAB_X.get(team_no, 272), 93))
+        self.device.click(Point(self._TEAM_TAB_X.get(team_no, 272), 93))
         time.sleep(1.5)
-        self.maa.click(Point(1200, 630))  # 演练开始
+        self.device.click(Point(1200, 630))  # 演练开始
         time.sleep(2.0)
 
         # ---- 阵形选择（索敌失败则跳过此界面直接打）----
         got_formation = False
         for _ in range(10):  # 最多等 20s
-            self.maa.screenshot(force=True)
+            self.device.screenshot(force=True)
             if self._formation_mode_state(
                     allow_auto_without_title=formation_mode != "auto") is not None:
                 got_formation = True
@@ -447,7 +447,7 @@ class PracticeMixin:
             formation_left = False
             for _ in range(8):
                 time.sleep(0.5)
-                self.maa.screenshot(force=True)
+                self.device.screenshot(force=True)
                 if self._formation_mode_state() is None:
                     formation_left = True
                     break
@@ -465,7 +465,7 @@ class PracticeMixin:
             time.sleep(3.0)
         else:
             yield "[演练] 等战斗结束超时"
-            body = practice_receipt(available_events(self.maa), boundary, "/battle/practicebattle",
+            body = practice_receipt(available_events(self.device), boundary, "/battle/practicebattle",
                                     getattr(self, "_practice_enemy_id", None), "enemy_user_id")
             if isinstance(body, dict):
                 return practice_rank((body.get("result") or {}).get("rank")) or "unknown"
@@ -473,7 +473,7 @@ class PracticeMixin:
 
         # ---- 读结算章 ----
         time.sleep(1.0)
-        body = practice_receipt(available_events(self.maa), boundary, "/battle/practicebattle",
+        body = practice_receipt(available_events(self.device), boundary, "/battle/practicebattle",
                                 getattr(self, "_practice_enemy_id", None), "enemy_user_id")
         if body is False:
             return "unknown"
@@ -489,8 +489,8 @@ class PracticeMixin:
         text = ""
         for _ in range(4):
             time.sleep(1.5)
-            self.maa.screenshot(force=True)
-            tokens = self.maa.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
+            self.device.screenshot(force=True)
+            tokens = self.device.ocr_all(roi_4to4(1050, cy - 40, 1280, cy + 40))
             text = "".join(t for t, _ in tokens)
             if "胜利" in text or "败北" in text:
                 break

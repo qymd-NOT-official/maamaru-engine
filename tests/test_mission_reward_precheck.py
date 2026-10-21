@@ -5,7 +5,7 @@ import pytest
 
 from touken import game_state as gs
 from touken.flows import rewards as module
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 
 NOW = 1_000_000.0
 
@@ -88,8 +88,8 @@ class _FakeMaa:
 class _Host(module.RewardsMixin):
     """claim_task_rewards_stream 最小宿主（仿 test_flow_resource_changes）"""
 
-    def __init__(self, maa, tabs=("日常",)):
-        self.maa = maa
+    def __init__(self, device, tabs=("日常",)):
+        self.device = device
         self.current_location = "任务"
         self.config = {"task_reward": {
             "tabs": {name: [48, 204] for name in tabs},
@@ -116,14 +116,14 @@ def no_sleep(monkeypatch):
 
 def test_facts_none_empty_tab_is_never_clicked(no_sleep, monkeypatch):
     fresh_none = [mission_index_event({"1": {"status": "3"}})]
-    monkeypatch.setattr(module, "available_events", lambda maa: fresh_none)
-    maa = _FakeMaa()
-    host = _Host(maa)
+    monkeypatch.setattr(module, "available_events", lambda device: fresh_none)
+    device = _FakeMaa()
+    host = _Host(device)
 
     messages = list(host.claim_task_rewards_stream())
 
     # 预检拦截在一切点击之前：tab 不切换、按钮模板不看、手不出
-    assert maa.clicks == [] and maa.template_calls == 0
+    assert device.clicks == [] and device.template_calls == 0
     assert host.tab_clicks == []
     assert host.events == [("task_rewards.none", {"tab": "日常"})]
     assert any("数据确认没有可领奖励" in m for m in messages)
@@ -132,38 +132,38 @@ def test_facts_none_empty_tab_is_never_clicked(no_sleep, monkeypatch):
 @pytest.mark.parametrize("mode", ["missing", "stale"])
 def test_facts_unusable_falls_back_to_template(no_sleep, monkeypatch, mode):
     if mode == "missing":
-        monkeypatch.setattr(module, "available_events", lambda maa: [])
+        monkeypatch.setattr(module, "available_events", lambda device: [])
     else:
         stale = [mission_index_event({"1": {"status": "2"}},
                                      at=time.time() - gs.FACT_MAX_AGE - 1)]
-        monkeypatch.setattr(module, "available_events", lambda maa: stale)
-    maa = _FakeMaa()
-    host = _Host(maa)
+        monkeypatch.setattr(module, "available_events", lambda device: stale)
+    device = _FakeMaa()
+    host = _Host(device)
 
     messages = list(host.claim_task_rewards_stream())
 
     # 兜底 = 旧行为：模板说按钮在就点，游戏回执缺失就不计成绩，但不跳过
-    assert maa.clicks and maa.template_calls > 0
+    assert device.clicks and device.template_calls > 0
     assert not any(t == "task_rewards.none" for t, _ in host.events)
     assert not any("数据确认没有可领奖励" in m for m in messages)
 
 
 def test_facts_claimable_leaves_clicking_to_template_gate(no_sleep, monkeypatch):
     fresh = [mission_index_event({"1": {"status": "3"}, "487": {"status": "2"}})]
-    monkeypatch.setattr(module, "available_events", lambda maa: fresh)
+    monkeypatch.setattr(module, "available_events", lambda device: fresh)
 
-    def confirm(maa, boundary, kind):
+    def confirm(device, boundary, kind):
         boundary["result_body"] = {"item": []}
         return True
 
     monkeypatch.setattr(module, "confirm_operation", confirm)
-    maa = _FakeMaa()
-    host = _Host(maa)
+    device = _FakeMaa()
+    host = _Host(device)
 
     messages = list(host.claim_task_rewards_stream())
 
     assert host.events[0][0] == "task_rewards.claimed"
-    assert maa.clicks  # 预检 True 不拦点击，按钮模板仍是每页的执行闸门
+    assert device.clicks  # 预检 True 不拦点击，按钮模板仍是每页的执行闸门
     assert any("游戏结果" in m for m in messages)
 
 
@@ -172,11 +172,11 @@ def test_precheck_refreshes_between_tabs(no_sleep, monkeypatch):
         [mission_index_event({"487": {"status": "2"}})],  # 日常：有可领
         [mission_index_event({"487": {"status": "3"}})],  # 月常：已领完
     ]
-    monkeypatch.setattr(module, "available_events", lambda maa: reads.pop(0))
+    monkeypatch.setattr(module, "available_events", lambda device: reads.pop(0))
     monkeypatch.setattr(module, "confirm_operation",
-                        lambda maa, boundary, kind: True)
-    maa = _FakeMaa()
-    host = _Host(maa, tabs=("日常", "月常"))
+                        lambda device, boundary, kind: True)
+    device = _FakeMaa()
+    host = _Host(device, tabs=("日常", "月常"))
 
     list(host.claim_task_rewards_stream())
 
@@ -187,14 +187,14 @@ def test_precheck_refreshes_between_tabs(no_sleep, monkeypatch):
 
 def test_facts_none_skips_activity_tab_before_ocr_guard(no_sleep, monkeypatch):
     monkeypatch.setattr(module, "available_events",
-                        lambda maa: [mission_index_event({"1": {"status": "3"}})])
-    maa = _FakeMaa()
-    host = _Host(maa, tabs=("活动",))
+                        lambda device: [mission_index_event({"1": {"status": "3"}})])
+    device = _FakeMaa()
+    host = _Host(device, tabs=("活动",))
 
     messages = list(host.claim_task_rewards_stream())
 
     # 无可领时活动 tab 连「标签是否存在」都不用问，更不会点旧坐标
-    assert host.tab_clicks == [] and maa.clicks == []
+    assert host.tab_clicks == [] and device.clicks == []
     assert host.events == [("task_rewards.none", {"tab": "活动"})]
     assert any("数据确认没有可领奖励" in m for m in messages)
     assert not any("当前没有活动任务标签" in m for m in messages)

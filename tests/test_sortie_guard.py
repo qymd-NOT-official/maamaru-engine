@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from touken.flows.sortie import SortieMixin
 from touken.flows.battle import BattleMixin
-from touken.maa_adapter import Point
+from touken.device_adapter import Point
 from touken.flow_control import FlowAborted
 
 
@@ -32,7 +32,7 @@ class _Host(SortieMixin, BattleMixin):
             "team_select": {"teams": {"3": [30, 30]}},
         }
         self.current_location = "出阵"
-        self.maa = _Maa()
+        self.device = _Maa()
         self.march_calls = 0
 
     def navigate_to_stream(self, dest):
@@ -242,7 +242,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
     def test_plate_with_type_prefix_matches(self):
         # 名牌整条读出「短刀 毛利藤四郎」，刀种前缀+名册严格匹配接住
         flow = SortieMixin()
-        flow.maa = _PlateMaa([("短刀 毛利藤四郎", Point(100, 660))])
+        flow.device = _PlateMaa([("短刀 毛利藤四郎", Point(100, 660))])
 
         result = flow._read_drop_sword()
 
@@ -253,7 +253,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
     def test_plate_higher_layout_also_matches(self):
         # 不带立牌布局名牌偏上（2026-08-24 连拍：打刀 大和守安定），宽 ROI 罩住
         flow = SortieMixin()
-        flow.maa = _PlateMaa([("打刀 大和守安定", Point(180, 530))], badge=False)
+        flow.device = _PlateMaa([("打刀 大和守安定", Point(180, 530))], badge=False)
 
         result = flow._read_drop_sword()
 
@@ -263,7 +263,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
     def test_split_type_and_name_tokens(self):
         # OCR 把刀种和名字拆成两条：有刀种在场，裸名也认
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [("打刀", Point(60, 530)), ("大和守安定", Point(180, 530))],
             badge=False)
 
@@ -275,7 +275,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
     def test_dialog_late_gets_retried(self):
         # 对话框晚半拍滑入：第一拍名牌区空、立牌在，重读后认到
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [[], [("短刀 毛利藤四郎", Point(100, 660))]], badge=True)
 
         with patch("touken.flows.sortie.time.sleep"):
@@ -288,7 +288,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # 「刀派」「粟田口」（右边刀派立牌）不是刀名，严格匹配不许乱认；
         # 但立牌徽章=确知掉刀：必须返回 unrecognized，绝不能装没看见
         flow = SortieMixin()
-        flow.maa = _PlateMaa([("刀派", Point(1, 1)), ("粟田口", Point(2, 2))])
+        flow.device = _PlateMaa([("刀派", Point(1, 1)), ("粟田口", Point(2, 2))])
 
         with patch("touken.flows.sortie.time.sleep"):
             result = flow._read_drop_sword()
@@ -300,7 +300,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # 获得画面上名牌只读出裸名（没刀种前缀）也拒认：认错比认不到糟；
         # 立牌在场=掉刀证据，落 unrecognized
         flow = SortieMixin()
-        flow.maa = _PlateMaa([("大和守安定", Point(180, 530))], badge=True)
+        flow.device = _PlateMaa([("大和守安定", Point(180, 530))], badge=True)
 
         with patch("touken.flows.sortie.time.sleep"):
             result = flow._read_drop_sword()
@@ -312,7 +312,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # 「之六 博多藤四郎」被逐圈误记成掉落。裸名没有刀种前缀就必须拒认；
         # 没立牌没横幅=没有掉刀证据，返回 none
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [("之六", Point(40, 660)), ("博多藤四郎", Point(150, 660))],
             badge=False)
 
@@ -325,7 +325,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # 掉刀预告横幅在、名牌还在转场动画里（裸立绘阶段名牌区全空）：
         # 耐心模式一直等到名牌到位，不许提前放弃让安全区点掉获得画面
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [[], [], [], [("打刀 蜂须贺虎彻", Point(180, 530))]],
             badge=False, banner=True)
 
@@ -334,13 +334,13 @@ class DropSwordRecognitionTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "recognized")
         self.assertEqual(result["sword"]["name"], "蜂须贺虎彻")
-        self.assertEqual(flow.maa.calls, 4)  # 空拍全熬过来了
+        self.assertEqual(flow.device.calls, 4)  # 空拍全熬过来了
 
     def test_transient_failure_does_not_downgrade_later_success(self):
         # 前几拍名牌读花（刀种在场、名字乱码），后续拍认出：
         # 正常 recognized，绝不能因为之前短暂 OCR 失败而降级
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [[("太刀", Point(60, 530)), ("乱码丼", Point(180, 530))],
              [("打刀 大和守安定", Point(180, 530))]],
             badge=False)
@@ -356,19 +356,19 @@ class DropSwordRecognitionTests(unittest.TestCase):
         # unrecognized（上游据此记 not_observed/recognizer_error），
         # 绝不能静默返回 none 让真实掉落变成"确认无掉落"
         flow = SortieMixin()
-        flow.maa = _PlateMaa([[]], badge=False, banner=True)
+        flow.device = _PlateMaa([[]], badge=False, banner=True)
 
         with patch("touken.flows.sortie.time.sleep"):
             result = flow._read_drop_sword()
 
         self.assertEqual(result["status"], "unrecognized")
         self.assertTrue(flow._drop_watch_failed)
-        self.assertEqual(flow.maa.calls, 10)  # 耐心上限 10 拍
+        self.assertEqual(flow.device.calls, 10)  # 耐心上限 10 拍
 
     def test_recognizer_exception_is_unrecognized(self):
         # 认人流程自身翻车：同样落 unrecognized + 观察降级旗，诚实交底
         flow = SortieMixin()
-        flow.maa = _PlateMaa(
+        flow.device = _PlateMaa(
             [[("太刀", Point(60, 530)), ("乱码丼", Point(180, 530))]],
             badge=False)
 
@@ -383,13 +383,13 @@ class DropSwordRecognitionTests(unittest.TestCase):
     def test_no_banner_no_badge_exits_fast(self):
         # 没横幅没立牌的普通画面（结果页/状态页）：两拍内快速退场，不拖慢行军圈
         flow = SortieMixin()
-        flow.maa = _PlateMaa([[]], badge=False, banner=False)
+        flow.device = _PlateMaa([[]], badge=False, banner=False)
 
         with patch("touken.flows.sortie.time.sleep"):
             result = flow._read_drop_sword()
 
         self.assertEqual(result["status"], "none")
-        self.assertEqual(flow.maa.calls, 2)  # 一拍宽限 + 一拍确认，就撤
+        self.assertEqual(flow.device.calls, 2)  # 一拍宽限 + 一拍确认，就撤
 
 
 class _ScriptedMaa:
@@ -426,9 +426,9 @@ class _ScriptedMaa:
 class _NavHost(_Host):
     """记录坐标点击的出阵宿主，带上部队选择页标题地标配置"""
 
-    def __init__(self, maa):
+    def __init__(self, device):
         super().__init__()
-        self.maa = maa
+        self.device = device
         self.config["sortie"]["team_ui_ocr"] = {
             "expected": "部队选择", "roi": [506, 1, 774, 77]}
         self.clicks = []
@@ -487,8 +487,8 @@ class _MilestoneMaa:
 
 
 class _MilestoneHost(SortieMixin):
-    def __init__(self, maa):
-        self.maa = maa
+    def __init__(self, device):
+        self.device = device
         self.clicks = []
         self.skips = 0
         self.events = []
@@ -515,7 +515,7 @@ class YosariMilestonePopupTests(unittest.TestCase):
         # 弹窗出现（原句写「奖励」）→ 点确定 → 下一帧弹窗消失 → 安全区收获得窗
         host = _MilestoneHost(_MilestoneMaa([True, False], "奖励"))
         self.assertTrue(host._dismiss_yosari_milestone(self.CFG))
-        self.assertEqual(host.maa.clicks, [(640, 500)])
+        self.assertEqual(host.device.clicks, [(640, 500)])
         self.assertEqual(host.clicks, [])
         self.assertEqual(host.skips, 3)
         self.assertEqual(host.events, ["yosari.milestone_claimed"])
@@ -525,21 +525,21 @@ class YosariMilestonePopupTests(unittest.TestCase):
         # 兜底：画面只认出「火车切」三个字也照样领
         host = _MilestoneHost(_MilestoneMaa([True, False], "火车切"))
         self.assertTrue(host._dismiss_yosari_milestone(self.CFG))
-        self.assertEqual(host.maa.clicks, [(640, 500)])
+        self.assertEqual(host.device.clicks, [(640, 500)])
 
     @patch("touken.flows.sortie.time.sleep")
     def test_confirm_without_milestone_text_is_not_touched(self, _sleep):
         # 只有确定键、画面里既没有「奖励」也没有「火车切」：不认识就不碰，防误点
         host = _MilestoneHost(_MilestoneMaa([True], ""))
         self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
-        self.assertEqual(host.maa.clicks, [])
+        self.assertEqual(host.device.clicks, [])
         self.assertEqual(host.skips, 0)
 
     @patch("touken.flows.sortie.time.sleep")
     def test_no_popup_is_noop(self, _sleep):
         host = _MilestoneHost(_MilestoneMaa([False], ""))
         self.assertFalse(host._dismiss_yosari_milestone(self.CFG))
-        self.assertEqual(host.maa.clicks, [])
+        self.assertEqual(host.device.clicks, [])
 
 
 if __name__ == "__main__":

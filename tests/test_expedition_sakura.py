@@ -63,7 +63,7 @@ class Agent(FormationEditorMixin):
         self.round_done = round_done
         self.calls = []
         self._expedition_sakura_active = False
-        self.maa = SimpleNamespace()
+        self.device = SimpleNamespace()
     def _save_team_record(self, cfg, number):
         self.calls.append('save')
         self.data['preset'] = {'1': {'party': training.team_snapshot(self.data, 3)}}
@@ -225,12 +225,12 @@ def test_fresh_body_stays_on_formation_and_navigation_never_detours_home():
     class Maa:
         def screenshot(self, force=False): pass
         def ocr(self, *args): return True
-    host.maa = Maa()
+    host.device = Maa()
     with patch.object(training, 'latest_party', return_value=data):
         assert finish(training.fresh_body_stream(host, 3))[0] is data
         assert host.current_location == '编队'  # no navigation interface needed
     calls = []
-    host.maa.ocr = lambda *args: False
+    host.device.ocr = lambda *args: False
     def navigate(destination):
         calls.append(destination)
         host.current_location = destination

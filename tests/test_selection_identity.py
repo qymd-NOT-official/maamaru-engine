@@ -87,7 +87,7 @@ def test_ranbu_disambiguates_but_identical_copies_remain_ambiguous():
 def test_existing_client_member_skips_replacement_without_new_set_response():
     from test_formation_editor import _std_setup, _target, _run, HASEBE
     import time
-    maa, host = _std_setup()
+    device, host = _std_setup()
     now = time.time()
     existing = event({'party': {'2': {'slot': {'3': {'serial_id': '456'}}}}}, epoch=now-20)
     evidence = {'sword_catalog_id': HASEBE, 'form': 'normal', 'level': 35, 'tou_level': 9}
@@ -106,7 +106,7 @@ def test_existing_client_member_skips_replacement_without_new_set_response():
 
 def test_number_verification_failure_prevents_changed_result():
     from test_formation_editor import _std_setup, _target, _row, _run, _DECOY_PAGE, HASEBE
-    maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
+    device, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
     read = host._read_list_page
 
     def enriched():
@@ -119,7 +119,7 @@ def test_number_verification_failure_prevents_changed_result():
                 'tou_level': 9, 'survival_max': 50, 'recon': 45}
     for actual, expected in ((456, 'changed'), (999, 'screen_unrecognized'),
                              (None, 'screen_unrecognized')):
-        maa, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
+        device, host = _std_setup(pages=[[_row('压切长谷部', 200, level=35, fatigue=49)], _DECOY_PAGE])
         read = host._read_list_page
         with patch.object(host, '_read_list_page', side_effect=enriched), \
                 patch.object(host, '_formation_read_team', side_effect=AssertionError('use client identity')), \
@@ -131,7 +131,7 @@ def test_number_verification_failure_prevents_changed_result():
                 patch('touken.selection_identity.selected_serial', side_effect=[0, actual]):
             result = _run(host, target=_target(observation_id='youzu:456'))
         assert result['result'] == expected
-        assert not maa.swipes
+        assert not device.swipes
 
 
 def test_client_roster_uniqueness_uses_all_same_form_copies():
@@ -149,7 +149,7 @@ def test_client_roster_uniqueness_uses_all_same_form_copies():
 
 def test_client_search_only_moves_forward_until_target_and_stops_on_single_page():
     from test_formation_editor import _std_setup, _target, HASEBE, KOGI
-    maa, host = _std_setup()
+    device, host = _std_setup()
     target = _target()
     row = {'sword_catalog_id': HASEBE, 'name': '压切长谷部', 'name_raw': '压切长谷部',
            'level': 35, 'fatigue': 49, 'y': 200}
@@ -163,36 +163,36 @@ def test_client_search_only_moves_forward_until_target_and_stops_on_single_page(
             patch('touken.flows.formation_editor.time.sleep'):
         selected, page = finish(host._find_client_target_stream(target, ('name', 'level'), 60))
         assert selected is row and page == 1
-        assert len(maa.swipes) == 1
-        assert maa.swipes[0][3] < maa.swipes[0][1]
-        assert maa.swipes[0] == (640, 500, 640, 330, 800)
-    maa.swipes.clear()
+        assert len(device.swipes) == 1
+        assert device.swipes[0][3] < device.swipes[0][1]
+        assert device.swipes[0] == (640, 500, 640, 330, 800)
+    device.swipes.clear()
     with patch.object(host, '_read_list_page', return_value=(decoy, 0)), \
             patch.object(host, '_scrollbar_bottom', return_value=None):
         assert finish(host._find_client_target_stream(target, ('name', 'level'), 60))[0] is None
-        assert not maa.swipes
+        assert not device.swipes
 
 
 def test_bottom_row_reads_identity_numbers_when_rois_are_fully_visible():
     import numpy as np
     from test_formation_editor import _std_setup, _P
     from touken.flows.formation_editor import FormationEditorMixin
-    maa, host = _std_setup()
+    device, host = _std_setup()
     catalog = 'touken_103_urashima_kotetsu'
     row = {'sword_catalog_id': catalog, 'name': '浦岛虎彻', 'level': 37, 'y': 666}
     host._selection_identity_target = {'sword_catalog_id': catalog, 'survival_max': 57, 'recon': 91}
-    with patch.object(maa, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
+    with patch.object(device, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
          patch.object(host, '_parse_selection_rows', return_value=([row], 0)), \
-         patch.object(maa, 'ocr_all', side_effect=[[], [('乱舞8级', _P(530, 628))],
+         patch.object(device, 'ocr_all', side_effect=[[], [('乱舞8级', _P(530, 628))],
                                                  [('57', _P(620, 660))], [('91', _P(900, 660))]]):
         rows, _ = FormationEditorMixin._read_list_page(host)
     assert rows[0]['tou_level'] == 8
     assert rows[0]['survival_max'] == 57
     assert rows[0]['recon'] == 91
     row['y'] = 698
-    with patch.object(maa, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
+    with patch.object(device, 'screenshot', return_value=np.zeros((720, 1280, 3), dtype=np.uint8)), \
          patch.object(host, '_parse_selection_rows', return_value=([row], 0)), \
-         patch.object(maa, 'ocr_all', return_value=[]) as ocr:
+         patch.object(device, 'ocr_all', return_value=[]) as ocr:
         FormationEditorMixin._read_list_page(host)
     assert ocr.call_count == 1  # 数值 ROI 真正越过名单底缘时才跳过。
 
@@ -201,7 +201,7 @@ def test_missing_name_is_recovered_from_same_frame_white_strip():
     import numpy as np
     from test_formation_editor import _std_setup, _P
     from touken.flows.formation_editor import FormationEditorMixin, parse_selection_rows
-    maa, host = _std_setup()
+    device, host = _std_setup()
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     catalog = 'touken_035_gotou_toushirou'
     host._selection_identity_target = {'sword_catalog_id': catalog, 'survival_max': 43, 'recon': None}
@@ -216,8 +216,8 @@ def test_missing_name_is_recovered_from_same_frame_white_strip():
         if roi.x == 470:
             return [('乱舞9级', _P(530, 498))]
         return [('43', _P(623, 530))]
-    with patch.object(maa, 'screenshot', return_value=frame), \
-         patch.object(maa, 'ocr_all', side_effect=recognize), \
+    with patch.object(device, 'screenshot', return_value=frame), \
+         patch.object(device, 'ocr_all', side_effect=recognize), \
          patch.object(host, '_parse_selection_rows', side_effect=parse_selection_rows):
         rows, _ = FormationEditorMixin._read_list_page(host)
     target = next(row for row in rows if row['sword_catalog_id'] == catalog)

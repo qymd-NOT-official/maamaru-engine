@@ -5,10 +5,10 @@ from . import youzu_log, sword_db
 from .game_state import read_events, successful_body
 
 
-def client_events(maa):
+def client_events(device):
     """Pull observations only; never click or update the roster."""
     try:
-        return read_events(maa.adb_path, maa.adb_address)
+        return read_events(device.adb_path, device.adb_address)
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
         return []
 

@@ -29,7 +29,7 @@ class OsakaFlow(OsakaMixin):
             "osaka": {"skip_tap": [775, 695]},
             "team_select": {"teams": {"3": [100, 100]}},
         }
-        self.maa = FakeMaa()
+        self.device = FakeMaa()
         self.current_location = "本丸"
         self._floor_done_seq = list(floor_done_seq)
         self.wait_march_result = None   # _wait_for_osaka_march 的返回值
