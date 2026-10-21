@@ -20,6 +20,14 @@ _engine = None
 # 字表里，实测比引擎自带模型更快更准）；文件缺失时回退引擎自带模型。
 _MODEL_DIR = RESOURCE_DIR / 'model' / 'ocr'
 
+# 引擎参数（2026-10-21 真机Benchmark，笔记本上每次 OCR 2~4 秒的元凶）：
+# - det_limit_type 'min'+736 是默认值，会把小 ROI 短边无脑放大到 736
+#   （480×65 标题栏 → 736×5449 巨图），慢 10 倍且对检出毫无帮助；
+#   'max'+2000 = 保持原生分辨率，只压超限大图（我们帧最大 1280，不触发）。
+# - use_cls=False：游戏文字永远是正的，方向分类器白跑，关掉再省一刀。
+# 精度验证：售罄证物 + 介绍页竖排书法/对话文本，与旧配置逐项对齐。
+_ENGINE_KW = dict(use_cls=False, det_limit_type='max', det_limit_side_len=2000)
+
 
 def _get_engine():
     global _engine
@@ -35,9 +43,10 @@ def _get_engine():
         if all(p.is_file() for p in (det, rec, keys)):
             _engine = RapidOCR(det_model_path=str(det),
                                rec_model_path=str(rec),
-                               rec_keys_path=str(keys))
+                               rec_keys_path=str(keys),
+                               **_ENGINE_KW)
         else:
-            _engine = RapidOCR()
+            _engine = RapidOCR(**_ENGINE_KW)
     return _engine
 
 
