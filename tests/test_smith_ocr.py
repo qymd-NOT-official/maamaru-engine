@@ -59,23 +59,6 @@ class _RevealFakeMaa:
 
 
 class ForgeCollectRecognitionTests(unittest.TestCase):
-    def test_read_forge_sword_strict_match(self):
-        flow = SmithMixin()
-        flow.maa = _RevealFakeMaa([("大和守安定", Point(500, 600))])
-
-        sword = flow._read_forge_sword()
-
-        self.assertEqual(sword["name"], "大和守安定")
-        self.assertEqual(sword["sword_id"], "touken_087_yamato_no_kami_yasusada")
-
-    def test_read_forge_sword_rejects_garbage_and_typos(self):
-        flow = SmithMixin()
-        # 界面杂字不含刀名；错一个字（大和守安走）不许靠模糊兜底乱认
-        flow.maa = _RevealFakeMaa(
-            [("刀位", Point(1, 1)), ("大和守安走", Point(2, 2))])
-
-        self.assertIsNone(flow._read_forge_sword())
-
     def test_find_by_name_fuzzy_switch(self):
         self.assertIsNotNone(sword_db.find_by_name("源清磨"))  # 模糊兜底认对错字
         self.assertIsNone(sword_db.find_by_name("源清磨", fuzzy=False))
@@ -86,25 +69,15 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         self.assertEqual(sword_db.display_name("研藤四郎"), "药研藤四郎")
         self.assertEqual(sword_db.display_name("？？天书？？"), "??天书??")  # 认不出返回清洗后原文
 
-    def test_collect_slot_returns_recognized_sword(self):
+    def test_collect_slot_without_log_hit_still_collects(self):
         flow = SmithMixin()
-        flow.maa = _RevealFakeMaa([("大和守安定", Point(500, 600))])
+        flow.maa = _RevealFakeMaa([])  # 获得画面干净
 
         with patch("touken.flows.smith.time.sleep"):
             collected, sword = flow._collect_slot(205)
 
         self.assertTrue(collected)
-        self.assertEqual(sword["name"], "大和守安定")
-
-    def test_collect_slot_without_name_still_collects(self):
-        flow = SmithMixin()
-        flow.maa = _RevealFakeMaa([])  # 获得画面没字（书法字认不出）照常收
-
-        with patch("touken.flows.smith.time.sleep"):
-            collected, sword = flow._collect_slot(205)
-
-        self.assertTrue(collected)
-        self.assertIsNone(sword)
+        self.assertIsNone(sword)  # 日志没认领到就不编，手记记「结果未记录」
 
     def test_collect_slot_resolves_name_from_forge_log(self):
         """书法字认不出时，收炉结果从游戏日志 /forge/complete 认领

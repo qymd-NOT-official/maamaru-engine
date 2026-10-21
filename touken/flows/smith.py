@@ -260,8 +260,11 @@ class SmithMixin:
     def _collect_slot(self, cy: int) -> tuple:
         """收一炉，返回 (是否收成功, 认出的刀 or None)。刀位满弹氪金窗则 (False, None)。
         获得动画要轮询着点穿：一口气连点会顺手把下一个完成的炉也开了，
-        后面的步骤全踩在动画上（血泪）"""
-        sword = None
+        后面的步骤全踩在动画上（血泪）
+
+        认人全程走游戏日志（_sword_from_forge_log）：获得画面的刀名是竖排
+        书法字，OCR 检出率趋近于零（历史上只认出过 1 次），/forge/complete
+        响应直接带 sword_id，数据走 JSON 不养笨蛋眼珠子。"""
         slot_no = _SLOT_CY.index(cy) + 1
         clicked_at = time.time()
         self.maa.click(Point(265, cy))
@@ -277,19 +280,16 @@ class SmithMixin:
                 time.sleep(1.5)
                 return (False, None)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
-                return (True, sword or self._sword_from_forge_log(slot_no, clicked_at))
-            # 还在获得画面：顺路认一下是哪位刀剑男士（只认一次，认不到拉倒）
-            if sword is None:
-                sword = self._read_forge_sword()
+                return (True, self._sword_from_forge_log(slot_no, clicked_at))
             # 安全点：点穿获得动画；回到状况界面这点是空地，点不坏
             self.maa.click(Point(290, 600))
             time.sleep(1.5)
-        return (True, sword or self._sword_from_forge_log(slot_no, clicked_at))  # 超时也当收了，别卡死
+        return (True, self._sword_from_forge_log(slot_no, clicked_at))  # 超时也当收了，别卡死
 
     def _sword_from_forge_log(self, slot_no, clicked_at):
-        """收炉认人走游戏落盘日志：/forge/complete 响应直接带 sword_id，
-        比 OCR 认获得画面的书法字可靠得多（书法字检出率趋近于零，
-        历史上只认出过 1 次）。取点击之后同炉位最新一条；认不到返回 None。
+        """收炉认人走游戏落盘日志：/forge/complete 响应直接带 sword_id。
+        取点击之后同炉位最新一条；认不到返回 None（手记记「结果未记录」，
+        不编）。
         """
         try:
             from ..game_state import forge_completions
@@ -310,24 +310,6 @@ class SmithMixin:
                 "name_jp": info["name"],
                 "serial_id": hit["serial_id"],
                 "is_first_get_sword": hit["is_first_get_sword"]}
-
-    def _read_forge_sword(self):
-        """获得画面认人：整屏 OCR + 名册严格匹配（精确/包含，不走模糊兜底）。
-
-        获得画面除了刀名没有别的文字（揭竿帧干净得很），严格匹配不会撞车；
-        认错比认不到更糟，所以关掉模糊兜底。认不到返回 None。
-        """
-        try:
-            for text, _pt in self.maa.ocr_all(roi_4to4(0, 90, 1280, 720)):
-                found = sword_db.find_by_name(text, fuzzy=False)
-                if found:
-                    sid, info = found
-                    return {"sword_id": sid,
-                            "name": info.get("name_zh") or info["name"],
-                            "name_jp": info["name"]}
-        except Exception:
-            pass
-        return None
 
     def _start_forge(self, cy: int, recipe: list | None = None) -> bool:
         """给空闲炉点火：进配比界面 → 设配方 → 点锻刀 → 等回到状况界面"""
