@@ -262,6 +262,8 @@ class SmithMixin:
         获得动画要轮询着点穿：一口气连点会顺手把下一个完成的炉也开了，
         后面的步骤全踩在动画上（血泪）"""
         sword = None
+        slot_no = _SLOT_CY.index(cy) + 1
+        clicked_at = time.time()
         self.maa.click(Point(265, cy))
         time.sleep(2.5)
         for _ in range(10):
@@ -275,14 +277,39 @@ class SmithMixin:
                 time.sleep(1.5)
                 return (False, None)
             if self.maa.ocr("锻刀状况", roi_4to4(400, 45, 880, 110)):
-                return (True, sword)
+                return (True, sword or self._sword_from_forge_log(slot_no, clicked_at))
             # 还在获得画面：顺路认一下是哪位刀剑男士（只认一次，认不到拉倒）
             if sword is None:
                 sword = self._read_forge_sword()
             # 安全点：点穿获得动画；回到状况界面这点是空地，点不坏
             self.maa.click(Point(290, 600))
             time.sleep(1.5)
-        return (True, sword)  # 超时也当收了，别卡死
+        return (True, sword or self._sword_from_forge_log(slot_no, clicked_at))  # 超时也当收了，别卡死
+
+    def _sword_from_forge_log(self, slot_no, clicked_at):
+        """收炉认人走游戏落盘日志：/forge/complete 响应直接带 sword_id，
+        比 OCR 认获得画面的书法字可靠得多（书法字检出率趋近于零，
+        历史上只认出过 1 次）。取点击之后同炉位最新一条；认不到返回 None。
+        """
+        try:
+            from ..game_state import forge_completions
+            hits = [h for h in forge_completions(
+                self._forge_events(), after=clicked_at - 300)  # 时钟偏差余量
+                    if h["slot_no"] == slot_no]
+        except Exception:
+            return None
+        if not hits:
+            return None
+        hit = hits[-1]
+        found = sword_db.find_game_sword(hit["sword_id"])
+        if not found:
+            return None
+        sid, info, _form = found
+        return {"sword_id": sid,
+                "name": info.get("name_zh") or info["name"],
+                "name_jp": info["name"],
+                "serial_id": hit["serial_id"],
+                "is_first_get_sword": hit["is_first_get_sword"]}
 
     def _read_forge_sword(self):
         """获得画面认人：整屏 OCR + 名册严格匹配（精确/包含，不走模糊兜底）。

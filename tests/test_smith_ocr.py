@@ -106,6 +106,32 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         self.assertTrue(collected)
         self.assertIsNone(sword)
 
+    def test_collect_slot_resolves_name_from_forge_log(self):
+        """书法字认不出时，收炉结果从游戏日志 /forge/complete 认领
+        （响应直接带 sword_id，2026-10-21 真机核实）。"""
+        import time as _time
+        flow = SmithMixin()
+        flow.maa = _RevealFakeMaa([])  # 获得画面没字
+        flow._forge_events = lambda: [
+            {"endpoint": "/forge/complete", "direction": "C->S", "status": 200,
+             "payload": {"slot_no": "1"}, "ts": "2026-10-21 12:00:00"},
+            {"endpoint": "/forge/complete", "direction": "S->C", "status": 200,
+             "payload": {"status": "0", "sword_id": "87",
+                         "serial_id": "32349911",
+                         "is_first_get_sword": "False",
+                         "now_time": _time.time()},
+             "ts": "2026-10-21 12:00:01"},
+        ]
+
+        with patch("touken.flows.smith.time.sleep"):
+            collected, sword = flow._collect_slot(205)
+
+        self.assertTrue(collected)
+        self.assertEqual(sword["sword_id"], "touken_087_yamato_no_kami_yasusada")
+        self.assertEqual(sword["name"], "大和守安定")
+        self.assertEqual(sword["serial_id"], 32349911)
+        self.assertFalse(sword["is_first_get_sword"])
+
     def test_read_countdown_parses_and_misses(self):
         flow = SmithMixin()
 

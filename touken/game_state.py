@@ -580,6 +580,43 @@ def forge_capacity(events, *, now=None):
     return (len(ids), maximum) if 0 <= now - observed <= FACT_MAX_AGE else None
 
 
+def forge_completions(events, *, after=None):
+    """/forge/complete 请求（带 slot_no）⋈ 成功响应（带 sword_id/serial_id）
+    配对成收炉清单，时间升序。
+
+    诚实口径：只收 status==0 的成功响应；请求/响应配对不上、炉位号或
+    刀剑字段残缺的一律跳过，绝不编。响应自身不带炉位号（实测 2026-10-21），
+    炉位只能从配对的 C->S 请求拿。after 过滤响应时间（收炉点击前的
+    旧完成不算这次的）。
+    """
+    out = []
+    pending = None
+    for event in events:
+        if event.get("endpoint") != "/forge/complete":
+            continue
+        if event.get("direction") == "C->S":
+            pending = event
+            continue
+        body = successful_body(event)
+        at = youzu_log._event_epoch(event)
+        request = pending
+        pending = None
+        if body is None or at is None or request is None:
+            continue
+        slot_no = youzu_log._int((request.get("payload") or {}).get("slot_no"), 0)
+        sword_id = youzu_log._int(body.get("sword_id"), 0)
+        serial_id = youzu_log._int(body.get("serial_id"), 0)
+        if slot_no <= 0 or sword_id <= 0 or serial_id <= 0:
+            continue
+        if after is not None and at < after:
+            continue
+        out.append({"slot_no": slot_no, "sword_id": sword_id,
+                    "serial_id": serial_id,
+                    "is_first_get_sword": str(body.get("is_first_get_sword")) == "True",
+                    "at": at})
+    return out
+
+
 def available_events(maa):
     """Missing connection evidence uses the existing screen path."""
     if not getattr(maa, "adb_address", None):

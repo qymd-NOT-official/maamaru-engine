@@ -20,6 +20,33 @@ def boundary():
     return {"after": 1000, "requests": set(), "forge_slot": 1, "forge_recipe": [700] * 4}
 
 
+def test_forge_completions_pairs_request_slot_with_response_sword():
+    req = event("/forge/complete", {"slot_no": "2"}, direction="C->S")
+    resp = event("/forge/complete", {"status": 0, "sword_id": "91",
+                 "serial_id": "32349911", "is_first_get_sword": "False"}, 1001)
+    assert game_state.forge_completions([req, resp]) == [
+        {"slot_no": 2, "sword_id": 91, "serial_id": 32349911,
+         "is_first_get_sword": False, "at": 1001}]
+
+
+def test_forge_completions_skips_unpaired_failed_and_garbage():
+    orphan = event("/forge/complete", {"status": 0, "sword_id": "93",
+                   "serial_id": "1"}, 1000)  # 响应没有配对请求
+    req = event("/forge/complete", {"slot_no": "1"}, direction="C->S")
+    failed = event("/forge/complete", {"status": 1}, 1001)  # 游戏拒绝
+    garbage = event("/forge/complete", {"status": 0, "sword_id": "None",
+                    "serial_id": "x"}, 1002)  # 字段残缺
+    assert game_state.forge_completions([orphan, req, failed, garbage]) == []
+
+
+def test_forge_completions_after_filter():
+    req = event("/forge/complete", {"slot_no": "1"}, direction="C->S")
+    resp = event("/forge/complete", {"status": 0, "sword_id": "93",
+                 "serial_id": "5"}, 1001)
+    assert game_state.forge_completions([req, resp], after=2000) == []
+    assert len(game_state.forge_completions([req, resp], after=1000)) == 1
+
+
 def test_normal_forge_checks_this_request_slot_recipe_and_response():
     request = event("/forge/startmultiple", {"slot_no": "1", "charcoal": "700", "steel": "700",
                     "coolant": "700", "file": "700"}, direction="C->S")
