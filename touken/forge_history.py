@@ -12,8 +12,8 @@
   started 没有等到 collected → 照常出一炉，collected_at/swords 给
   null（炉子还烧着或领取没记上，不编结果）。
 - 炉位号两种写法都收：youzu_log 收据写 slot_no（带配方），面板锻刀流
-  写 slot（不带配方）；配方字段缺失一律 null，cost_est 整个给 null，
-  绝不拿默认配方填。
+  写 slot（2026-10-21 起带配方，更早的历史事件没有）；配方字段缺失
+  一律 null，cost_est 整个给 null，绝不拿默认配方填。
 - 近侍 = 开炉时刻之前最近一条 secretary.observed（登录时刻的观测）。
   局内换人不会产观测——登录之后在游戏里换的近侍，开炉时实际站的是谁
   分辨不出，只能按最近一次登录观测给，这是口径不是 bug。

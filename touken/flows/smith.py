@@ -213,6 +213,11 @@ class SmithMixin:
                     if hasattr(self, "record_event"):
                         started_payload = {"slot": slot_no, "sequence": forged,
                                            "target_hit": hit}
+                        # 配方进事件：锻刀手记的配方展示/成本估算全靠它
+                        # （曾只记 slot，履历配方全是 ?/?/?/?）
+                        for key, value in zip(("charcoal", "steel", "coolant", "file"),
+                                              self._forge_recipe(recipe)):
+                            started_payload[key] = value
                         if countdown:
                             started_payload["duration"] = countdown[0]
                             started_payload["duration_secs"] = countdown[1]

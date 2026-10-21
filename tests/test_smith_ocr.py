@@ -206,6 +206,35 @@ class ForgeAttemptBudgetTests(unittest.TestCase):
         self.assertTrue(any("点了 3 炉" in m for m in messages))
 
 
+class ForgeStartedPayloadTests(unittest.TestCase):
+    def test_started_event_carries_recipe(self):
+        """锻刀手记的配方展示/成本估算全靠 started 事件带配方
+        （曾只记 slot，履历配方全是 ?/?/?/?）。"""
+
+        class Host(_ForgeHost):
+            def __init__(self):
+                super().__init__()
+                self.events = []
+
+            def record_event(self, kind, **kw):
+                self.events.append((kind, kw))
+                return len(self.events)
+
+            def record_resource_change(self, *args, **kw):
+                pass
+
+        host = Host()
+        with patch("touken.flows.smith.time.sleep"):
+            list(host.forge_stream(times=3))
+
+        started = [kw for kind, kw in host.events if kind == "forge.started"]
+        self.assertEqual(len(started), 3)
+        for payload in started:  # 宿主没配置 → 回落默认 700×4
+            self.assertEqual([payload[k] for k in
+                              ("charcoal", "steel", "coolant", "file")],
+                             [700, 700, 700, 700])
+
+
 class _LimitedForgeMaa:
     """限锻确认窗现场（issue#7）：点火后先弹「是否进行锻刀？」，
     点【是】才回状况页；不限锻时状况页直接出现"""
