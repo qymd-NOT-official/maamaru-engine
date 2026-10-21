@@ -29,21 +29,22 @@ _MODEL_DIR = RESOURCE_DIR / 'model' / 'ocr'
 _ENGINE_KW = dict(use_cls=False, det_limit_type='max', det_limit_side_len=2000)
 
 # 省电模式（设置-模拟器-性能档位）：限制 onnxruntime 推理线程数，
-# 每次 OCR 稍慢但 CPU 占用平缓，笔记本散热差的场景（酒店桌面惨案）
-# 画面不卡。fast=不限线程（默认）。
+# CPU 占用平缓，笔记本散热差的场景画面不卡。实测小 ROI 和整屏
+# 都不吃亏甚至更快（小图多线程同步开销大于算力收益），
+# 2026-10-21 起 eco 就是默认档，fast 留作对照备胎。
 _ECO_ENGINE_KW = dict(intra_op_num_threads=2, inter_op_num_threads=1)
 
 
 def _performance_mode() -> str:
-    """读主配置的 performance_mode；缺省/读不到都算 fast。"""
+    """读主配置的 performance_mode；缺省/读不到都算 eco。"""
     try:
         import json
         from .runtime_paths import CONFIG_PATH
         cfg = json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
         mode = str(cfg.get('performance_mode', '')).strip().lower()
-        return mode if mode in ('fast', 'eco') else 'fast'
+        return mode if mode in ('fast', 'eco') else 'eco'
     except Exception:
-        return 'fast'
+        return 'eco'
 
 
 def _get_engine():

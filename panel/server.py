@@ -2146,7 +2146,7 @@ async def api_get_emulator_config():
         "adb_address": str(cfg.get("adb_address", "")).strip(),
         "default_address": _DEFAULT_ADB_ADDR,
         "adb_path": str(cfg.get("adb_path", "")),
-        "performance_mode": mode if mode in ("fast", "eco") else "fast",
+        "performance_mode": mode if mode in ("fast", "eco") else "eco",
     }
 
 
@@ -2173,7 +2173,7 @@ async def api_save_emulator_config(request: Request):
         cfg["performance_mode"] = mode
     _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "adb_address": address,
-            "performance_mode": cfg.get("performance_mode", "fast")}
+            "performance_mode": cfg.get("performance_mode", "eco")}
 
 
 # ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
