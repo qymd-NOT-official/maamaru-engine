@@ -735,7 +735,7 @@ class SakuraMixin:
         interior = image[y1 + 7:y2 - 7, x1 + 7:x2 - 7]
         return bool(interior.size and ((interior >= 220).all(axis=2)).mean() > .97)
 
-    def _sakura_clear_equipment_filters(self):
+    def _sakura_clear_equipment_filters(self, tag="[刷花]"):
         # 运行帧校准：只搜各自复选框，避免拿别处的勾来判断。
         for label, bounds in (("期间限定", (296, 81, 327, 112)),
                               ("远战", (430, 81, 461, 112))):
@@ -748,10 +748,10 @@ class SakuraMixin:
                 time.sleep(2)  # 等点击特效消失再读勾。
                 image = self.device.screenshot(force=True)
                 if self.device.template_match("team/ui道具勾选.png", roi_4to4(*bounds), threshold=.85):
-                    yield f"[刷花] {label}仍勾选，停止"
+                    yield f"{tag} {label}仍勾选，停止"
                     return False
             if not self._sakura_blank_checkbox(image, bounds):
-                yield f"[刷花] {label}未确认取消勾选，停止"
+                yield f"{tag} {label}未确认取消勾选，停止"
                 return False
         return True
 

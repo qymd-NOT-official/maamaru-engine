@@ -282,6 +282,101 @@ class BattleMixin:
             self.record_event("equipment.restored", record_no=record_no)
         return True
 
+    # 部队选择页六行「装备」按钮（2026-10-22 真机校准：行距 ~94.5px，
+    # 与编队页 98px 不同，两页坐标不共用——刷花模块踩过这个坑）
+    _TEAM_SELECT_EQUIP_X = 960
+    _TEAM_SELECT_ROW_CY = (172, 266, 361, 456, 550, 645)
+
+    def _refill_equipment_from_warning_stream(self, cfg: dict, team_no: int,
+                                              tag: str, record_no: int = 1):
+        """刀装空缺警告 → 整备刀装 → 逐成员「自动装备刀装」补空位 → 重存记录。
+
+        警告上的「整备刀装」只是关掉警告回到部队选择页（2026-10-22 真机实测），
+        这页每行自带「装备」入口。游戏的自动装备只填空位：已配齐的成员身上
+        点它是无操作（无确认弹窗、不替换现有刀装），所以可以安全逐成员刷一遍。
+        比「使用记录一」安全得多：绝不整队替换，也不依赖记录一里存的是哪支队
+        ——记录一可能被进场前就缺装的快照污染（2026-10-22 挖地连续两天翻车：
+        存了缺装快照再拿它补，拿空气补空气）。
+
+        Yields 日志；返回 (结果, 记录是否已重存)：
+          结果 None=没有警告；True=补装链路完成；False=链路失败（调用方停止）。
+        """
+        warning = cfg.get("equip_warning_button", {}).get("template")
+        if not warning or not self.device.template_match(warning):
+            return None, False
+        prepare = cfg.get("equip_warning_prepare", {}).get(
+            "template", "team/整备刀装.png")
+        prepare_pt = self.device.template_match(prepare)
+        if not prepare_pt:
+            return False, False
+        self.device.click(prepare_pt)
+        time.sleep(1.0)
+        if not self._wait_team_select_after_record(cfg, attempts=8):
+            yield f"{tag} 整备刀装后没回到部队选择页，停止点击"
+            return False, False
+
+        # 有数据只刷在编成员的行；数据不在册则六行都试——空成员行没有
+        # 「装备」按钮，点了装备页不会打开，逐行验证后跳过，不盲点。
+        from ..team_state_reader import read_team_snapshot
+        snapshot = read_team_snapshot(self, team_no, default_connection=True)
+        slots = (sorted(m.slot for m in snapshot.members)
+                 if snapshot is not None else [])
+        if not slots:
+            slots = list(range(1, 7))
+        yield f"{tag} 刀装有空缺，改用整备逐成员补装（不动记录一的队伍）"
+        for slot in slots:
+            if slot not in range(1, 7):
+                return False, False
+            self._click_point((self._TEAM_SELECT_EQUIP_X,
+                               self._TEAM_SELECT_ROW_CY[slot - 1]))
+            time.sleep(1.5)
+            opened = False
+            for _ in range(4):
+                self.device.screenshot(force=True)
+                if self.device.ocr("更换装备", roi_4to4(530, 0, 750, 60)):
+                    opened = True
+                    break
+                time.sleep(0.5)
+            if not opened:
+                # 数据说在编却打不开装备页才算异常；无数据试行时跳过即可
+                if snapshot is not None:
+                    yield f"{tag} {slot}号位装备页没打开，停止点击"
+                    return False, False
+                continue
+            if not (yield from self._sakura_clear_equipment_filters(tag=tag)):
+                return False, False
+            auto_pt = self.device.template_match("team/自动装备刀装.png",
+                                                 threshold=0.85)
+            if not auto_pt:
+                yield f"{tag} {slot}号位没找到自动装备刀装按钮，停止点击"
+                return False, False
+            self.device.click(auto_pt)
+            time.sleep(2.0)
+            self.device.screenshot(force=True)
+            confirm = self.device.template_match("通用_确定.png", threshold=0.7)
+            if confirm:
+                self.device.click(confirm)
+                time.sleep(1.0)
+            self._click_point((135, 25))
+            time.sleep(1.5)
+            if not self._wait_team_select_after_record(cfg, attempts=8):
+                yield f"{tag} {slot}号位补装后没回到部队选择页，停止点击"
+                return False, False
+
+        # 补完整存一次记录：把之前可能存进去的缺装快照洗成满装快照，
+        # 本次后续圈层的「使用记录一」快速通道才有东西可补。
+        if self._save_team_record(cfg, record_no=record_no):
+            yield f"{tag} 🛡️ 已逐成员补齐刀装，记录一已更新"
+            if hasattr(self, "record_event"):
+                self.record_event("equipment.refilled", team_no=team_no,
+                                  record_no=record_no, source="equip_warning")
+            return True, True
+        yield f"{tag} 🛡️ 已逐成员补齐刀装；记录一更新失败（不影响本次出阵）"
+        if hasattr(self, "record_event"):
+            self.record_event("equipment.refilled", team_no=team_no,
+                              source="equip_warning")
+        return True, False
+
     _recover_ok: bool = False
 
     def _record_ticket_refill(self, cfg: dict, tag: str):
@@ -639,7 +734,8 @@ class BattleMixin:
 
         选择部队 → 出阵前伤势检查 → （可选）保存记录一 → 即刻出阵 →
         票尽补票弹窗（可选，异去同款交互：点确定补一张 → 重新出阵）→
-        刀装未满警告处理（自动恢复或安全取消）→ 重伤确认弹窗拦截。
+        刀装未满警告处理（记录一恢复，或逐成员整备自动装备，或安全取消）→
+        重伤确认弹窗拦截。
 
         各玩法只负责把部队选择页打开、以及之后自己的二次确认与入图验证；
         中间的人身安全语义全在这里，不准各玩法再自己手搓一遍。
@@ -706,6 +802,7 @@ class BattleMixin:
                 return False, team_record_saved
 
         equip_retries = 0
+        record_restore_tried = False
         refill_done = False
         while True:
             if not self._click_depart(cfg):
@@ -811,17 +908,35 @@ class BattleMixin:
                 continue
 
             if auto_equip:
-                equip_result = self._restore_equipment_from_warning(
-                    cfg, record_no=1)
-                if equip_result is None:
-                    break
-                if not equip_result:
-                    yield f"{tag} 刀装有空缺，但从记录一恢复失败，停止出阵"
-                    return False, team_record_saved
+                # 两条补装通道：记录一已存本队好快照时先用「使用记录一」（快）；
+                # 恢复后警告还在（记录一存的就是缺装快照，拿空气补空气）或根本
+                # 没存过记录，就改走整备逐成员自动装备（慢但真补，不整队替换）。
+                if team_record_saved and not record_restore_tried:
+                    equip_result = self._restore_equipment_from_warning(
+                        cfg, record_no=1)
+                    if equip_result is None:
+                        break
+                    if not equip_result:
+                        yield f"{tag} 刀装有空缺，但从记录一恢复失败，停止出阵"
+                        return False, team_record_saved
+                    record_restore_tried = True
+                    yield f"{tag} 🛡️ 刀装有空缺，已使用记录一自动补齐"
+                else:
+                    equip_result, resaved = (
+                        yield from self._refill_equipment_from_warning_stream(
+                            cfg, team_no, tag))
+                    if equip_result is None:
+                        break
+                    if not equip_result:
+                        yield f"{tag} 刀装有空缺，整备补装没完成，停止出阵"
+                        return False, team_record_saved
+                    if resaved:
+                        team_record_saved = True
+                        record_restore_tried = False  # 新记录是满装快照，快速通道恢复可用
                 equip_retries += 1
-                yield f"{tag} 🛡️ 刀装有空缺，已使用记录一自动补齐"
-                if equip_retries >= 2:
-                    yield f"{tag} 恢复刀装后仍出现空缺警告，停止重试"
+                if equip_retries >= 3:
+                    yield (f"{tag} 补装后仍报刀装空缺（刀装库存可能不足），"
+                           "停止重试；请手动整备刀装")
                     return False, team_record_saved
                 self.device.screenshot(force=True)
                 # 使用记录可能改变队员；不得复用恢复前的验伤数据。

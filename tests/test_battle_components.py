@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from touken.flows.battle import BattleMixin
@@ -202,6 +203,163 @@ class BattleComponentTests(unittest.TestCase):
             self.assertTrue(flow._save_team_record(cfg, record_no=1))
         self.assertEqual(flow.device.state, "team")
         self.assertIn(Point(784, 510), flow.device.clicked)
+
+    @staticmethod
+    def _drain(generator):
+        messages = []
+        while True:
+            try:
+                messages.append(next(generator))
+            except StopIteration as done:
+                return messages, done.value
+
+    @staticmethod
+    def _refill_flow(equip_opens=True):
+        """整备补装走查假人：警告 → 整备回部队选择 → 逐行装备页 → 重存记录一。"""
+        points = {
+            "prepare": Point(500, 510), "auto": Point(620, 85),
+            "record": Point(1200, 145), "save": Point(480, 85),
+            "yes": Point(784, 510),
+        }
+
+        class Maa:
+            def __init__(self):
+                self.state = "warning"
+                self.clicked = []
+
+            def screenshot(self, force=False):
+                return object()
+
+            def template_match(self, template, roi=None, threshold=0.7):
+                if template == "team/继续出阵.png" and self.state == "warning":
+                    return Point(780, 510)
+                if template == "team/整备刀装.png" and self.state == "warning":
+                    return points["prepare"]
+                if template == "team/自动装备刀装.png" and self.state == "equip":
+                    return points["auto"]
+                if template == "team/部队记录.png" and self.state == "team":
+                    return points["record"]
+                if template == "team/进行记录.png" and self.state == "record":
+                    return points["save"]
+                if (template == "team/是.png"
+                        and self.state.startswith("confirm")):
+                    return points["yes"]
+                return None
+
+            def ocr(self, expected, roi, match_mode="contains"):
+                if expected == "更换装备":
+                    return Point(640, 30) if self.state == "equip" else None
+                return Point(640, 30) if self.state == "team" else None
+
+            def ocr_all(self, roi):
+                return []
+
+            def click(self, point):
+                self.clicked.append(point)
+                if point == points["prepare"]:
+                    self.state = "team"
+                elif point == Point(135, 25) and self.state == "equip":
+                    self.state = "team"
+                elif point.x == 960 and self.state == "team":
+                    if equip_opens:
+                        self.state = "equip"
+                elif point == points["record"]:
+                    self.state = "record"
+                elif point == points["save"]:
+                    self.state = "confirm_save"
+                elif point == points["yes"]:
+                    self.state = "team"
+                return True
+
+        class RefillFlow(BattleMixin):
+            def __init__(self):
+                self.device = Maa()
+                self.config = {"team_select": {"team_record": {
+                    "button": {"template": "team/部队记录.png"},
+                    "records": {"1": [1225, 179]},
+                    "save_confirm": {"template": "team/进行记录.png"},
+                    "load_confirm": {"template": "team/使用记录.png"},
+                    "yes_button": {"template": "team/是.png"},
+                }}}
+                self.events = []
+
+            def record_event(self, event_type, **payload):
+                self.events.append((event_type, payload))
+                return len(self.events)
+
+            def _click_template_config(self, config):
+                point = self.device.template_match(config.get("template"))
+                return self.device.click(point) if point else False
+
+            def _click_point(self, target):
+                return self.device.click(Point(*target))
+
+            def _sakura_clear_equipment_filters(self, tag="[刷花]"):
+                if False:
+                    yield
+                return True
+
+        return RefillFlow()
+
+    _REFILL_CFG = {
+        "equip_warning_button": {"template": "team/继续出阵.png"},
+        "team_ui_ocr": {"expected": "部队选择", "roi": [0, 0, 10, 10]},
+    }
+
+    def test_refill_walks_every_row_and_resaves_record_when_data_missing(self):
+        """队伍数据不在册时六行都试：空的成员行装备页打不开会跳过。"""
+        flow = self._refill_flow()
+        with patch("touken.flows.battle.time.sleep"), patch(
+                "touken.team_state_reader.read_team_snapshot",
+                return_value=None):
+            messages, result = self._drain(
+                flow._refill_equipment_from_warning_stream(
+                    self._REFILL_CFG, 3, "[测试]"))
+        self.assertEqual(result, (True, True))
+        row_clicks = [p for p in flow.device.clicked if p.x == 960]
+        self.assertEqual([p.y for p in row_clicks],
+                         [172, 266, 361, 456, 550, 645])
+        self.assertEqual(flow.device.state, "team")
+        self.assertTrue(any("记录一已更新" in m for m in messages))
+        self.assertIn(("equipment.refilled",
+                       {"team_no": 3, "record_no": 1,
+                        "source": "equip_warning"}), flow.events)
+
+    def test_refill_only_walks_roster_rows_from_snapshot(self):
+        """队伍数据在册时只刷在编成员的行，不碰空行。"""
+        flow = self._refill_flow()
+        snapshot = SimpleNamespace(members=[SimpleNamespace(slot=1),
+                                            SimpleNamespace(slot=3)])
+        with patch("touken.flows.battle.time.sleep"), patch(
+                "touken.team_state_reader.read_team_snapshot",
+                return_value=snapshot):
+            _, result = self._drain(
+                flow._refill_equipment_from_warning_stream(
+                    self._REFILL_CFG, 3, "[测试]"))
+        self.assertEqual(result, (True, True))
+        row_clicks = [p for p in flow.device.clicked if p.x == 960]
+        self.assertEqual([p.y for p in row_clicks], [172, 361])
+
+    def test_refill_stops_when_roster_member_equip_page_never_opens(self):
+        """数据说在编却打不开装备页 = 画面和数据对不上，停止点击。"""
+        flow = self._refill_flow(equip_opens=False)
+        snapshot = SimpleNamespace(members=[SimpleNamespace(slot=2)])
+        with patch("touken.flows.battle.time.sleep"), patch(
+                "touken.team_state_reader.read_team_snapshot",
+                return_value=snapshot):
+            messages, result = self._drain(
+                flow._refill_equipment_from_warning_stream(
+                    self._REFILL_CFG, 3, "[测试]"))
+        self.assertEqual(result, (False, False))
+        self.assertTrue(any("装备页没打开" in m for m in messages))
+
+    def test_refill_returns_none_without_warning(self):
+        flow = self._refill_flow()
+        flow.device.state = "team"
+        _, result = self._drain(flow._refill_equipment_from_warning_stream(
+            self._REFILL_CFG, 3, "[测试]"))
+        self.assertEqual(result, (None, False))
+        self.assertEqual(flow.device.clicked, [])
 
     def test_injury_templates_are_restricted_to_our_team_side(self):
         flow = Flow(FakeMaa(templates={"battle/轻伤.png": Point(200, 150)}))
@@ -1203,6 +1361,60 @@ class SafeDepartChainTests(unittest.TestCase):
                                 after_equipment_stream=prepare)
         self.assertFalse(result[0])
         host._click_depart.assert_called_once()
+
+    def test_record_restore_spinning_falls_back_to_member_refill(self):
+        """记录一恢复后警告还在（缺装快照空转）→ 改走整备逐成员补装。"""
+        host = _SafeDepartHost()
+        host._restore_equipment_from_warning = Mock(side_effect=[True, None])
+        refills = []
+
+        def refill(cfg, team_no, tag, record_no=1):
+            refills.append(team_no)
+            if False:
+                yield
+            return True, True
+
+        host._refill_equipment_from_warning_stream = refill
+        msgs, result = _drain_chain(host, auto_equip=True)
+        self.assertEqual(result, (True, True))
+        self.assertEqual(host._restore_equipment_from_warning.call_count, 2)
+        self.assertEqual(refills, [3])
+        self.assertTrue(any("已使用记录一自动补齐" in m for m in msgs))
+
+    def test_member_refill_failure_stops_departure(self):
+        """整备补装链路失败即停，不再重新出阵。"""
+        host = _SafeDepartHost()
+        host._restore_equipment_from_warning = Mock(return_value=True)
+
+        def refill(cfg, team_no, tag, record_no=1):
+            if False:
+                yield
+            return False, False
+
+        host._refill_equipment_from_warning_stream = refill
+        msgs, result = _drain_chain(host, auto_equip=True)
+        self.assertFalse(result[0])
+        self.assertTrue(any("整备补装没完成" in m for m in msgs), msgs)
+        host._restore_equipment_from_warning.assert_called_once()
+
+    def test_persistent_warning_stops_after_retry_limit(self):
+        """两条通道都补不掉警告：三次后停止，提示可能是刀装库存不足。"""
+        host = _SafeDepartHost()
+        host._restore_equipment_from_warning = Mock(return_value=True)
+        refills = []
+
+        def refill(cfg, team_no, tag, record_no=1):
+            refills.append(team_no)
+            if False:
+                yield
+            return True, False  # 补了但没能重存，快速通道不再启用
+
+        host._refill_equipment_from_warning_stream = refill
+        msgs, result = _drain_chain(host, auto_equip=True)
+        self.assertFalse(result[0])
+        host._restore_equipment_from_warning.assert_called_once()
+        self.assertEqual(refills, [3, 3])
+        self.assertTrue(any("刀装库存可能不足" in m for m in msgs), msgs)
 
     def test_second_confirmation_uses_its_configured_threshold(self):
         device = FakeMaa(templates={"海联确认": Point(640, 179),
