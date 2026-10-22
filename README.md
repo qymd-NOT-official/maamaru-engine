@@ -11,7 +11,7 @@
 
 > **你决定今天的本丸要做什么，执行、照看、收尾和记录交给まあ丸。**
 
-国服可以交给它跑任务，也可以只用来记账；日服可以连接游戏浏览器，边玩边更新本丸记录。
+国服可以交给它跑任务，也可以只用来记账；日服可以连接游戏浏览器，边玩边更新本丸记录，也能在「日服出阵」中连刷已经攻略的地图。
 
 **[逛逛介绍站](https://maamaru-honmaru.sassycoot2.chatgpt.site)** · **[下载最新版](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[使用指南](docs/user-manual.md)** · [提交问题](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
@@ -58,6 +58,8 @@
 </table>
 
 出阵前会检查队伍、伤势和刀装，确认重伤时拦截。任务停下来，先看最后几条消息和游戏画面，再决定怎样继续。[看看支持的玩法](docs/user-manual.md#出阵与活动任务) · [任务流与一键日课](docs/user-manual.md#任务流与一键日课)
+
+日课和任务流中，某一步出错会记下未完成，再尝试返回本丸；确认回到本丸后继续下一步，无法恢复时停下。流程运行中，可以直接在搭建页点「停止工作流」。跑到最后不代表每一步都成功，收工后记得看成绩单。
 
 ## 攒资源、等限锻，先看看家底够不够
 
@@ -109,9 +111,10 @@
 | 家底、道具与刀账记录 | ✓ | ✓ |
 | 更新记录 | 读取游戏家底、更新刀账，相关任务收工后同步 | 连接专用游戏浏览器，游玩期间更新 |
 | 单项任务、自定义任务流、一键日课 | ✓ | — |
-| 自动出阵、远征与定时执行 | ✓ | — |
+| 自动出阵 | 支持的合战场与活动玩法 | 已攻略地图，按游戏记忆的地图连刷 |
+| 自动远征与定时执行 | ✓ | — |
 
-启动器选择对应本丸。两服的配置、档案、小记与记录分别保存；日服入口提供账房与本丸展示。[日服本丸使用说明](docs/user-manual.md#日服本丸账房)
+启动器选择对应本丸。两服的配置、档案、小记与记录分别保存。连接日服浏览器只更新记录；要跑图，再到「功能 → 执务台 → 日服出阵」选部队和轮数。出发前会确认队伍状态、拦截重伤，行军中遇到弹窗会停等人工。[日服连接与出阵说明](docs/user-manual.md#日服本丸账房)
 
 ## 开始使用
 
@@ -122,6 +125,8 @@
 3. 想跑任务，在「功能 → 玩法设置」选好地图、部队、伤势与资源设置，先设 **1 圈**，观察这一圈是否按自己的意思跑完。想记账，先到「仓库」读取游戏家底。
 
 不必先录完整刀账或做预算才能跑普通任务。熟悉以后，再去规划里安排一键日课。
+
+国服在「设置 → 模拟器」可选性能档位，默认「省着点跑」，适合日常挂机；改动保存后，下次运行任务生效。[性能档位说明](docs/user-manual.md#性能档位)
 
 **详细操作 → [使用指南](docs/user-manual.md)**。启动提醒看[安装与启动](docs/user-manual.md#安装与启动)，任务停下来看[排查停止](docs/user-manual.md#任务为什么停了)。
 
@@ -146,12 +151,16 @@ git clone https://github.com/qymd-NOT-official/maamaru-engine.git
 cd maamaru-engine
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip uninstall -y opencv-python
+.\.venv\Scripts\python.exe -m pip install --force-reinstall --no-deps opencv-python-headless
 .\.venv\Scripts\python.exe maamaru_app.py
 ```
 
+安装依赖后重新安装 headless 版 OpenCV，避免 OCR 依赖带入的另一版 OpenCV 覆盖相同文件。
+
 也可以直接双击 `启动源码版.cmd`。默认面板地址为 `http://127.0.0.1:8080`；安装版和源码版不建议同时运行。
 
-まあ丸由 Python 长任务编排、ADB、MaaFramework、FastAPI 与 Vue 3 / TypeScript 组成。程序文件和用户数据严格分开，旧目录迁移会先复制、备份并校验，不自动删除来源。详细契约见 [用户数据与迁移](docs/data-layout.md) 和 [结构化运行数据](docs/telemetry-data.md)。
+まあ丸由 Python 长任务编排、内置视觉与设备适配层、FastAPI 与 Vue 3 / TypeScript 组成。文字识别使用 RapidOCR / PP-OCR 模型与 ONNX Runtime，图像匹配使用 OpenCV，MuMu 显存帧与 ADB 提供截图，ADB 与 minitouch 负责操作；不再依赖 MaaFramework。程序文件和用户数据严格分开，旧目录迁移会先复制、备份并校验，不自动删除来源。详细契约见 [用户数据与迁移](docs/data-layout.md) 和 [结构化运行数据](docs/telemetry-data.md)。
 
 ```text
 maamaru-engine/
@@ -170,7 +179,7 @@ maamaru-engine/
 
 ## 鸣谢
 
-まあ丸使用 [MaaFramework](https://github.com/MaaXYZ/MaaFramework) 提供的视觉识别能力，并由 [FastAPI](https://github.com/tiangolo/fastapi)、[Vue](https://github.com/vuejs/core)、[Vite](https://github.com/vitejs/vite)、[pywebview](https://github.com/r0x0r/pywebview)、[Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) 与 [Kenney Game Icons](https://kenney.nl/assets/game-icons) 等开源项目共同支撑。完整许可证信息见 [NOTICE](NOTICE)。
+まあ丸使用 [OpenCV](https://github.com/opencv/opencv-python)、[ONNX Runtime](https://github.com/microsoft/onnxruntime)、[RapidOCR](https://github.com/RapidAI/RapidOCR)、[PaddleOCR / PP-OCR 模型](https://github.com/PaddlePaddle/PaddleOCR) 与 [minitouch](https://github.com/openstf/minitouch) 支撑画面识别和设备操作，并由 [FastAPI](https://github.com/tiangolo/fastapi)、[Vue](https://github.com/vuejs/core)、[Vite](https://github.com/vitejs/vite)、[pywebview](https://github.com/r0x0r/pywebview)、[Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) 与 [Kenney Game Icons](https://kenney.nl/assets/game-icons) 等开源项目共同支撑。完整许可证信息见 [NOTICE](NOTICE)。
 
 まあ丸本身也由人类与 AI 共同开发：人类提出真实场景、定义玩法规则和安全边界、判断方案并实机验收；Kimi Code K3、Codex 与 WorkBuddy 作为协作者参与实现、排障、测试和发布。
 

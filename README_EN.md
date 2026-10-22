@@ -11,7 +11,7 @@ I have played Touken Ranbu for nine years, and I still want to keep playing. I j
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play. The app's interface is in Simplified Chinese.
+On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play, or start repeated runs on a cleared map through Japanese-server Sortie (日服出阵). The app's interface is in Simplified Chinese.
 
 **[Visit the website (Chinese)](https://maamaru-honmaru.sassycoot2.chatgpt.site)** · **[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
@@ -58,6 +58,8 @@ Functions (功能) runs **a standalone task or one custom workflow**. Pick a map
 </table>
 
 Before departure, Maamaru checks the team, injuries, and equipment, and blocks confirmed critical injuries. When a task stops, check its latest messages and the game screen before continuing. [Supported tasks](docs/user-manual.md#出阵与活动任务) · [Workflows and dailies](docs/user-manual.md#任务流与一键日课)
+
+If a daily or workflow step fails, Maamaru records it as incomplete and tries to return to Honmaru. It continues with the next step after confirming that return, and stops if recovery fails. Stop a running workflow directly from the builder with 停止工作流. Reaching the end does not mean every step succeeded; check the report afterward.
 
 ## Saving for a limited forge? Check what you have
 
@@ -109,9 +111,10 @@ Back in My Honmaru, write your own notes, change your avatar, edit your Saniwa p
 | Balance, item, and sword records | ✓ | ✓ |
 | Update records | Read balances, update the archive, or sync after related tasks | Connect the dedicated game browser; update during play |
 | Standalone tasks, custom workflows, and dailies | ✓ | — |
-| Automated sorties, expeditions, and scheduled work | ✓ | — |
+| Automated sorties | Supported regular maps and events | Cleared maps, using the game's remembered map |
+| Automated expeditions and scheduled work | ✓ | — |
 
-Choose the corresponding Honmaru in the launcher. Settings, profiles, notes, and records stay separate between servers. The Japanese-server entry provides the ledger and Honmaru display. [Japanese-server guide](docs/user-manual.md#日服本丸账房)
+Choose the corresponding Honmaru in the launcher. Settings, profiles, notes, and records stay separate between servers. Connecting the Japanese-server browser updates records. To run sorties, open 功能 → 执务台 → 日服出阵 and choose a team and run count. Maamaru checks the team before departure, blocks critical injuries, and stops for manual attention if a dialog appears during marching. [Japanese-server connection and sortie guide](docs/user-manual.md#日服本丸账房)
 
 ## Get started
 
@@ -122,6 +125,8 @@ The primary environment for China-server automation is **Windows, MuMu Player 12
 3. To run a task, open Functions → Gameplay Settings, check the map, team, injury rules, and spending settings, then try **one supervised run**. To start bookkeeping, open Warehouse and read game balances.
 
 You do not need a complete sword archive or budget to run ordinary tasks. Set up your daily checklist in Planning when you are ready.
+
+For China-server tasks, Settings → Emulator (设置 → 模拟器) offers a performance setting. The default 省着点跑 limits recognition threads for everyday use. Save changes to apply them on the next task run. [Performance settings](docs/user-manual.md#性能档位)
 
 **Detailed instructions → [User guide (Chinese)](docs/user-manual.md)**. See [setup](docs/user-manual.md#安装与启动) or [why a task stopped](docs/user-manual.md#任务为什么停了) for help.
 
@@ -146,12 +151,16 @@ git clone https://github.com/qymd-NOT-official/maamaru-engine.git
 cd maamaru-engine
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m pip uninstall -y opencv-python
+.\.venv\Scripts\python.exe -m pip install --force-reinstall --no-deps opencv-python-headless
 .\.venv\Scripts\python.exe maamaru_app.py
 ```
 
+Reinstall headless OpenCV after installing dependencies to avoid overlapping files from the other OpenCV package brought in by the OCR dependency.
+
 You can also double-click `启动源码版.cmd`. The panel opens at `http://127.0.0.1:8080` by default. Running the installed and source versions at the same time is not recommended.
 
-Maamaru combines Python orchestration, ADB, MaaFramework, FastAPI, and Vue 3 with TypeScript. Program files and user data are kept strictly separate. Migration from an old data directory copies, backs up, and verifies data before use; it never deletes the source automatically. See [User Data and Migration](docs/data-layout.md) and [Structured Runtime Data](docs/telemetry-data.md) for the detailed contracts (Chinese).
+Maamaru combines Python orchestration, built-in vision and device adapters, FastAPI, and Vue 3 with TypeScript. Text recognition uses RapidOCR / PP-OCR models and ONNX Runtime; image matching uses OpenCV. MuMu frames and ADB provide screenshots, while ADB and minitouch handle input. MaaFramework is no longer a dependency. Program files and user data are kept strictly separate. Migration from an old data directory copies, backs up, and verifies data before use; it never deletes the source automatically. See [User Data and Migration](docs/data-layout.md) and [Structured Runtime Data](docs/telemetry-data.md) for the detailed contracts (Chinese).
 
 ```text
 maamaru-engine/
@@ -168,7 +177,7 @@ maamaru-engine/
 
 ## Acknowledgements
 
-Maamaru uses [MaaFramework](https://github.com/MaaXYZ/MaaFramework) for visual recognition and is built with open-source projects including [FastAPI](https://github.com/tiangolo/fastapi), [Vue](https://github.com/vuejs/core), [Vite](https://github.com/vitejs/vite), [pywebview](https://github.com/r0x0r/pywebview), [Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font), and [Kenney Game Icons](https://kenney.nl/assets/game-icons). See [NOTICE](NOTICE) for complete license information.
+Maamaru uses [OpenCV](https://github.com/opencv/opencv-python), [ONNX Runtime](https://github.com/microsoft/onnxruntime), [RapidOCR](https://github.com/RapidAI/RapidOCR), [PaddleOCR / PP-OCR models](https://github.com/PaddlePaddle/PaddleOCR), and [minitouch](https://github.com/openstf/minitouch) for recognition and device input. Other open-source projects include [FastAPI](https://github.com/tiangolo/fastapi), [Vue](https://github.com/vuejs/core), [Vite](https://github.com/vitejs/vite), [pywebview](https://github.com/r0x0r/pywebview), [Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font), and [Kenney Game Icons](https://kenney.nl/assets/game-icons). See [NOTICE](NOTICE) for complete license information.
 
 Maamaru itself is also a collaboration between a human and AI. The human brings real use cases, defines gameplay rules and safety boundaries, chooses among proposed solutions, and validates them on a real device. Kimi Code K3, Codex, and WorkBuddy collaborate on implementation, debugging, testing, and releases.
 
