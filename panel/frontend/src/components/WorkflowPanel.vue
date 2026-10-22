@@ -268,7 +268,6 @@ async function run() {
     const result = await api.run('workflow', { workflow_id: draft.value!.id })
     if (!result.ok) throw new Error('没有启动成功，请稍后重试')
     emit('started', result.workflow || { id: draft.value!.id, name: draft.value!.name })
-    tell(`「${draft.value!.name}」已开始`)
   } catch (error) { tell(error instanceof Error ? `启动失败：${error.message}` : '启动失败，请重试', true) }
   finally { starting.value = false }
 }
@@ -344,9 +343,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
         </fieldset>
         <footer class="wf-toolbar">
           <span class="wf-save-state" :class="{ unsaved: dirty }">{{ dirty ? '● 尚未保存' : '✓ 已保存' }}</span>
-          <div class="wf-actions"><button type="button" class="wf-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button type="button" class="wf-button wf-primary" :disabled="running || locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
+          <div class="wf-actions"><button type="button" class="wf-button" :disabled="!dirty || !valid || locked" @click="save">{{ saving ? '保存中…' : '保存流程' }}</button><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button v-else type="button" class="wf-button wf-primary" :disabled="running || locked || !valid" @click="run">{{ starting ? '正在启动…' : dirty ? '保存并运行' : '运行这条' }}<span aria-hidden="true"> →</span></button></div>
         </footer>
-        <div v-if="running" class="wf-running"><span>{{ stopping ? '正在停止…' : current === 'workflow' ? (runningWorkflow ? `「${runningWorkflow.name}」正在执行` : '工作流正在执行') : '当前有其他任务在执行，结束后可运行这份安排' }}</span><button v-if="current === 'workflow'" type="button" class="wf-button wf-danger" :disabled="stopping" @click="emit('stop')">{{ stopping ? '正在停止…' : '停止工作流' }}</button><button type="button" class="wf-text-button" @click="emit('office')">去执务台看实况 →</button></div>
+        <div v-if="running" class="wf-running"><span v-if="current !== 'workflow'">当前有其他任务在执行，结束后可运行这份安排</span><button type="button" class="wf-text-button" @click="emit('office')">去执务台看实况 →</button></div>
         <p v-if="message" class="wf-message" :class="{ 'wf-danger': failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
       </PaperCard>
     </div>
