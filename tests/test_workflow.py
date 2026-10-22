@@ -106,10 +106,10 @@ class PresetStoreTests(unittest.TestCase):
         loaded = workflow.load_presets()
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0]["name"], "早课")
-        self.assertEqual(loaded[0]["nodes"][1]["on_error"], "continue")
+        # 旧字段 on_error 已被智能翻车处置取代：入档时直接剥掉
+        self.assertNotIn("on_error", loaded[0]["nodes"][1])
         self.assertEqual(loaded[0]["nodes"][1]["params"], {"mode": "shutdown"})
-        # 缺省 on_error 归一为 stop
-        self.assertEqual(loaded[0]["nodes"][0]["on_error"], "stop")
+        self.assertNotIn("on_error", loaded[0]["nodes"][0])
 
     def test_update_and_delete(self):
         preset = workflow.create_preset({"name": "A", "nodes": [_node("signin")]})
@@ -143,10 +143,13 @@ class PresetStoreTests(unittest.TestCase):
             workflow.create_preset({"name": "X",
                                     "nodes": [_node("signin"), _node("hack_master")]})
 
-    def test_invalid_on_error_rejected(self):
-        with self.assertRaises(workflow.WorkflowError):
-            workflow.create_preset({"name": "X",
-                                    "nodes": [_node("signin", on_error="ignore")]})
+    def test_legacy_on_error_is_tolerated_and_stripped(self):
+        """老配置里的 on_error（包括乱写的值）不再报错，存下来时直接剥掉。"""
+        preset = workflow.create_preset({
+            "name": "X", "nodes": [_node("signin", on_error="ignore")]})
+        self.assertTrue(preset["id"])
+        loaded = workflow.load_presets()
+        self.assertNotIn("on_error", loaded[0]["nodes"][0])
 
     def test_over_30_nodes_rejected(self):
         with self.assertRaises(workflow.WorkflowError):
@@ -231,9 +234,6 @@ class WorkflowApiTests(unittest.TestCase):
         r = self.client.post("/api/workflows", json={
             "name": "坏", "nodes": [_node("nope")]})
         self.assertEqual(r.status_code, 400)
-        r = self.client.post("/api/workflows", json={
-            "name": "坏", "nodes": [_node("signin", on_error="garbage")]})
-        self.assertEqual(r.status_code, 400)
         r = self.client.put("/api/workflows/no-such", json={
             "name": "X", "nodes": [_node("signin")]})
         self.assertEqual(r.status_code, 404)
@@ -293,7 +293,7 @@ class WorkflowRunnerTests(unittest.TestCase):
                          {"run_id", "finished_at", "finished", "all_green", "steps"})
 
     def test_failure_stops_and_marks_rest_skipped(self):
-        """翻车 + 回本丸失败 = 现场失控：按「翻车即停」收摊，后续 ⏭ 跳过。"""
+        """翻车 + 回本丸失败 = 现场失控：收摊，后续 ⏭ 跳过。"""
 
         class LostAgent(_FakeAgent):
             """导航回不去本丸的假 Agent（游戏真的失控了）。"""
@@ -316,7 +316,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         ran = [c[0] for c in agent.calls if c[0].endswith("_stream")]
         self.assertIn("claim_free_gift_stream", ran)
         self.assertNotIn("naihanka_stream", ran)
-        self.assertTrue(any("现场失控" in m and "翻车即停" in m for m in messages))
+        self.assertTrue(any("现场失控" in m and "块不跑" in m for m in messages))
         report = self._latest_report()
         self.assertEqual(report["steps"], [
             {"name": "签到", "status": "✓"},
@@ -355,12 +355,13 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertFalse(report["all_green"])
         self.assertTrue(any("翻车项" in m and "万屋领免费礼包" in m for m in messages))
 
-    def test_on_error_continue_marks_fail_and_keeps_going(self):
+    def test_failure_recovers_home_and_keeps_going(self):
+        """翻车但回得去本丸 = 现场干净：这块照记 ✗，后续积木继续跑。"""
         agent = _FakeAgent({
             "claim_free_gift_stream": ["[万屋] 未识别到领取按钮，停"],
             "naihanka_stream": ["[内番] ✓ 已安排上工"],
         })
-        self._run([_node("free_gift", on_error="continue"), _node("naihanka")], agent)
+        self._run([_node("free_gift"), _node("naihanka")], agent)
         report = self._latest_report()
         self.assertEqual(report["steps"], [
             {"name": "万屋领免费礼包", "status": "✗ 未识别到领取按钮，未点击"},
@@ -374,7 +375,7 @@ class WorkflowRunnerTests(unittest.TestCase):
             "status_snapshot_stream": ["[快照] ✓ 拍完了"],
         })
         messages, agent, _ = self._run(
-            [_node("signin", on_error="continue"), _node("snapshot")], agent)
+            [_node("signin"), _node("snapshot")], agent)
         self.assertTrue(any("节点执行翻车" in m for m in messages))
         report = self._latest_report()
         self.assertTrue(report["steps"][0]["status"].startswith("✗"))

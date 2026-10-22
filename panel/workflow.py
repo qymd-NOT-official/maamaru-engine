@@ -42,7 +42,6 @@ _DEFAULT_ADB_PATH = r"D:\MUMU\MuMuPlayer\nx_device\12.0\shell\adb.exe"
 _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 MAX_NODES = 30
-VALID_ON_ERROR = ("stop", "continue")
 VALID_AFTER = ("none", "logout", "shutdown", "sleep")
 DAILY_PRESET_ID = "builtin-daily"
 daily_template_provider = None
@@ -328,14 +327,12 @@ def normalize_nodes(nodes) -> list[dict]:
         type_ = node.get("type")
         if type_ not in NODE_REGISTRY:
             raise WorkflowError(f"第 {i + 1} 块：不支持的积木类型 {type_!r}")
-        on_error = node.get("on_error") or "stop"
-        if on_error not in VALID_ON_ERROR:
-            raise WorkflowError(
-                f"第 {i + 1} 块：翻车后策略只准 stop/continue，收到 {on_error!r}")
         params = node.get("params") or {}
         if not isinstance(params, dict):
             raise WorkflowError(f"第 {i + 1} 块：参数必须是对象")
-        out.append({"type": type_, "params": params, "on_error": on_error})
+        # 旧配置里的 on_error 字段直接忽略：翻车后统一走智能处置
+        # （能回本丸收拾就继续，收拾不了才停），不再让积木各自设策略。
+        out.append({"type": type_, "params": params})
     return out
 
 
@@ -619,7 +616,7 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
 
     Args:
         config_path: touken_config.json 路径
-        nodes: [{"type", "params", "on_error"}]，会先过 normalize_nodes 校验
+        nodes: [{"type", "params"}]，会先过 normalize_nodes 校验
         make_agent: (config_path) -> ToukenAgent，可注入便于测试
 
     Yields:
@@ -712,8 +709,7 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                 defn = {**defn, "run": defn["daily_run"]}
         if defer_expedition and node['type'] not in {'boot_emulator', 'login'} and getattr(agent, '_expedition_takeover_requested', lambda: False)() is True:
             yield from _pause_for_expedition(agent, plan, i, report)
-        suffix = "（翻车跳过继续）" if node["on_error"] == "continue" else ""
-        yield f"【工作流】▶ 第 {i + 1} 块：{defn['label']}{suffix}"
+        yield f"【工作流】▶ 第 {i + 1} 块：{defn['label']}"
         try:
             if hasattr(agent, "set_progress"):
                 agent.set_progress(f"workflow:{node['type']}")
@@ -739,7 +735,6 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             if defer_expedition and ok and _count_keys(node) and type(pending_runs) is int and pending_runs >= (0 if node['type'] == 'pumpkin' or node['params'].get('sortie_mode') == 'pumpkin' else 1):
                 yield from _pause_for_expedition(agent, plan, i, report, pending_runs)
             ok, detail = False, '✗ 远征接班，目标未完成，未自动续跑'
-            node = {**node, 'on_error': 'stop'}
         if node["type"] == "forge":
             agent._workflow_forge_ran = True
         report.append((defn["label"], detail or ("✓" if ok else "✗")))
@@ -749,11 +744,11 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             game_closed = True
         # 每跑完一块就落盘一次，防中途被杀丢数据
         _flush_report(report, finished=False)
-        if not ok and (node["on_error"] == "stop" or (daily_mode and node["type"] == "login")):
-            # 翻车先看现场（2026-10-20 老大亲定「翻车智能」）：登录翻车
-            # （地基没打好）、游戏已关、远征接班（必须交还控制权）没有现场
-            # 可收拾，直接停；其余先试着导航回本丸——回得去说明现场干净，
-            # 后续积木继续跑（这块照记翻车）；回不去才是真失控，收摊。
+        if not ok:
+            # 翻车智能处置（2026-10-20 老大亲定）：登录翻车（地基没打好）、
+            # 游戏已关、远征接班（必须交还控制权）没有现场可收拾，直接停；
+            # 其余先试着导航回本丸——回得去说明现场干净，后续积木继续跑
+            # （这块照记翻车）；回不去才是真失控，收摊。
             recoverable = (node["type"] != "login" and not game_closed
                            and agent is not None and not interrupted)
             if recoverable:
@@ -773,10 +768,10 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                        "块不跑，交还给远征排班")
             elif node["type"] == "login" or game_closed or agent is None:
                 yield (f"【工作流】这块翻车了，没有现场可收拾，"
-                       f"按设定「翻车即停」，剩余 {len(plan) - i - 1} 块不跑")
+                       f"剩余 {len(plan) - i - 1} 块不跑")
             else:
                 yield (f"【工作流】这块翻车了且回本丸失败，现场失控，"
-                       f"按设定「翻车即停」，剩余 {len(plan) - i - 1} 块不跑")
+                       f"剩余 {len(plan) - i - 1} 块不跑")
             report.extend(_skipped_entries(plan[i + 1:]))
             _flush_report(report, finished=False)
             break

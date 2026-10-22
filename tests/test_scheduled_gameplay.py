@@ -48,7 +48,7 @@ def test_worker_uses_saved_settings_overrides_only_count(script):
     assert effective["rotate_captain"] is True
     assert effective["auto_refill"] is False
     assert effective["use_koban_refill"] is False
-    assert all(node["on_error"] == "stop" for node in captured)
+    assert all("on_error" not in node for node in captured)
     assert saved["params"][script]["runs"] == 15
 
 

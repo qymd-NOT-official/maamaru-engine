@@ -362,8 +362,7 @@ class DayConductorTests(unittest.TestCase):
             self.assertEqual([node["type"] for node in spec["nodes"]], ["raid", "wait_until"])
             self.assertEqual(spec["raid_index"], 0)
         for nodes in ([{"type": "signin", "params": {}}],
-                      [{"type": "raid", "params": {}}, {"type": "raid", "params": {}}],
-                      [{"type": "raid", "params": {}, "on_error": "continue"}]):
+                      [{"type": "raid", "params": {}}, {"type": "raid", "params": {}}]):
             with patch.object(dc.workflow, "find_preset", return_value={"name": "mixed", "nodes": nodes}):
                 with self.assertRaisesRegex(ValueError, "一个联队战"):
                     dc.workflow_spec("mixed", {})
@@ -423,7 +422,7 @@ class DayConductorTests(unittest.TestCase):
             plan = run.call_args.args[1]
             self.assertEqual([node["type"] for node in plan],
                              ["boot_emulator", "login", "raid"])
-            self.assertTrue(all(node["on_error"] == "stop" for node in plan))
+            self.assertTrue(all("on_error" not in node for node in plan))
             self.assertEqual(plan[2]["params"]["rounds"], 24)
             self.assertEqual(plan[2]["params"]["runs"], 24)
             # 走真实玩法入口，验证最终交给 raid_stream 的圈数，而非只看中间字段。
@@ -451,9 +450,9 @@ class DayConductorTests(unittest.TestCase):
         # 两版面板分别签预设原文/补入设置后的节点；两者都是同一份授权。
         settings = {"team_no": "3", "rounds": 99, "auto_refill": True}
         old_panel_signature = (
-            "70c79a20a34a1f93ff96673d53d559cd252d167bbb75e6d6f0ab694ddc07a4b1")
+            "e87952ce9789e05ff9a18388299499de575412ec610e2f6fba35c915b75c891b")
         running_panel_signature = (
-            "30d8f7bae3f19f1c9ca0887a6bf1c1ae570f5e5246a156ec278fbd497c56f884")
+            "50721f45f35131e465410fd6e5e3ba54e520f7d859c674269561cb0c709f06a6")
         self.assertTrue({old_panel_signature, running_panel_signature}.issubset(
             dc.workflow_spec(dc.BUILTIN_ID, settings)["compatible_signatures"]))
         with patch.object(server, "_load_panel_settings", return_value={

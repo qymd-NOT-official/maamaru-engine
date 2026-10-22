@@ -69,13 +69,11 @@ def make_template(settings, config, daily_steps):
             params = {k: copy.deepcopy(v) for k, v in daily.items()
                       if k in DAILY_SORTIE_KEYS}
             params.setdefault("sortie_mode", "none")
-        nodes.append({"type": mapping[step], "params": params,
-                      "on_error": "stop" if step == "登录" else "continue"})
+        nodes.append({"type": mapping[step], "params": params})
     # 账本同步永远殿后：把国服客户端的 HttpRequestCollect 流量日志
     # 拉下来解析成真账房流水（只读、阅后即焚）。daily.ledger_sync=false 可关。
     if daily.get("ledger_sync", True):
-        nodes.append({"type": "ledger_sync", "params": {},
-                      "on_error": "continue"})
+        nodes.append({"type": "ledger_sync", "params": {}})
     return {"id": "builtin-daily", "name": "一键日课", "nodes": nodes,
             "after": daily.get("after") or "none", "daily_mode": True}
 

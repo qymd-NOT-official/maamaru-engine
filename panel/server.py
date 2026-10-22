@@ -1455,22 +1455,18 @@ def _build_workflow(config_path, params):
                     node['params'].update(runs=recommended_runs, auto_refill=True)
         params['daily_bootstrap_version'] = 1
         plan = [node for node in plan if node['type'] not in {'boot_emulator', 'login'}]
-        plan[:0] = [{'type': 'boot_emulator', 'params': {}, 'on_error': 'stop'},
-                    {'type': 'login', 'params': {}, 'on_error': 'stop'}]
+        plan[:0] = [{'type': 'boot_emulator', 'params': {}},
+                    {'type': 'login', 'params': {}}]
     if scheduled_runs is not None:
         raid_index = spec["raid_index"]
         plan[raid_index]["params"] = {**plan[raid_index]["params"],
                                       "runs": scheduled_runs, "rounds": scheduled_runs}
         # 推荐圈数只覆盖本次联队战；原有前后步骤、参数及下班安排照常执行。
         if plan[0]["type"] != "boot_emulator":
-            plan.insert(0, {"type": "boot_emulator", "params": {}, "on_error": "stop"})
+            plan.insert(0, {"type": "boot_emulator", "params": {}})
         raid_index = next(i for i, node in enumerate(plan) if node["type"] == "raid")
         if not any(node["type"] == "login" for node in plan[:raid_index]):
-            plan.insert(1, {"type": "login", "params": {}, "on_error": "stop"})
-        else:
-            for node in plan[:raid_index]:
-                if node["type"] == "login":
-                    node["on_error"] = "stop"
+            plan.insert(1, {"type": "login", "params": {}})
     completed = yield from _workflow.run_workflow(
         config_path, plan, make_agent=_make_agent,
         after=preset.get("after", "none"),
@@ -1501,10 +1497,10 @@ def _build_scheduled_gameplay(config_path, params):
     except ValueError as exc:
         yield f"[时间表] ✗ {exc}，本段不启动"
         raise FlowAborted(str(exc)) from exc
-    nodes = [{"type": "boot_emulator", "params": {}, "on_error": "stop"},
-             {"type": "login", "params": {}, "on_error": "stop"},
-             {"type": params["script"], "params": {**current["params"], "runs": runs},
-              "on_error": "stop"}]
+    nodes = [{"type": "boot_emulator", "params": {}},
+             {"type": "login", "params": {}},
+             {"type": params["script"],
+              "params": {**current["params"], "runs": runs}}]
     completed = yield from _workflow.run_workflow(
         config_path, nodes, make_agent=_make_agent, after="none", daily_mode=False,
         resume=params.get("workflow_resume"), defer_expedition=params["script"] in _workflow._COUNT_KEYS)

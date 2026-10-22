@@ -122,7 +122,7 @@ def _plan_signature(plan: dict) -> str:
 def _preset(workflow_id: str) -> dict:
     if workflow_id == BUILTIN_ID:
         return {"id": BUILTIN_ID, "name": "按联队战设置开工",
-                "nodes": [{"type": "raid", "params": {}, "on_error": "stop"}],
+                "nodes": [{"type": "raid", "params": {}}],
                 "after": "none", "daily_mode": False}
     preset = workflow.find_preset(workflow_id)
     if not preset:
@@ -136,7 +136,7 @@ def _eligible(preset: dict) -> bool:
     except workflow.WorkflowError:
         return False
     raids = [node for node in nodes if node["type"] == "raid"]
-    return len(raids) == 1 and raids[0]["on_error"] == "stop"
+    return len(raids) == 1
 
 
 def options() -> list[dict]:
@@ -147,7 +147,7 @@ def options() -> list[dict]:
 def workflow_spec(workflow_id: str, raid_settings: dict | None = None) -> dict:
     preset = _preset(workflow_id)
     if not _eligible(preset):
-        raise ValueError("请选择包含一个联队战步骤、且联队战翻车即停的任务流")
+        raise ValueError("请选择只包含一个联队战步骤的任务流")
     source_nodes = workflow.normalize_nodes(preset["nodes"])
     raid_index = next(i for i, node in enumerate(source_nodes) if node["type"] == "raid")
     source_node = source_nodes[raid_index]

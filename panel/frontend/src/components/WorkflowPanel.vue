@@ -4,7 +4,6 @@ import { api } from '../api'
 import PaperCard from './PaperCard.vue'
 import PixelControl from './PixelControl.vue'
 import ParamField from './ParamField.vue'
-import SegmentedControl from './SegmentedControl.vue'
 import type { ParamField as Field, WorkflowNode, WorkflowNodeCategory, WorkflowNodeDef, WorkflowPreset, WorkflowIdentity } from '../types'
 import { matchesRule } from '../visibility'
 
@@ -201,7 +200,7 @@ function openPicker(index: number) {
 }
 function addNode(def: WorkflowNodeDef) {
   if (!draft.value || draft.value.nodes.length >= maxNodes) return
-  const node: WorkflowNode = { type: def.type, params: clone(Object.fromEntries(def.params.filter(field => field.type !== 'note').map(field => [field.key, field.default ?? '']))), on_error: 'stop' }
+  const node: WorkflowNode = { type: def.type, params: clone(Object.fromEntries(def.params.filter(field => field.type !== 'note').map(field => [field.key, field.default ?? '']))) }
   draft.value.nodes.splice(insertAt.value++, 0, node)
   expanded.value = draft.value.nodes[insertAt.value - 1]
   lastAdded.value = `已添加「${def.label}」，可以继续选`
@@ -319,7 +318,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                 <div class="wf-step-head">
                   <button type="button" class="wf-step-toggle" :aria-expanded="expanded === node" @click="expanded = expanded === node ? null : node">
                     <span class="wf-number">{{ String(index + 1).padStart(2, '0') }}</span>
-                    <span class="wf-step-label"><strong>{{ defOf(node.type)?.label || node.type }}<small v-if="node.on_error === 'continue'">失败后继续</small></strong><span>{{ summary(node) }}</span></span>
+                    <span class="wf-step-label"><strong>{{ defOf(node.type)?.label || node.type }}</strong><span>{{ summary(node) }}</span></span>
                     <span class="wf-chevron" aria-hidden="true">{{ expanded === node ? '−' : '＋' }}</span>
                   </button>
                   <span class="wf-step-tools"><button type="button" :aria-label="`上移第 ${index + 1} 步`" title="上移" :disabled="index === 0" @click="move(index, -1)">↑</button><button type="button" :aria-label="`下移第 ${index + 1} 步`" title="下移" :disabled="index === draft.nodes.length - 1" @click="move(index, 1)">↓</button><button type="button" class="wf-danger" :aria-label="`移除第 ${index + 1} 步`" title="移除步骤" @click="removeNode(index)">×</button></span>
@@ -330,7 +329,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                   <p v-if="node.type === 'raid'" class="wf-inherited">直接运行任务流时，按这里的圈数执行。只有在时间表选「联队战」并指定这份任务流时，才会用时间表填写的圈数替换本次执行；这里的设置不变。</p>
                   <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="valueFor(node, field.key)" @update:model-value="node.params[field.key] = $event" /></div>
                   <p v-if="draft.daily_mode && node.type === 'login'" class="wf-inherited">登录未成功时，会停止后面的日课安排。</p>
-                  <div v-else class="wf-error-policy"><span>这一步没完成时</span><SegmentedControl v-model="node.on_error" label="失败后的安排" :items="[{ value: 'stop', label: '停下等我', caption: '暂停后面的安排' }, { value: 'continue', label: '继续下一步', caption: '记录失败，接着执行' }]" /></div>
+                  <p v-else class="wf-inherited">这一步没完成时，先试着回本丸收拾现场；收拾不了才会停下后面的安排。</p>
                 </div>
               </article>
             </template>
@@ -445,9 +444,6 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
 .wf-step-detail { padding: 0 18px 18px 53px; }
 .wf-step-detail > p { font-size: 12px; color: var(--ink-dim); line-height: 1.7; margin: 0 0 14px; }
 .wf-params { padding: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.wf-error-policy { margin-top: 15px; padding-top: 14px; border-top: 1px dashed var(--paper-line); display: grid; gap: 10px; }
-.wf-error-policy > span { color: var(--ink-dim); font-size: 11px; }
-.wf-error-policy :deep(.segmented-control) { max-width: 390px; }
 .wf-add { display: block; width: 100%; margin-top: 18px; border-style: dashed; background: transparent; color: var(--fox-gold); }
 .wf-undo { display: flex; gap: 12px; align-items: center; font-size: 12px; margin-top: 14px; color: var(--ink-dim); }
 .wf-undo button, .wf-text-button { background: none; border: 0; color: var(--fox-gold); font-size: 12px; padding: 6px 0; }

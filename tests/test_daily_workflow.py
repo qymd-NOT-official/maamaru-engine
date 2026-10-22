@@ -33,7 +33,6 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_osaka_daily_api_save_reloads_execution_and_checklist_together(self):
         from fastapi.testclient import TestClient
         node = _node("osaka", params={"team_no": "3", "floors": 60, "select_floor": True, "target_floor": 88})
-        node["on_error"] = "stop"
         body = {"id": "builtin-daily", "name": "一键日课", "daily_mode": True,
                 "parameter_version": 1, "nodes": [node], "after": "none",
                 "daily_ui": {"startTime": "", "useRecommendedRuns": False,
@@ -121,7 +120,7 @@ class DailyWorkflowTests(unittest.TestCase):
         template = make_template({"params": {"daily": {"steps": ["登录"]}}},
                                  {}, server._DAILY_STEPS)
         self.assertEqual(template["nodes"][-1]["type"], "ledger_sync")
-        self.assertEqual(template["nodes"][-1]["on_error"], "continue")
+        self.assertNotIn("on_error", template["nodes"][-1])
 
         off = make_template({"params": {"daily": {"steps": ["登录"],
                                                   "ledger_sync": False}}},
@@ -233,10 +232,9 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_recovered_failure_reaches_finish_but_lost_control_does_not(self):
         """翻车智能（2026-10-20 老大亲定）：翻车但回得去本丸 = 后续照跑，
         结束后的安排也照常执行；回本丸失败（现场失控）才一刀切不许下班。"""
-        for policy in ("stop", "continue"):
-            agent = _FakeAgent({"signin_stream": ["[fake] ✗ 失败"]})
-            self.run_plan([_node("signin", on_error=policy)], after="sleep", agent=agent)
-            self.assertTrue(any(c[0] == "logout_stream" for c in agent.calls), policy)
+        agent = _FakeAgent({"signin_stream": ["[fake] ✗ 失败"]})
+        self.run_plan([_node("signin")], after="sleep", agent=agent)
+        self.assertTrue(any(c[0] == "logout_stream" for c in agent.calls))
 
         class LostAgent(_FakeAgent):
             def __init__(self, script=None):
@@ -247,7 +245,7 @@ class DailyWorkflowTests(unittest.TestCase):
                 yield "[fake] 回不去本丸"
 
         agent = LostAgent({"signin_stream": ["[fake] ✗ 失败"]})
-        self.run_plan([_node("signin", on_error="stop")], after="sleep", agent=agent)
+        self.run_plan([_node("signin")], after="sleep", agent=agent)
         self.assertFalse(any(c[0] == "logout_stream" for c in agent.calls))
 
     def test_daily_uses_own_practice_settings_expedition_and_snapshot(self):

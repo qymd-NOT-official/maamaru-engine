@@ -13,7 +13,7 @@ export const dailyGroups = [
 ]
 export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {
   const def = defs.find(d => d.type === type)
-  return {type, on_error: 'stop', params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
+  return {type, params: Object.fromEntries((def?.params || []).filter(f => f.type !== 'note').map(f => [f.key, clone(f.default ?? '')]))}
 }
 const activityTypes = ['raid', 'osaka', 'edocastle', 'hanafuda', 'pumpkin']
 function currentActivity(rows: DailyRow[], defs: WorkflowNodeDef[], available: string[]): DailyRow[] {
@@ -65,7 +65,7 @@ export function dailyRows(preset: WorkflowPreset, defs: WorkflowNodeDef[], activ
   return currentActivity(rows, defs, available)
 }
 export function compileDaily(rows: DailyRow[], tail: WorkflowNode[]): WorkflowNode[] {
-  return clone([{type:'boot_emulator',params:{},on_error:'stop'}, {type:'login',params:{},on_error:'stop'}, ...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])
+  return clone([{type:'boot_emulator',params:{}}, {type:'login',params:{}}, ...rows.filter(r => r.enabled).flatMap(r => r.nodes), ...tail])
 }
 
 export function withRecommendedRuns(node: WorkflowNode, runs: number): WorkflowNode {

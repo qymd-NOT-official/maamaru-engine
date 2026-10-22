@@ -104,7 +104,6 @@ export interface HomeLayout {
 export interface WorkflowNode {
   type: string
   params: ScriptParams
-  on_error: 'stop' | 'continue'
 }
 
 export interface WorkflowProjectionStep {
