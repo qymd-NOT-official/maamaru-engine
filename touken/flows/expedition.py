@@ -165,6 +165,9 @@ class ExpeditionMixin:
         expect_name = map_name
         if not expect_name and map_slot is not None:
             _, expect_name, _ = _map_meta(era, map_slot)
+        # 卡位派图时 map_name 本来就没有，回填查到的图名，
+        # 免得收工日志打出「None」
+        map_name = map_name or expect_name
         slots = cfg.get("map_slots", {})
         if map_slot is not None and str(map_slot) not in slots:
             yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
