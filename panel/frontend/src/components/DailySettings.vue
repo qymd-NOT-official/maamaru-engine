@@ -240,7 +240,7 @@ async function stopExpeditions() {
           <p v-if="!definition(node.type)?.params.length" class="daily-muted">无需设置，开工后会按顺序处理。</p>
         </fieldset>
         </template>
-        <p v-if="activeRow.nodes.length" class="daily-muted">某一步没完成时，会先试着回本丸收拾现场；收拾不了才会停下后面的安排。</p>
+        <p v-if="activeRow.nodes.length" class="daily-muted">出错时会跳过这一步，同时尝试返回本丸，成功返回本丸后进行下一步。</p>
         <p v-if="!activeRow.nodes.length">当前没有可用的活动玩法。</p>
       </section>
     </div>

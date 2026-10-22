@@ -329,7 +329,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDraft)
                   <p v-if="node.type === 'raid'" class="wf-inherited">直接运行任务流时，按这里的圈数执行。只有在时间表选「联队战」并指定这份任务流时，才会用时间表填写的圈数替换本次执行；这里的设置不变。</p>
                   <div class="fields wf-params"><ParamField v-for="field in (defOf(node.type)?.params || []).filter(item => isVisible(item, node))" :key="field.key" :field="field" :model-value="valueFor(node, field.key)" @update:model-value="node.params[field.key] = $event" /></div>
                   <p v-if="draft.daily_mode && node.type === 'login'" class="wf-inherited">登录未成功时，会停止后面的日课安排。</p>
-                  <p v-else class="wf-inherited">这一步没完成时，先试着回本丸收拾现场；收拾不了才会停下后面的安排。</p>
+                  <p v-else class="wf-inherited">出错时会跳过这一步，同时尝试返回本丸，成功返回本丸后进行下一步。</p>
                 </div>
               </article>
             </template>
