@@ -132,8 +132,8 @@ const qqBroadcastEnabled = computed({
         <template v-else-if="selected === 'emulator'"><h3>模拟器</h3><label>ADB 地址<PixelControl v-model="emu.adb_address" :placeholder="emu.default_address" /></label><p>留空表示自动探测；手动填写后脚本会固定连接这个地址。MuMu 多开时端口是 16384 + 32 × 实例号（例如二号实例是 16416）。改动在下次运行脚本时生效。</p>
           <h3>性能档位</h3>
           <label class="check-label"><input v-model="emu.performance_mode" type="radio" value="eco" />省着点跑（默认）</label>
-          <label class="check-label"><input v-model="emu.performance_mode" type="radio" value="fast" />🔥 火力全开冬季限定功能</label>
-          <p>充分调用闲置 CPU 资源，将宝贵的电能转化为温暖。任务效率可能下降，但体感温度可能上升。</p>
+          <label class="check-label"><input v-model="emu.performance_mode" type="radio" value="fast" />🔥火力全开</label>
+          <p>冬季限定功能。充分调用闲置 CPU 资源，将宝贵的电能转化为温暖。任务效率可能下降，但体感温度可能上升。</p>
           <p>省着点跑：限制识别线程数，CPU 占用平缓，实测速度还略快，笔记本推荐。改动在下次运行脚本时生效。</p></template>
         <template v-else-if="selected === 'connection'"><h3>日服连接</h3><p>打开日服浏览器，进入游戏后自动更新家底、刀账与本丸近况。这里只更新数据，不会替你出阵或消耗资源。</p><button class="primary" :disabled="connecting" @click="connect">{{ connecting ? '连接中…' : '打开日服浏览器' }}</button>
           <h3>熄屏画面诊断</h3><p>先进入游戏本丸，再开始诊断。接电后放开鼠标键盘，让屏幕按你的设置自行关闭，约 7 分钟后回来查看结果。期间不点击游戏、不改电源设置、不保存截图。</p>
