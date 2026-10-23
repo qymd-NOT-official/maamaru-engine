@@ -130,6 +130,15 @@ class DeviceAdapter:
         self._minitouch = None    # 内核触摸注入通道（touken/minitouch_client.py）
         self._initialized = False
 
+    # 国服帧固定 1280×720，基准像素空间（game_device.GameDevice 协议）
+    # 即实际像素空间，恒等不换算。
+    FRAME_W, FRAME_H = 1280, 720
+
+    @property
+    def base_size(self) -> tuple[int, int]:
+        """基准分辨率：国服恒为实际帧尺寸。"""
+        return (self.FRAME_W, self.FRAME_H)
+
     def init(self) -> bool:
         """初始化：ADB 可用性检查 + 模拟器自启动。"""
         if self._initialized:

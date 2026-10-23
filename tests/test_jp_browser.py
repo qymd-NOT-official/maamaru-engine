@@ -175,3 +175,74 @@ def test_error_messages_carry_no_connection_detail(fake):
     with pytest.raises(jp_browser.BrowserError) as caught:
         browser.screenshot()
     assert 'ws://' not in str(caught.value)
+
+
+# ---- 基准分辨率像素点击（click_base）与拖拽（swipe） ----
+
+
+def _mouse_events(socket):
+    return [params for method, params in socket.calls
+            if method == 'Input.dispatchMouseEvent']
+
+
+def test_click_base_identity_when_view_matches_base(fake):
+    browser = jp_browser.JpBrowser().connect()   # 视口 1000×600
+    browser.click_base(800, 240, 1000)
+    events = _mouse_events(fake['sockets'][0])
+    assert [p['type'] for p in events] == ['mouseMoved', 'mousePressed', 'mouseReleased']
+    assert all(p['x'] == 800 and p['y'] == 240 for p in events)
+
+
+def test_click_base_scales_to_viewport(fake):
+    """基准宽是视口两倍时，落点视口像素减半（窗口整体缩放）。"""
+    browser = jp_browser.JpBrowser().connect()
+    browser.click_base(800, 240, 2000)           # scale = 1000/2000 = 0.5
+    events = _mouse_events(fake['sockets'][0])
+    assert all(p['x'] == 400 and p['y'] == 120 for p in events)
+
+
+def test_click_base_rejects_point_outside_viewport(fake):
+    """窗口变矮裁掉的内容区：基准点落在视口外必须拒点，不盲点。"""
+    browser = jp_browser.JpBrowser().connect()   # 视口高 600
+    with pytest.raises(ValueError):
+        browser.click_base(500, 700, 1000)       # vy=700 超出视口
+    assert _mouse_events(fake['sockets'][0]) == []
+
+
+def test_click_base_still_checks_view_fuse(fake):
+    browser = jp_browser.JpBrowser().connect()
+    fake['view'] = {'clientWidth': 1200, 'clientHeight': 600}
+    with pytest.raises(jp_browser.BrowserError, match='尺寸已变化'):
+        browser.click_base(500, 300, 1000)
+
+
+def test_swipe_dispatches_press_move_release_sequence(fake, monkeypatch):
+    monkeypatch.setattr(jp_browser.time, 'sleep', lambda s: None)
+    browser = jp_browser.JpBrowser().connect()   # 视口 1000×600
+    browser.swipe(0.2, 0.8, 0.8, 0.2, duration_ms=400)
+    events = _mouse_events(fake['sockets'][0])
+    types = [p['type'] for p in events]
+    assert types[0] == 'mousePressed' and types[-1] == 'mouseReleased'
+    assert set(types[1:-1]) == {'mouseMoved'} and len(types) >= 4
+    assert (events[0]['x'], events[0]['y']) == (200, 480)       # 起点按下
+    assert (events[-1]['x'], events[-1]['y']) == (800, 120)     # 终点松开
+    moves = events[1:-1]
+    assert all(p['buttons'] == 1 for p in events[:-1])          # 拖动中按住
+    assert events[-1]['buttons'] == 0
+    xs = [p['x'] for p in moves]                                # 插值单调逼近终点
+    assert xs == sorted(xs) and abs(xs[-1] - 800) < 1e-9
+
+
+def test_swipe_rejects_point_outside_frame(fake):
+    browser = jp_browser.JpBrowser().connect()
+    with pytest.raises(ValueError):
+        browser.swipe(0.5, 0.5, 1.2, 0.5)
+    assert _mouse_events(fake['sockets'][0]) == []
+
+
+def test_swipe_press_failure_surfaces_original_error(fake, monkeypatch):
+    monkeypatch.setattr(jp_browser.time, 'sleep', lambda s: None)
+    browser = jp_browser.JpBrowser().connect()
+    fake['sockets'][0].fail_on = 'mousePressed'
+    with pytest.raises(jp_browser.BrowserError, match='连接已断开'):
+        browser.swipe(0.2, 0.8, 0.8, 0.2)

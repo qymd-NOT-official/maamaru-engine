@@ -14,7 +14,8 @@ from __future__ import annotations
 import hashlib
 import time
 
-from . import jp_browser, jp_browser_probe as frames, jp_party, jp_vision
+from . import jp_browser, jp_browser_probe as frames, jp_game_device, jp_party, jp_vision
+from .device_adapter import Point
 
 # 点击目标一律「锚点模板 + 基准分辨率像素偏移」：固定归一化坐标在窗口
 # 高度变化后会漂（2026-10-12 事故：窗口 1088→944，指揮标签点歪到编成），
@@ -75,12 +76,13 @@ def _digest(image) -> str:
 
 
 class Sally:
-    """一轮/多轮出阵状态机。browser 只需 screenshot() 与 click(nx, ny)。"""
+    """一轮/多轮出阵状态机。device 只需 screenshot(force=...) 与 click(Point)
+    （基准分辨率像素，见 game_device.GameDevice）。"""
 
-    def __init__(self, browser, log=print, poll: float = 2.0,
+    def __init__(self, device, log=print, poll: float = 2.0,
                  stuck_seconds: float = STUCK_SECONDS,
                  save_debug=None):
-        self.b = browser
+        self.device = device
         self.log = log
         self.poll = poll
         self.stuck_seconds = stuck_seconds
@@ -110,7 +112,7 @@ class Sally:
         last = (None, None)          # (screen, digest)
         last_change = time.monotonic()
         while time.monotonic() < deadline:
-            image = self.b.screenshot()
+            image = self.device.screenshot(force=True)
             screen = self.classify(image)
             if screen in targets:
                 return screen
@@ -135,11 +137,12 @@ class Sally:
         默认重新取一帧；调用方若刚分类过某帧（如启动序列）应把它传进来——
         音量箭头是动的，重新取帧可能抓到另一个动画相位导致匹配失败。"""
         if image is None:
-            image = self.b.screenshot()
+            image = self.device.screenshot(force=True)
         hit = jp_vision.find(image, template)
         if not hit:
             raise SallyStop(f'{what}的按钮没认出来，已停止；请人工查看游戏')
-        self.b.click(hit.nx, hit.ny)
+        w, h = jp_vision.normalize_frame(image).size
+        self.device.click(Point(int(hit.nx * w), int(hit.ny * h)))
 
     def _click_near(self, anchor: str, offset: tuple[float, float],
                     what: str, image=None) -> None:
@@ -148,14 +151,15 @@ class Sally:
         用于没有独立模板价值的固定按钮（页签、弹窗按钮、返回箭头）：
         窗口高度变化只是视口裁剪，内容相对位置不变，锚点命中偏移就对。"""
         if image is None:
-            image = self.b.screenshot()
+            image = self.device.screenshot(force=True)
         normalized = jp_vision.normalize_frame(image)
         hit = jp_vision.match(normalized, jp_vision.load_template(anchor),
                               name=anchor)
         if not hit:
             raise SallyStop(f'{what}没认出来，已停止；请人工查看游戏')
         w, h = normalized.size
-        self.b.click(hit.nx + offset[0] / w, hit.ny + offset[1] / h)
+        self.device.click(Point(int(hit.nx * w + offset[0]),
+                                int(hit.ny * h + offset[1])))
 
     # ---- 出阵流程 ----
 
@@ -173,9 +177,9 @@ class Sally:
         greeted = False                   # 登录问候已点过
         unknown_since: float | None = None  # 进入未知画面的时刻
         departed = False                  # 已看到旧画面消失（防刷新前的残留帧被误当「到本丸了」）
-        with self.b.relaxed_view():
+        with self.device.relaxed_view():
             while time.monotonic() < deadline:
-                image = self.b.screenshot()
+                image = self.device.screenshot(force=True)
                 screen = self.classify(image)
                 if screen != 'home':
                     departed = True
@@ -203,11 +207,12 @@ class Sally:
                         and time.monotonic() - unknown_since > GREET_STABLE):
                     # 点过本丸按钮后的合理落点只有登录问候（近侍无 UI 全身像）。
                     # 它没有可匹配的固定元素，认图无解——此处上下文收敛，
-                    # 等画面稳定 4 秒后点一次中央跳过问候。只点这一次；若猜错
-                    # 画面，公告栏会被认出点掉，其余陌生画面不动会触发卡死
-                    # 熔断，安全停车。
+                    # 等画面稳定 4 秒后点一次内容中央（基准空间中点；视口裁剪
+                    # 下内容坐标不变）跳过问候。只点这一次；若猜错画面，公告栏
+                    # 会被认出点掉，其余陌生画面不动会触发卡死熔断，安全停车。
                     self.log('跳过登录问候…')
-                    self.b.click(0.5, 0.5)
+                    base_w, base_h = jp_vision.base_size()
+                    self.device.click(Point(base_w // 2, base_h // 2))
                     greeted = True
                 unknown_since = (unknown_since if screen == 'unknown' else None)
                 if unknown_since is None and screen == 'unknown':
@@ -220,7 +225,7 @@ class Sally:
                     self._save_debug(image)
                     raise SallyStop('游戏重新启动时画面卡住不动了，已停止；请人工查看游戏')
                 time.sleep(self.poll)
-        self._save_debug(self.b.screenshot())
+        self._save_debug(self.device.screenshot(force=True))
         raise SallyStop('游戏重新启动超时，已停止；请人工查看游戏')
 
     def _navigate_to_team(self) -> None:
@@ -242,7 +247,7 @@ class Sally:
         progressed = False              # 已经点过东西（导航有进展）
         reloaded = False
         while time.monotonic() < deadline:
-            image = self.b.screenshot()
+            image = self.device.screenshot(force=True)
             screen = self.classify(image)
             if screen == 'team':
                 return
@@ -254,7 +259,7 @@ class Sally:
                     loading_since = time.monotonic()
                 elif not reloaded and time.monotonic() - loading_since > RELOAD_AFTER:
                     self.log('游戏黑屏加载太久，自动刷新一次页面…')
-                    self.b.reload()
+                    self.device.reload()
                     reloaded = True
                     self._boot_to_home()
                     deadline = time.monotonic() + NAV_TIMEOUT * 5
@@ -276,7 +281,7 @@ class Sally:
                     continue
                 if not reloaded:
                     self.log('当前画面认不出，刷新一次页面重来…')
-                    self.b.reload()
+                    self.device.reload()
                     reloaded = True
                     self._boot_to_home()
                     deadline = time.monotonic() + NAV_TIMEOUT * 5
@@ -348,7 +353,7 @@ class Sally:
         last_change = time.monotonic()
         last_beat = 0.0
         while time.monotonic() < deadline:
-            image = self.b.screenshot()
+            image = self.device.screenshot(force=True)
             screen = self.classify(image)
             if screen == 'home':
                 return
@@ -428,7 +433,7 @@ class Sally:
                     # 起手已停在部队页等场景：游戏没拉新数据，刷新页面
                     # 重走一遍导航逼它拉取，再拿不到才停。
                     self.log('没拿到队伍数据，刷新页面重新拿一次…')
-                    self.b.reload()
+                    self.device.reload()
                     self._boot_to_home()
                     self._navigate_to_team()
                     latest = self._await_party_data(party_watch)
@@ -468,10 +473,10 @@ def run_script(config_path=None, params: dict | None = None):
     except (TypeError, ValueError):
         raise ValueError('参数格式不正确')
     try:
-        with jp_browser.JpBrowser() as browser:
+        with jp_game_device.JpGameDevice(jp_browser.JpBrowser()) as device:
             with jp_party.PartyWatch() as watch:
-                Sally(browser).run(team_no=team_no, rounds=rounds,
-                                   party_watch=watch)
+                Sally(device).run(team_no=team_no, rounds=rounds,
+                                  party_watch=watch)
     except jp_party.PartyWatchError as exc:
         raise FlowAborted(str(exc)) from exc
     except SallyStop as exc:

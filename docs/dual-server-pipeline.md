@@ -61,17 +61,22 @@
 
 ### 3.1 设备窄接口
 
-`jp_sally.py:78-80` 已实证窄接口可行（只要 `screenshot()` + `click(nx,ny)`
-就能跑玩法）。正式化为协议：
+`jp_sally.py:78-80` 已实证窄接口可行（只要 `screenshot()` + 点击
+就能跑玩法）。正式化为协议（`touken/game_device.py` 的 `GameDevice`）：
 
-- `screenshot()` → 帧（统一 RGB 语义，尺寸以设备自报为准）
-- `click(point)` / `swipe(...)` —— 坐标用**归一化**（0~1），
-  由设备侧换算成像素（JpBrowser 已经是归一化点击，见 `jp_browser.py:163`）
-- `template_match(逻辑名, roi, threshold)` / `ocr(逻辑名, roi)` ——
-  识别能力从 DeviceAdapter 内建方法上移到接口，素材解析问素材包要
+- `screenshot()` → 帧（device-native：国服 numpy BGR，日服 PIL RGB，
+  尺寸以设备自报为准）
+- `click(point)` / `swipe(...)` —— 坐标用**基准分辨率像素空间**
+  （int 像素）：国服基准 = 实际 1280×720（恒等，零改动）；日服基准 =
+  标定锁存分辨率，DMM 页面内容固定宽度，窗口变矮只是视口裁剪，内容
+  坐标在「宽度归一化到基准宽」的空间里不变。不采用 0~1 归一化坐标：
+  视口高度变化时归一化 y 会漂（2026-10-12 事故），基准像素锚死在内容上
+- `template_match(...)` / `ocr(...)` —— 识别能力从 DeviceAdapter 内建
+  方法上移到接口，操作设备最近一次 screenshot 的缓存帧
 
-国服 `DeviceAdapter` 包一层适配（像素↔归一化换算在适配器里做掉），
-日服给 `JpBrowser` 补识别能力（`jp_vision.py` 已有模板匹配，接上即可）。
+国服 `DeviceAdapter` 只补一个 `base_size` 即结构性满足协议；日服侧
+`JpGameDevice`（`touken/jp_game_device.py`）组合 `JpBrowser`，负责
+基准像素 ↔ 视口归一化的换算（换算与视口熔断收在 JpBrowser 内）。
 
 ### 3.2 素材包 ServerPack
 

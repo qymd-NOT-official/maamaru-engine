@@ -51,19 +51,22 @@ def fake_screen(*names):
     return image
 
 
-class FakeBrowser:
+class FakeDevice:
+    """JpGameDevice 形状：screenshot(force) + click(Point) + reload/relaxed_view。"""
+
     def __init__(self, frames):
         self.frames = list(frames)
-        self.clicks = []
+        self.clicks = []          # 基准空间像素 (x, y)
         self.reloads = 0
 
-    def screenshot(self):
+    def screenshot(self, force=False):
         if self.frames:
             self.last = self.frames.pop(0)
         return self.last
 
-    def click(self, nx, ny):
-        self.clicks.append((round(nx, 3), round(ny, 3)))
+    def click(self, point):
+        self.clicks.append((point.x, point.y))
+        return True
 
     def reload(self):
         self.reloads += 1
@@ -73,9 +76,9 @@ class FakeBrowser:
         return contextlib.nullcontext()
 
 
-def make_sally(browser, **kwargs):
+def make_sally(device, **kwargs):
     logs = []
-    sally = jp_sally.Sally(browser, log=logs.append, poll=0.01,
+    sally = jp_sally.Sally(device, log=logs.append, poll=0.01,
                            save_debug=lambda img: None, **kwargs)
     return sally, logs
 
@@ -107,28 +110,32 @@ def happy_frames():
     ]
 
 
-def click_near(clicks, nx, ny, tol=0.01):
-    return any(abs(c[0] - nx) < tol and abs(c[1] - ny) < tol for c in clicks)
+def click_near(clicks, x, y, tol=12):
+    return any(abs(c[0] - x) < tol and abs(c[1] - y) < tol for c in clicks)
 
 
-# 锚点 + 偏移算出的期望点击位置（锚点即 KNOWN 里的粘贴中心）
-CATALOG_CLICK = KNOWN['home/catalog']
-DIR_SALLY_CLICK = KNOWN['directory/sally']
-MENU_SALLY_CLICK = KNOWN['menu/sally']
-TAB1_CLICK = (0.905 + jp_sally.TEAM_TAB_OFFSETS[1][0] / 1508,
-              0.714 + jp_sally.TEAM_TAB_OFFSETS[1][1] / 1088)
-AUTOMARCH_CLICK = (0.905 + jp_sally.AUTOMARCH_OFFSET[0] / 1508,
-                   0.714 + jp_sally.AUTOMARCH_OFFSET[1] / 1088)
-CONFIRM_CLICK = (0.500 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[0] / 1508,
-                 0.154 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[1] / 1088)
-CLOSE_CLICK = (0.500 + jp_sally.DIALOG_CLOSE_OFFSET[0] / 1508,
-               0.154 + jp_sally.DIALOG_CLOSE_OFFSET[1] / 1088)
-BACK_CLICK = (0.060 + jp_sally.BACK_ARROW_OFFSET[0] / 1508,
-              0.134 + jp_sally.BACK_ARROW_OFFSET[1] / 1088)
+# 锚点 + 偏移算出的期望点击位置（基准空间像素 = 归一化 × (1508, 1088) + 偏移）
+def _px(name):
+    return (KNOWN[name][0] * 1508, KNOWN[name][1] * 1088)
+
+
+CATALOG_CLICK = _px('home/catalog')
+DIR_SALLY_CLICK = _px('directory/sally')
+MENU_SALLY_CLICK = _px('menu/sally')
+TAB1_CLICK = (0.905 * 1508 + jp_sally.TEAM_TAB_OFFSETS[1][0],
+              0.714 * 1088 + jp_sally.TEAM_TAB_OFFSETS[1][1])
+AUTOMARCH_CLICK = (0.905 * 1508 + jp_sally.AUTOMARCH_OFFSET[0],
+                   0.714 * 1088 + jp_sally.AUTOMARCH_OFFSET[1])
+CONFIRM_CLICK = (0.500 * 1508 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[0],
+                 0.154 * 1088 + jp_sally.AUTOMARCH_CONFIRM_OFFSET[1])
+CLOSE_CLICK = (0.500 * 1508 + jp_sally.DIALOG_CLOSE_OFFSET[0],
+               0.154 * 1088 + jp_sally.DIALOG_CLOSE_OFFSET[1])
+BACK_CLICK = (0.060 * 1508 + jp_sally.BACK_ARROW_OFFSET[0],
+              0.134 * 1088 + jp_sally.BACK_ARROW_OFFSET[1])
 
 
 def test_happy_path_single_round():
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert any('出阵完成' in line for line in logs)
@@ -139,7 +146,8 @@ def test_happy_path_single_round():
     assert click_near(browser.clicks, *AUTOMARCH_CLICK)
     assert click_near(browser.clicks, *CONFIRM_CLICK)
     assert click_near(browser.clicks, *CLOSE_CLICK)
-    depart = [c for c in browser.clicks if abs(c[0] - 0.905) < 0.01 and abs(c[1] - 0.714) < 0.01]
+    depart = [c for c in browser.clicks
+              if abs(c[0] - 0.905 * 1508) < 12 and abs(c[1] - 0.714 * 1088) < 12]
     assert depart, '出阵按钮没被点'
 
 
@@ -147,7 +155,7 @@ def test_menu_already_open_used_directly():
     """指挥菜单已被手动开着（上次中断留下的现场）：直接用，不走目录。"""
     frames = [fake_screen('menu/sally')  # 菜单已开，直接点出阵入口
               ] + happy_frames()[2:]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert not click_near(browser.clicks, *CATALOG_CLICK)  # 没绕道目录
@@ -159,7 +167,7 @@ def test_navigation_continues_from_formation():
     """停留在编成页：点左上 ↩ 回本丸再接着走。"""
     frames = [fake_screen('formation/label'),   # 编成页
               ] + happy_frames()
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert click_near(browser.clicks[:1], *BACK_CLICK)
@@ -168,7 +176,7 @@ def test_navigation_continues_from_formation():
 
 def test_dialog_during_march_stops_everything():
     frames = happy_frames()[:12] + [fake_screen('dialog/yes', 'dialog/no')]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='弹窗'):
         sally.run(team_no=2, rounds=1)
@@ -181,7 +189,7 @@ def test_unknown_screen_mid_navigation_stops(monkeypatch):
     monkeypatch.setattr(jp_sally, 'UNKNOWN_STABLE', -1.0)
     weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
     frames = [fake_screen('home/badge', 'home/catalog'), weird]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
         sally.run(team_no=1, rounds=1)
@@ -193,7 +201,7 @@ def test_unknown_at_start_reloads_once(monkeypatch):
     monkeypatch.setattr(jp_sally, 'UNKNOWN_STABLE', -1.0)
     monkeypatch.setattr(jp_sally, 'BOOT_TIMEOUT', 0.05)
     weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
-    browser = FakeBrowser([weird])
+    browser = FakeDevice([weird])
     sally, logs = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop):
         sally.run(team_no=1, rounds=1)
@@ -204,7 +212,7 @@ def test_unknown_at_start_reloads_once(monkeypatch):
 
 def test_stuck_march_blows_fuse():
     weird = Image.new('RGB', (1508, 1088), (10, 200, 10))
-    browser = FakeBrowser([weird])
+    browser = FakeDevice([weird])
     sally, _ = make_sally(browser, stuck_seconds=0.05)
     with pytest.raises(jp_sally.SallyStop, match='没有变化'):
         sally._watch_march()
@@ -212,7 +220,7 @@ def test_stuck_march_blows_fuse():
 
 def test_near_black_counts_as_loading_then_timeout():
     black = Image.new('RGB', (1508, 1088), (0, 0, 0))
-    browser = FakeBrowser([black])
+    browser = FakeDevice([black])
     sally, _ = make_sally(browser)
     sally.stuck_seconds = 999
     with pytest.raises(jp_sally.SallyStop, match='超时'):
@@ -230,12 +238,12 @@ def notice_frame():
     return fake_screen('notice/close', 'notice/hide-forever')
 
 
-NOTICE_CLOSE_CLICK = KNOWN['notice/close']
+NOTICE_CLOSE_CLICK = _px('notice/close')
 
 
 def test_notice_board_closed_during_navigation():
     """公告栏挡在导航路上：认出后点 ✕ 关掉，照常出阵。"""
-    browser = FakeBrowser([notice_frame()] + happy_frames())
+    browser = FakeDevice([notice_frame()] + happy_frames())
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
@@ -253,7 +261,7 @@ def test_notice_board_during_boot_gets_closed(monkeypatch):
         notice_frame(),                        # 公告栏
         fake_screen('home/badge'),
     ]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally._boot_to_home()
     assert click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
@@ -263,7 +271,7 @@ def test_notice_board_during_boot_gets_closed(monkeypatch):
 def test_notice_during_march_still_stops():
     """行军途中弹出公告栏：不在白名单里，安全停车，绝不盲点。"""
     frames = happy_frames()[:12] + [notice_frame()]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
         sally.run(team_no=1, rounds=1)
@@ -275,13 +283,13 @@ def confirm_frame():
     return fake_screen('dialog/decline', 'dialog/accept')
 
 
-DECLINE_CLICK = KNOWN['dialog/decline']
-ACCEPT_CLICK = KNOWN['dialog/accept']
+DECLINE_CLICK = _px('dialog/decline')
+ACCEPT_CLICK = _px('dialog/accept')
 
 
 def test_confirm_dialog_declined_during_navigation():
     """导航路上撞见确认窗：默认点 いいえ 拒绝，照常出阵；绝不碰 はい。"""
-    browser = FakeBrowser([confirm_frame()] + happy_frames())
+    browser = FakeDevice([confirm_frame()] + happy_frames())
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert click_near(browser.clicks, *DECLINE_CLICK)
@@ -300,7 +308,7 @@ def test_confirm_dialog_during_boot_gets_declined(monkeypatch):
         confirm_frame(),                       # 确认窗
         fake_screen('home/badge'),
     ]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally._boot_to_home()
     assert click_near(browser.clicks, *DECLINE_CLICK)
@@ -311,7 +319,7 @@ def test_confirm_dialog_during_boot_gets_declined(monkeypatch):
 def test_confirm_during_march_still_stops():
     """行军途中弹出确认窗：不在白名单里，安全停车，两个按钮都不点。"""
     frames = happy_frames()[:12] + [confirm_frame()]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
         sally.run(team_no=1, rounds=1)
@@ -340,7 +348,7 @@ def make_payload(members, status=1, team_no=1):
 
 
 HEALTHY_TEAM = [(1, 101, 3, 56, 56), (2, 102, 5, 33, 33)]
-DEPART_CLICK = KNOWN['team/depart']
+DEPART_CLICK = _px('team/depart')
 
 
 class FakeWatch:
@@ -355,7 +363,7 @@ class FakeWatch:
 def test_heavy_injury_blocks_departure():
     """队伍里有重伤：出发前拦下，出发按钮绝不点。"""
     payload = make_payload(HEALTHY_TEAM + [(3, 103, 7, 10, 56)])  # 重伤
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='重伤'):
         sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
@@ -365,7 +373,7 @@ def test_heavy_injury_blocks_departure():
 def test_medium_injury_logs_and_departs():
     """中伤不拦：日志点名带伤出发，流程照常走完。"""
     payload = make_payload(HEALTHY_TEAM + [(3, 103, 7, 20, 56)])  # 中伤
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
     assert any('带伤出发' in line and '中伤' in line for line in logs)
@@ -378,14 +386,14 @@ def test_stale_or_missing_party_data_blocks(monkeypatch):
     monkeypatch.setattr(jp_sally, 'PARTY_DATA_WAIT', 0.05)
     monkeypatch.setattr(jp_sally.Sally, '_boot_to_home', lambda self: None)
 
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
         sally.run(team_no=1, rounds=1, party_watch=FakeWatch(None))
     assert browser.reloads == 1            # 试过刷新重拿，不是直接放弃
 
     payload = make_payload(HEALTHY_TEAM)
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
         sally.run(team_no=1, rounds=1,
@@ -396,7 +404,7 @@ def test_stale_or_missing_party_data_blocks(monkeypatch):
 def test_team_away_blocks_departure():
     """队伍在远征/出阵中（status != 1）：拦下，不盲点出发。"""
     payload = make_payload(HEALTHY_TEAM, status=2)
-    browser = FakeBrowser(happy_frames())
+    browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='待命'):
         sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
@@ -415,13 +423,13 @@ def test_black_loading_too_long_reloads_and_boots(monkeypatch):
         greeting_frame(), greeting_frame(),    # 登录问候（unknown 稳定后点中央）
         fake_screen('home/badge'),             # 回到本丸
     ] + happy_frames()[1:]                     # 之后照常走到出阵
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally.run(team_no=1, rounds=1)
     assert browser.reloads == 1
     assert any('自动刷新' in line for line in logs)
     assert any('跳过登录问候' in line for line in logs)
-    assert (0.5, 0.5) in browser.clicks        # 问候屏中央
+    assert (754, 544) in browser.clicks      # 问候屏基准空间中央
     assert any('出阵完成' in line for line in logs)
 
 
@@ -430,7 +438,7 @@ def test_reload_only_once_per_navigation(monkeypatch):
     monkeypatch.setattr(jp_sally, 'RELOAD_AFTER', -1.0)
     monkeypatch.setattr(jp_sally, 'BOOT_TIMEOUT', 0.05)
     black = Image.new('RGB', (1508, 1088), (0, 0, 0))
-    browser = FakeBrowser([black])             # 永远黑屏
+    browser = FakeDevice([black])             # 永远黑屏
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop):
         sally.run(team_no=1, rounds=1)
@@ -447,7 +455,7 @@ def test_boot_ignores_stale_home_frame(monkeypatch):
         fake_screen('boot/honmaru-button'),
         fake_screen('home/badge'),             # 真正回到本丸
     ]
-    browser = FakeBrowser(frames)
+    browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     sally._boot_to_home()
     # 残留帧没骗过它：箭头与本丸按钮都被点过
@@ -457,16 +465,18 @@ def test_boot_ignores_stale_home_frame(monkeypatch):
 
 def test_run_script_success_path(monkeypatch):
     """run_script 成功跑完一轮：不抛错、产出空日志迭代器（日志走 print）。"""
-    fake = FakeBrowser(happy_frames())
+    fake = FakeDevice(happy_frames())
 
-    class FakeJpBrowser:
+    class FakeGameDevice:
         def __enter__(self):
             return fake
 
         def __exit__(self, *exc):
             return False
 
-    monkeypatch.setattr(jp_sally.jp_browser, 'JpBrowser', lambda: FakeJpBrowser())
+    monkeypatch.setattr(jp_sally.jp_browser, 'JpBrowser', lambda: object())
+    monkeypatch.setattr(jp_sally.jp_game_device, 'JpGameDevice',
+                        lambda browser: FakeGameDevice())
 
     class FakePartyWatch:
         def __enter__(self):
@@ -478,18 +488,18 @@ def test_run_script_success_path(monkeypatch):
     monkeypatch.setattr(jp_sally.jp_party, 'PartyWatch', lambda: FakePartyWatch())
     lines = list(jp_sally.run_script(params={'team_no': 1, 'rounds': 1}))
     assert lines == []
-    assert any(abs(c[0] - 0.905) < 0.01 for c in fake.clicks)  # 出发键按过
+    assert any(abs(c[0] - 0.905 * 1508) < 12 for c in fake.clicks)  # 出发键按过
 
 
 @pytest.mark.parametrize('team_no', [0, 6, '二'])
 def test_bad_team_rejected(team_no):
-    sally, _ = make_sally(FakeBrowser([]))
+    sally, _ = make_sally(FakeDevice([]))
     with pytest.raises((ValueError, KeyError, TypeError)):
         sally.run(team_no=team_no, rounds=1)
 
 
 def test_rounds_must_be_sane():
-    sally, _ = make_sally(FakeBrowser([]))
+    sally, _ = make_sally(FakeDevice([]))
     with pytest.raises(ValueError):
         sally.run(team_no=1, rounds=0)
     with pytest.raises(ValueError):

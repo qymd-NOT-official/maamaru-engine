@@ -91,6 +91,31 @@ def read(image, roi: tuple[float, float, float, float] | None = None,
             if score >= min_score]
 
 
+def read_tokens(image, roi: tuple[float, float, float, float] | None = None,
+                min_score: float = 0.5) -> list[tuple[str, float, float, float]]:
+    """读一块区域里的文字，返回 [(文本, 置信度, cx, cy)]（已按置信度过滤）。
+
+    与 read 的区别是保留引擎返回的检测框：(cx, cy) 为文本框中心在
+    **传入帧**上的像素坐标（roi 裁剪时加回裁剪偏移），供调用方点击。
+    roi 为 None 读整帧。识别结果为空返回空列表。"""
+    offset_x = offset_y = 0
+    if roi is not None:
+        w, h = image.size
+        offset_x, offset_y = int(roi[0] * w), int(roi[1] * h)
+        image = crop_roi(image, roi)
+    result, _elapse = _get_engine()(np.array(image.convert('RGB')))
+    tokens = []
+    for box, text, score in (result or []):
+        if score < min_score:
+            continue
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        tokens.append((str(text), float(score),
+                       (min(xs) + max(xs)) / 2 + offset_x,
+                       (min(ys) + max(ys)) / 2 + offset_y))
+    return tokens
+
+
 def read_text(image, roi: tuple[float, float, float, float] | None = None,
               min_score: float = 0.5, sep: str = ' ') -> str:
     """读一块区域并拼成一行文本；什么都没读到返回空串。"""

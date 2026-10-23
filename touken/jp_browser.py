@@ -198,3 +198,66 @@ class JpBrowser:
                 pass  # 松开是善后，连接已死时不盖掉按下的原始错误
         if error:
             raise error
+
+    def click_base(self, bx: float, by: float, base_width: float,
+                   settle: float = 0.1) -> None:
+        """按基准分辨率像素坐标点击：换算成视口归一化后走现有 click 序列。
+
+        换算规则（JpGameDevice 只传数，换算与视口熔断都收在本层）：
+        scale = clientWidth / base_width，视口像素 = 基准像素 × scale。
+        先 check_view 再换算；落在当前视口之外的点（窗口变矮被裁掉的
+        区域）抛 ValueError，绝不盲点——与 click 的越界校验同款。"""
+        if (isinstance(bx, bool) or isinstance(by, bool)
+                or not isinstance(bx, (int, float))
+                or not isinstance(by, (int, float))
+                or not isinstance(base_width, (int, float)) or base_width <= 0):
+            raise ValueError('点击位置必须在游戏画面内')
+        view = self.check_view()
+        scale = view['clientWidth'] / base_width
+        vx, vy = bx * scale, by * scale
+        if not (0 < vx < view['clientWidth'] and 0 < vy < view['clientHeight']):
+            raise ValueError('点击位置在当前视口之外')
+        self.click(vx / view['clientWidth'], vy / view['clientHeight'],
+                   settle=settle)
+
+    def swipe(self, nx1: float, ny1: float, nx2: float, ny2: float,
+              duration_ms: int = 400) -> None:
+        """按画面归一化坐标拖拽（按下 → 插值移动若干步 → 松开）。
+
+        与 click 同款校验、同款只发不等应答（理由见 _send 注释）。
+        移动步数按时长分摊，每步之间 sleep，让页面看到一条连贯的
+        拖动轨迹而不是瞬移。"""
+        coords = (nx1, ny1, nx2, ny2)
+        if (any(isinstance(v, bool) or not isinstance(v, (int, float))
+                for v in coords)
+                or not all(0 < v < 1 for v in coords)):
+            raise ValueError('滑动位置必须在游戏画面内')
+        view = self.check_view()
+        w, h = view['clientWidth'], view['clientHeight']
+        x1, y1, x2, y2 = nx1 * w, ny1 * h, nx2 * w, ny2 * h
+        steps = max(2, min(24, int(duration_ms) // 40))
+        step_s = duration_ms / 1000.0 / steps
+        error = None
+        try:
+            self._send('Input.dispatchMouseEvent',
+                       {'x': x1, 'y': y1, 'type': 'mousePressed',
+                        'button': 'left', 'buttons': 1, 'clickCount': 1})
+            time.sleep(step_s)
+            for i in range(1, steps + 1):
+                t = i / steps
+                self._send('Input.dispatchMouseEvent',
+                           {'x': x1 + (x2 - x1) * t, 'y': y1 + (y2 - y1) * t,
+                            'type': 'mouseMoved', 'button': 'left',
+                            'buttons': 1})
+                time.sleep(step_s)
+        except BrowserError as exc:
+            error = exc
+        finally:
+            try:
+                self._send('Input.dispatchMouseEvent',
+                           {'x': x2, 'y': y2, 'type': 'mouseReleased',
+                            'button': 'left', 'buttons': 0, 'clickCount': 1})
+            except BrowserError:
+                pass  # 松开是善后，连接已死时不盖掉移动途中的原始错误
+        if error:
+            raise error
