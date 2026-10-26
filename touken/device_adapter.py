@@ -234,6 +234,44 @@ class DeviceAdapter:
             print(f"[ADB 错误] {' '.join(cmd[-3:])}: {exc}")
             return None
 
+    def _adb_capture_bgr(self) -> Optional[Any]:
+        """裸 adb 截图抓一帧：exec-out screencap -p → PNG bytes → numpy BGR。
+
+        独立成 helper 是为了让 MuMu 冻帧「静止核验」也能走这条路——
+        verifier 在 capture() 回调里被调，绝不能反过来碰 screenshot()
+        （递归截图），所以这里直接抓 ADB 原始帧，不读/不写截图缓存。
+        任何失败返回 None。
+        """
+        png = self._adb_run(["exec-out", "screencap", "-p"], timeout=15.0, binary=True)
+        if not png:
+            print("[ADB] 截图失败/超时")
+            return None
+        try:
+            import numpy as np
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(png)).convert("RGB")
+            # PIL 是 RGB，识别引擎要 BGR → 反转通道
+            return np.array(img)[:, :, ::-1].copy()
+        except Exception as exc:
+            print(f"[ADB] 截图解析失败: {exc}")
+            return None
+
+    def _verify_static_frame(self, frame) -> Optional[bool]:
+        """MuMu 冻帧核验：拿 ADB 新截的一帧和 MuMu 帧逐像素比。
+
+        返回 True=两条通道同画面（画面真静止，放行）；False=不同（通道
+        真冻了）；None=ADB 截图拿不到（核验不可用，调用方走安全回退）。
+        """
+        adb_frame = self._adb_capture_bgr()
+        if adb_frame is None:
+            return None
+        try:
+            import numpy as np
+            return bool(np.array_equal(frame, adb_frame))
+        except Exception:
+            return None
+
     def screenshot(self, force: bool = False) -> Optional[Any]:
         """
         截图并返回图像对象
@@ -258,8 +296,12 @@ class DeviceAdapter:
             self._mumu_tried = True
             try:
                 from .mumu_screen import MumuScreen
-                self._mumu_screen = MumuScreen.from_adb(self.adb_path,
-                                                        self.adb_address)
+                # 注入 ADB 静止核验：选人页等真静止画面会字节级连撞冻帧线，
+                # 撞线时用它交叉确认「ADB 也截到同一张图」再放行，免得误判
+                # 把显存通道断开重连（误判会把截图速度打回 ADB 级）。
+                self._mumu_screen = MumuScreen.from_adb(
+                    self.adb_path, self.adb_address,
+                    static_verifier=self._verify_static_frame)
             except Exception as exc:
                 print(f"[MuMu截图] 通道初始化失败，用 ADB 截图: {exc}")
                 self._mumu_screen = None
@@ -271,23 +313,12 @@ class DeviceAdapter:
             if self._mumu_screen._dead:
                 self._mumu_screen = None  # 通道已自判死刑，别再问了
 
-        # 裸 adb 截图：exec-out screencap -p → PNG bytes → numpy BGR
-        png = self._adb_run(["exec-out", "screencap", "-p"], timeout=15.0, binary=True)
-        if not png:
-            print("[ADB] 截图失败/超时")
+        # 裸 adb 截图兜底
+        arr = self._adb_capture_bgr()
+        if arr is None:
             return None
-        try:
-            import numpy as np
-            from PIL import Image
-            import io
-            img = Image.open(io.BytesIO(png)).convert("RGB")
-            # PIL 是 RGB，识别引擎要 BGR → 反转通道
-            arr = np.array(img)[:, :, ::-1].copy()
-            self._last_image = arr
-            return arr
-        except Exception as exc:
-            print(f"[ADB] 截图解析失败: {exc}")
-            return None
+        self._last_image = arr
+        return arr
 
     def save_screenshot(self, path: str, force: bool = True) -> bool:
         """截图存盘（调试用）。BGR numpy → RGB → PNG"""

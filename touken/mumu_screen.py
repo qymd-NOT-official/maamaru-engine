@@ -28,9 +28,12 @@ from typing import Optional
 _MAX_FAILURES = 3
 _DEFAULT_ADB_PORT = 16384  # MuMu 12：实例 N 的 ADB 端口 = 16384 + 32*N
 _PORT_STEP = 32
-# 连续这么多帧字节级一致 = 通道冻了。真静态画面（黑屏过场）误判了也无害：
-# 回退 ADB 截到的还是同一张静态图，只是慢一点。2026-09-17 现场：通道冻在
-# 公告弹窗帧上（dll 照样返回 rc=0），真实画面已在本丸，until_gone 死循环。
+# 连续这么多帧字节级一致 = 通道疑似冻了。静态选人页这类真静止画面也会
+# 连撞，撞线时先过 static_verifier 交叉核验（有注入才调），核验说 ADB 也
+# 是同一张图就放行，只有核验说「不同」或「不可用」才断开重连。真误判了也
+# 无害：回退 ADB 截到的还是同一张静态图，只是慢一点。
+# 2026-09-17 现场：通道冻在公告弹窗帧上（dll 照样返回 rc=0），真实画面已
+# 在本丸，until_gone 死循环。
 _STALE_LIMIT = 10
 
 
@@ -51,7 +54,8 @@ class MumuScreen:
     """MuMu 共享内存截图。capture() 返回 BGR numpy 数组或 None。"""
 
     def __init__(self, install_root: Path, dll_path: Path,
-                 instance_index: int = 0, display_id: int = 0):
+                 instance_index: int = 0, display_id: int = 0,
+                 static_verifier=None):
         self.install_root = Path(install_root)
         self.dll_path = Path(dll_path)
         self.instance_index = instance_index
@@ -65,9 +69,16 @@ class MumuScreen:
         self._prev_frame = None
         self._same_frames = 0
         self._stale_revives = 0
+        # 可选的静止核验回调：撞冻帧线时拿当前 BGR 帧去问第二条通道
+        # （device_adapter 注入 ADB 交叉核验）。返回 True=画面真静止且通道
+        # 健康（放行本帧并重置冻帧/重连计数），False/None=按冻帧处理
+        # （None=核验不可用，走原安全回退）。默认 None 时完全保留旧行为，
+        # 不调用任何外部逻辑。
+        self._static_verifier = static_verifier
 
     @classmethod
-    def from_adb(cls, adb_path: str, adb_address: str) -> Optional["MumuScreen"]:
+    def from_adb(cls, adb_path: str, adb_address: str,
+                 static_verifier=None) -> Optional["MumuScreen"]:
         """从 ADB 路径/地址推导 MuMu 实例。不是 MuMu 布局就返回 None。"""
         try:
             shell_dir = Path(adb_path).resolve().parent  # .../12.0/shell
@@ -81,7 +92,7 @@ class MumuScreen:
                 index = max(0, (port - _DEFAULT_ADB_PORT) // _PORT_STEP)
             except (ValueError, IndexError):
                 pass
-            return cls(install_root, dll, index)
+            return cls(install_root, dll, index, static_verifier=static_verifier)
         except (OSError, IndexError):
             return None
 
@@ -170,9 +181,31 @@ class MumuScreen:
             # 冻帧检测：dll 缓冲区冻结时照样返回 rc=0 + 旧帧，表面一切正常。
             # 字节级连撞 _STALE_LIMIT 次就断开重连；救过还冻就本场判死，
             # 返回 None 让调用方回退 ADB 截图。
+            # 静态选人页这类真静止画面也会连撞，撞线时先过 _static_verifier
+            # 交叉核验：核验说画面确实静止就放行本帧（不误伤、不断开）。
             if self._prev_frame is not None and np.array_equal(bgr, self._prev_frame):
                 self._same_frames += 1
                 if self._same_frames >= _STALE_LIMIT:
+                    verdict = None
+                    if self._static_verifier is not None:
+                        try:
+                            verdict = self._static_verifier(bgr)
+                        except Exception as exc:
+                            _safe_print(f"[MuMu截图] 静止核验异常: {exc}")
+                            verdict = None
+                    if verdict:
+                        # 第二条通道（ADB）截到同一张图：画面真静止且通道
+                        # 健康，放行本帧、重置冻帧计数，连重连次数也一并
+                        # 清零——不能带着旧账，否则下次真冻帧会沿积累的次数
+                        # 过早判死。
+                        self._same_frames = 0
+                        self._stale_revives = 0
+                        _safe_print(f"[MuMu截图] 连续 {_STALE_LIMIT} 帧一致，"
+                                    "ADB 核验同画面：真静止，放行")
+                        self._prev_frame = bgr
+                        return bgr
+                    # False=ADB 画面不同（通道真冻了）；None=核验不可用，
+                    # 两种都走原安全回退：断开重连/判死。
                     self._same_frames = 0
                     self._stale_revives += 1
                     if self._handle is not None:
@@ -185,6 +218,9 @@ class MumuScreen:
                         _safe_print("[MuMu截图] 重连后仍是冻帧，本场停用显存通道，"
                                     "退回 ADB 截图")
                         self._dead = True
+                    elif self._static_verifier is not None and verdict is None:
+                        _safe_print(f"[MuMu截图] 连续 {_STALE_LIMIT} 帧完全一致，"
+                                    "静止核验不可用，按冻帧断开重连")
                     else:
                         _safe_print(f"[MuMu截图] 连续 {_STALE_LIMIT} 帧完全一致，"
                                     "通道疑似冻帧，断开重连")

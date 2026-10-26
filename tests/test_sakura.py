@@ -537,7 +537,8 @@ class SwapTiredInFactsTests(unittest.TestCase):
         self.assertIs(result, False)
         self.assertTrue(any("全员飘花" in m for m in messages))
         self.assertEqual(device.swipes, [])      # 数据定论：名单一页都不用扫
-        self.assertEqual(device.clicks, [(1033, 160)])
+        # 无候选收尾：点左上返回箭头退回编队后才下收工结论（13d93a75197d）
+        self.assertEqual(device.clicks, [(1033, 160), (135, 25)])
         self.assertEqual(calls, [])
 
     def test_missing_facts_fall_back_to_ocr_scan(self):
@@ -607,6 +608,120 @@ class SwapTiredInFactsTests(unittest.TestCase):
         self.assertEqual(device.clicks, [(1033, 160)])
         self.assertEqual(result, "legacy")
         self.assertEqual(calls, [50])
+
+
+# ==================== 无候选收尾：先退回编队再下结论 ====================
+
+class SakuraLeaveMaa:
+    """收尾回归假实现：两个标题的 OCR 各自可开关（模拟在不在列表页、
+    返回后回没回到编队），名单疲劳行按 fy 喂给 OCR 兜底路径。"""
+
+    def __init__(self, rows=(), on_list=True, back_to_formation=True):
+        self.rows = list(rows)                 # [(fy, 疲劳)]
+        self.on_list = on_list                 # OCR "刀剑男士选择" 是否命中
+        self.back_to_formation = back_to_formation  # 返回后 OCR "部队编成" 是否命中
+        self.clicks = []
+        self.swipes = []
+
+    def screenshot(self, force=False):
+        return None
+
+    def ocr(self, text, roi, match_mode="contains"):
+        if text == "刀剑男士选择":
+            return Point(640, 30) if self.on_list else None
+        if text == "部队编成":
+            return Point(640, 30) if self.back_to_formation else None
+        return None
+
+    def ocr_all(self, roi):
+        if roi.x == 460:
+            return [(f"疲劳{v}/100", Point(540, fy)) for fy, v in self.rows]
+        return []
+
+    def click(self, point):
+        self.clicks.append((point.x, point.y))
+
+    def template_match(self, *args, **kwargs):
+        return None
+
+    def swipe(self, *args):
+        self.swipes.append(args)
+
+
+def _run_swap(flow, device, event, threshold=50):
+    """走完整 _swap_tired_in：有事件=数据路径，None=OCR 兜底路径。"""
+    from touken import game_state as gs
+    with patch.object(gs, "available_events",
+                      return_value=[event] if event else []), \
+            patch.object(gs.time, "time", return_value=1005), \
+            patch("touken.flows.sakura.time.sleep"), \
+            patch.object(flow, "_sakura_sort_list", return_value=True), \
+            patch.object(flow, "_sakura_candidate_eligible", return_value=True), \
+            patch.object(flow, "_wait_list_closed", return_value=True, create=True):
+        messages = []
+        stream = flow._swap_tired_in(1, threshold)
+        while True:
+            try:
+                messages.append(next(stream))
+            except StopIteration as stop:
+                return stop.value, messages
+
+
+class NoCandidateBackOutTests(unittest.TestCase):
+    """无候选两条路径的收尾纪律：先退回编队再 return False；
+    退回没确认必须返回 None 并留明确日志，不许假装干净收工。"""
+
+    def test_ocr_no_candidate_backs_out_before_finished(self):
+        # OCR 兜底：本页疲劳全部 ≥ threshold = 没人累。先点返回箭头退回
+        # 编队，再返回 False 下"没有候选"的结论
+        device = SakuraLeaveMaa(rows=[(200, 80), (300, 90)])
+        flow = _flow(device)
+        result, messages = _run_swap(flow, device, None)
+
+        self.assertIs(result, False)
+        # 点击顺序：替换(1033,160) → 返回箭头(135,25)；名单一页都没翻
+        self.assertEqual(device.clicks, [(1033, 160), (135, 25)])
+        self.assertEqual(device.swipes, [])
+
+    def test_no_candidate_back_out_failure_returns_none(self):
+        # 数据路径：全刀池无候选，但返回后编队标题没确认——不能当干净
+        # 收工，必须返回 None 并留明确日志
+        pool = [(201, 80, 5, 39, 1)]
+        device = SakuraLeaveMaa(back_to_formation=False)
+        flow = _flow(device)
+        result, messages = _run_swap(flow, device, _pool_event(pool))
+
+        self.assertIsNone(result)
+        self.assertTrue(any("不假装干净收工" in m for m in messages))
+        self.assertEqual(device.clicks, [(1033, 160), (135, 25)])
+
+    def test_ocr_no_candidate_back_out_failure_returns_none(self):
+        device = SakuraLeaveMaa(rows=[(200, 80)], back_to_formation=False)
+        flow = _flow(device)
+        result, messages = _run_swap(flow, device, None)
+
+        self.assertIsNone(result)
+        self.assertTrue(any("不假装干净收工" in m for m in messages))
+        self.assertEqual(device.clicks, [(1033, 160), (135, 25)])
+
+    def test_already_left_selection_never_clicks_back(self):
+        # 不在选人列表页：视为已离开，一个返回键都不许盲点
+        device = SakuraLeaveMaa(on_list=False)
+        flow = _flow(device)
+        messages = list(flow._sakura_leave_selection_for_formation())
+
+        self.assertTrue(any("不点返回" in m for m in messages))
+        self.assertEqual(device.clicks, [])
+
+    def test_found_candidate_never_triggers_back_out(self):
+        # 正常换人的路径不得增加返回动作（守住既有候选过滤与点击顺序）
+        pool = [(201, 40, 5, 39, 1)]
+        device = SakuraListMaa([(200, 40)], names={200: "小狐丸"})
+        flow = _flow(device)
+        result, messages = _run_swap(flow, device, _pool_event(pool))
+
+        self.assertIs(result, True)
+        self.assertEqual(device.clicks, [(1033, 160), (1197, 160)])
 
 
 if __name__ == "__main__":

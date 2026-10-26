@@ -42,6 +42,7 @@ _EQUIP_X = 963            # 每行"装备"按钮
 _SWAP_X = 1033            # 每行"替换"按钮
 _AUTO_EQUIP = (621, 96)   # 更换装备页"自动装备刀装"
 _EQUIP_BACK = (135, 25)   # 更换装备页返回箭头
+_SEL_BACK = (135, 25)     # 刀剑男士选择页返回箭头（同一只左上箭头）
 
 # 换队长拖拽：从成员卡片拖到队长位。起点 x 是真机校准点——
 # 太快会被游戏吞（repair.py 实测 <400ms 失灵）；adb input swipe 匀速
@@ -504,6 +505,8 @@ class SakuraMixin:
         选人决策吃全刀池游戏数据（上锁、等级>1、疲劳 < threshold、不在任何
         部队），OCR 只在名单里定位候选的行坐标；数据缺失/过期回退画面逐行
         核对，扫描上限依旧如实汇报，不脑补"全员飘花"。
+        无候选（数据定论或 OCR 全员达标）先退回编队再返回 False；退回
+        没确认返回 None，绝不抱着选人页假装干净收工。
         Returns: True/False 为定论，None=没核实出来（yield from 接返回值）
         """
         cy = _ROW_CY[slot - 1]
@@ -520,8 +523,11 @@ class SakuraMixin:
         candidates = self._sakura_pool_candidates(threshold)
         if candidates is not None and not candidates:
             # 全刀池数据新鲜完整：没一把符合条件的刀 = 全员飘花，这是
-            # 数据定论，不是"没扫完"。
+            # 数据定论，不是"没扫完"。收尾先把选人页退回编队再下结论，
+            # 列表页开着会让面板收尾连点打空（13d93a75197d 教训）。
             yield "[刷花·换人] 全刀池核对：没有累的上锁刀，全员飘花，收工"
+            if (yield from self._sakura_leave_selection_for_formation()) is not True:
+                return None
             return False
         if candidates:
             picked = yield from self._swap_candidates_in(candidates)
@@ -529,6 +535,27 @@ class SakuraMixin:
                 return picked
             yield "[刷花·换人] 名单跟数据对不上，改用画面逐行核对"
         return (yield from self._swap_tired_in_by_ocr(threshold))
+
+    def _sakura_leave_selection_for_formation(self):
+        """无候选收工收尾：选人列表页还开着时先退回编队再下结论，
+        列表页开着会让后续收尾连点打空（run 13d93a75197d 停在刀剑男士
+        选择、连点本丸全落空）。只在 OCR 确认当前是刀剑男士选择页时点
+        左上返回箭头；不在列表页就视为已离开，不盲点。点完等转场，必须
+        正面确认部队编成标题才算数。
+        Returns: True=已离开列表（退回编队确认，或本就不在列表页）；
+        None=退回失败，调用方不得当干净收工（yield from 接返回值）
+        """
+        self.device.screenshot(force=True)
+        if not self.device.ocr("刀剑男士选择", roi_4to4(500, 0, 780, 55)):
+            yield "[刷花·换人] 已不在选人列表页，按已离开处理，不点返回"
+            return True
+        self.device.click(Point(*_SEL_BACK))
+        time.sleep(1.5)
+        self.device.screenshot(force=True)
+        if self.device.ocr("部队编成", roi_4to4(500, 0, 780, 60)):
+            return True
+        yield "[刷花·换人] ⚠️ 返回后未确认部队编成页，不假装干净收工"
+        return None
 
     def _selection_rows(self, tokens):
         """刀剑男士选择列表：疲劳列 token 按 y 聚类成行
@@ -635,6 +662,10 @@ class SakuraMixin:
             fatigue_lines = [text for text in fatigue_lines if "疲劳" in text]
             values = [_parse_fatigue_text(text) for text in fatigue_lines]
             if (values and all(v is not None and threshold <= v <= 100 for v in values)):
+                # 本页（升序名单）疲劳全部达标 = 没人累。与数据路径同款
+                # 收尾：先退回编队再下"没有候选"的结论。
+                if (yield from self._sakura_leave_selection_for_formation()) is not True:
+                    return None
                 return False
             for group in lines.values():
                 group.sort()
