@@ -1,0 +1,32 @@
+{
+  "server": "jp",
+  "base_size": [1508, 1088],
+  "templates": {
+    "battle/result": "jp/battle/result.png",
+    "battle/start": "jp/battle/start.png",
+    "boot/honmaru-button": "jp/boot/honmaru-button.png",
+    "boot/volume-arrow": "jp/boot/volume-arrow.png",
+    "dialog/accept": "jp/dialog/accept.png",
+    "dialog/automarch-request": "jp/dialog/automarch-request.png",
+    "dialog/decline": "jp/dialog/decline.png",
+    "dialog/no": "jp/dialog/no.png",
+    "dialog/yes": "jp/dialog/yes.png",
+    "directory/sally": "jp/directory/sally.png",
+    "era/decide": "jp/era/decide.png",
+    "formation/label": "jp/formation/label.png",
+    "home/badge": "jp/home/badge.png",
+    "home/catalog": "jp/home/catalog.png",
+    "loading/sakura": "jp/loading/sakura.png",
+    "map/label": "jp/map/label.png",
+    "map/team-select": "jp/map/team-select.png",
+    "march/advance": "jp/march/advance.png",
+    "menu/sally": "jp/menu/sally.png",
+    "notice/close": "jp/notice/close.png",
+    "notice/hide-forever": "jp/notice/hide-forever.png",
+    "team/depart": "jp/team/depart.png"
+  },
+  "ocr": {},
+  "rois": {},
+  "points": {},
+  "navigation": {}
+}

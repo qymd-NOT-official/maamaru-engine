@@ -2,10 +2,12 @@
 """流程引擎（touken/flow_engine）测试。
 
 覆盖：normalize 校验（坏类型/越界坐标/坏 ROI/未知 builtin/模板路径穿越/
-跳转目标缺失/坏 on_fail/重 id/空流程）、线性执行顺序、on_fail 三策略、
-retry、jump_if 分支、wait_landmark 超时与命中、失败消息进翻车词表、
-执行步数上限（死循环保险）、内置积木（安全出阵链/弹窗扫地/回本丸）、
-存储备份式写入与坏文件恢复。
+跳转目标缺失/坏 on_fail/重 id/空流程）、线性执行顺序、on_fail 四策略
+（stop/continue/retry 显式兼容 + recover 缺省引擎收拾）、jump_if 分支、
+wait_landmark 超时与命中、失败消息进翻车词表、执行步数上限（死循环保险）、
+内置积木（安全出阵链/弹窗扫地/回本丸）、存储备份式写入与坏文件恢复；
+双服化新增：@逻辑名校验与官方流程限制、素材包解析执行、双服基准尺寸、
+默认回本丸收拾与不可恢复积木（安全出阵/开目录）。
 
 FakeAgent 只实现引擎会碰的接口（device / config / navigate_to_stream /
 skip_safe / _popup_sweep / _safe_depart_stream / _confirm_departure），
@@ -22,6 +24,7 @@ from touken import flow_engine
 from touken.flow_engine import FlowError
 from touken.flows.report_judge import _is_fail
 from touken.device_adapter import Point
+from touken.server_pack import ServerPack, UnknownServerError
 
 
 class FakeMaa:
@@ -112,7 +115,17 @@ class NormalizeValidationTests(unittest.TestCase):
         plan = self._norm([_step("s1", "click_point", {"x": 100, "y": 200})])
         self.assertEqual(plan["name"], "测试流程")
         self.assertEqual(plan["steps"][0]["type"], "click_point")
-        self.assertEqual(plan["steps"][0]["on_fail"], "stop")
+        # 缺省翻车策略 = recover（引擎回本丸收拾残局），显式写的照旧
+        self.assertEqual(plan["steps"][0]["on_fail"], "recover")
+
+    def test_explicit_on_fail_preserved(self):
+        plan = self._norm([
+            _step("s1", "click_point", {"x": 1, "y": 1}, on_fail="stop"),
+            _step("s2", "click_point", {"x": 2, "y": 2}, on_fail="continue"),
+            _step("s3", "click_point", {"x": 3, "y": 3}, on_fail="retry"),
+        ])
+        self.assertEqual([s["on_fail"] for s in plan["steps"]],
+                         ["stop", "continue", "retry"])
 
     def test_bad_step_type_rejected(self):
         with self.assertRaises(FlowError):
@@ -225,13 +238,16 @@ class LinearExecutionTests(unittest.TestCase):
         self.assertTrue(banners)
 
     def test_stop_policy_halts_and_skips_rest(self):
+        # 显式 stop：翻车即停、不触发引擎默认的本丸收拾（旧数据原样）
         flow = _flow("翻车即停", [
-            _step("s1", "click_template", {"template": "a/没了.png"}),
+            _step("s1", "click_template", {"template": "a/没了.png"},
+                  on_fail="stop"),
             _step("s2", "click_point", {"x": 1, "y": 1}),
         ])
         messages, agent = self._run(flow)
         ran = [c for c in agent.device.calls if c[0] == "click"]
         self.assertEqual(ran, [])  # 模板没认到，什么都没点
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
         self.assertTrue(any("剩余 1 步不跑" in m for m in messages))
         self.assertTrue(any("点坐标" in m and "⏭" in m for m in messages))
         self.assertTrue(any("有翻车项" in m for m in messages))
@@ -329,7 +345,8 @@ class JumpIfTests(unittest.TestCase):
 
     def test_jump_without_check_fails(self):
         flow = _flow("瞎跳", [
-            _step("s1", "jump_if", {"when": "hit", "target": "s2"}),
+            _step("s1", "jump_if", {"when": "hit", "target": "s2"},
+                  on_fail="stop"),
             _step("s2", "click_point", {"x": 1, "y": 1}),
         ])
         messages, agent = self._run(flow)
@@ -599,6 +616,351 @@ class OfficialFlowTests(unittest.TestCase):
         listed = [f["id"] for f in flow_engine.list_flows()]
         self.assertEqual(listed[0], "t-good")
         self.assertEqual(len([i for i in listed if i == "t-good"]), 1)
+
+
+class OfficialRestrictionTests(unittest.TestCase):
+    """官方流程只准 @逻辑名；私货兼容原始值（逃生舱不 ban）。"""
+
+    def _official(self, steps):
+        return flow_engine.normalize_flow(
+            {"name": "官方流程", "official": True, "steps": steps})
+
+    def test_official_rejects_raw_template_ocr_roi(self):
+        cases = [
+            {"template": "a/按钮.png"},
+            {"ocr_expected": "公告"},
+            {"ocr_expected": "@word/公告", "roi": [1, 2, 3, 4]},
+            {"template": "@btn/go", "ocr_expected": "公告"},
+        ]
+        for params in cases:
+            with self.assertRaises(FlowError, msg=repr(params)):
+                self._official([_step("s1", "check", params)])
+
+    def test_official_rejects_raw_point_and_swipe(self):
+        with self.assertRaises(FlowError):
+            self._official([_step("s1", "click_point", {"x": 1, "y": 2})])
+        with self.assertRaises(FlowError):
+            self._official([_step("s1", "click_point", {"point": "@pt/x",
+                                                        "x": 1, "y": 2})])
+        with self.assertRaises(FlowError):
+            self._official([_step("s1", "swipe",
+                                  {"x1": 1, "y1": 1, "x2": 2, "y2": 2})])
+
+    def test_official_accepts_logical_refs(self):
+        plan = self._official([
+            _step("s1", "check", {"ocr_expected": "@word/公告",
+                                  "roi": "@roi/公告"}),
+            _step("s2", "click_point", {"point": "@signin/tab"}),
+            _step("s3", "navigate", {"target": "@nav/本丸"}),
+            _step("s4", "click_template", {"template": "@btn/go"}),
+        ])
+        self.assertEqual(plan["steps"][1]["params"],
+                         {"point": "@signin/tab"})
+        self.assertEqual(plan["steps"][2]["params"]["target"], "@nav/本丸")
+
+    def test_private_flow_still_accepts_raw_values(self):
+        plan = flow_engine.normalize_flow(_flow("私货", [
+            _step("s1", "check", {"ocr_expected": "公告", "roi": [1, 2, 3, 4]}),
+            _step("s2", "click_point", {"x": 100, "y": 200}),
+            _step("s3", "swipe", {"x1": 1, "y1": 1, "x2": 2, "y2": 2}),
+        ]))
+        self.assertEqual(len(plan["steps"]), 3)
+
+    def test_bare_or_plain_at_rejected(self):
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("x", [
+                _step("s1", "check", {"ocr_expected": "@"})]))
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("x", [
+                _step("s1", "click_point", {"point": "tab"})]))
+
+
+class DualBaseSizeTests(unittest.TestCase):
+    """基准分辨率参数化：normalize 可换基准，run_flow 用 device.base_size。"""
+
+    def test_normalize_with_custom_base_size(self):
+        steps = [_step("s1", "click_point", {"x": 1500, "y": 850}),
+                 _step("s2", "check",
+                       {"ocr_expected": "x", "roi": [0, 0, 1600, 900]})]
+        plan = flow_engine.normalize_flow(_flow("日服基准", steps),
+                                          base_size=(1600, 900))
+        self.assertEqual(plan["steps"][0]["params"]["x"], 1500)
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("超界", [
+                _step("s1", "click_point", {"x": 1601, "y": 10})]),
+                base_size=(1600, 900))
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("超界", [
+                _step("s1", "check",
+                      {"ocr_expected": "x", "roi": [0, 0, 1601, 900]})]),
+                base_size=(1600, 900))
+
+    def test_default_base_size_is_legacy_cn_frame(self):
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("旧默认", [
+                _step("s1", "click_point", {"x": 1300, "y": 10})]))
+
+
+def _make_pack(tmp: Path, base_size=(1280, 720)) -> ServerPack:
+    """临时资源目录里的测试素材包（模板文件真实存在以过包校验）。"""
+    (tmp / "image" / "menu").mkdir(parents=True, exist_ok=True)
+    (tmp / "image" / "menu" / "go.png").write_bytes(b"")
+    return ServerPack(
+        server="test", base_size=base_size, resource_dir=tmp,
+        templates={"btn/go": "menu/go.png"},
+        ocr={"word/announce": "公告"},
+        rois={"roi/announce": [1100, 100, 1280, 680]},
+        points={"pt/tab": [550, 55]},
+        navigation={"nav/home": "本丸"},
+    )
+
+
+class PackResolutionTests(unittest.TestCase):
+    """@逻辑名 执行前经素材包解析；缺引用翻车（ValueError 子类）。"""
+
+    def setUp(self):
+        self._sleep = patch.object(flow_engine, "_sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+        self._tmp = tempfile.TemporaryDirectory(prefix="flow_pack_test_")
+        self.addCleanup(self._tmp.cleanup)
+        self.pack = _make_pack(Path(self._tmp.name))
+
+    def _run(self, flow, agent=None, pack=None):
+        agent = agent or FakeAgent()
+        with patch.object(flow_engine, "load_server_pack",
+                          return_value=pack or self.pack) as loader:
+            messages = list(flow_engine.run_flow(agent, flow))
+        loader.assert_called_once_with("cn")
+        return messages, agent
+
+    def test_recognition_steps_resolve_refs(self):
+        flow = _flow("逻辑素材", [
+            _step("s1", "wait_landmark",
+                  {"template": "@btn/go", "roi": "@roi/announce",
+                   "timeout_s": 5, "stable_hits": 1}),
+            _step("s2", "check",
+                  {"ocr_expected": "@word/announce", "roi": "@roi/announce"}),
+            _step("s3", "click_ocr", {"ocr_expected": "@word/announce"}),
+        ])
+        device = FakeMaa(templates={"menu/go.png": Point(30, 40)},
+                         ocrs={"公告": Point(1150, 300)})
+        messages, agent = self._run(flow, FakeAgent(device))
+        matches = [c for c in device.calls if c[0] == "template_match"]
+        self.assertEqual(matches[0][1], "menu/go.png")
+        self.assertEqual(matches[0][2].to_tuple(), (1100, 100, 180, 580))
+        ocrs = [c for c in device.calls if c[0] == "ocr"]
+        self.assertTrue(ocrs)
+        self.assertTrue(all(c[1] == "公告" for c in ocrs))
+        self.assertEqual(ocrs[0][2].to_tuple(), (1100, 100, 180, 580))
+        # click_ocr 认到公告 → 点在公告位置
+        clicks = [c for c in device.calls if c[0] == "click"]
+        self.assertEqual(clicks[-1][1].to_tuple(), (1150, 300))
+        self.assertTrue(any("全部跑完，全绿" in m for m in messages))
+
+    def test_click_point_resolves_logical_point(self):
+        flow = _flow("逻辑点", [
+            _step("s1", "click_point", {"point": "@pt/tab"}),
+        ])
+        messages, agent = self._run(flow)
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
+        self.assertEqual(clicks[0][1].to_tuple(), (550, 55))
+        self.assertTrue(any("@pt/tab" in m and "(550, 55)" in m
+                            for m in messages))
+
+    def test_navigate_resolves_logical_target(self):
+        flow = _flow("逻辑导航", [
+            _step("s1", "navigate", {"target": "@nav/home"}),
+        ])
+        messages, agent = self._run(flow)
+        self.assertIn(("navigate_to_stream", "本丸"), agent.calls)
+        self.assertTrue(any("已到达 本丸" in m for m in messages))
+
+    def test_raw_values_untouched_with_pack_loaded(self):
+        # 私货原始值不经过素材包解析，设备收到原样（旧语义）
+        flow = _flow("原始值", [
+            _step("s1", "check", {"ocr_expected": "公告", "roi": [1, 2, 3, 4]}),
+        ])
+        device = FakeMaa(ocrs={"公告": Point(9, 9)})
+        messages, agent = self._run(flow, FakeAgent(device))
+        ocrs = [c for c in device.calls if c[0] == "ocr"]
+        self.assertEqual(ocrs[0][1], "公告")
+        self.assertEqual(ocrs[0][2].to_tuple(), (1, 2, 2, 2))
+
+    def test_missing_ref_fails_step_with_value_error(self):
+        # 缺引用 = ValueError 子类 → 步骤翻车 → 缺省策略回本丸收拾后跳过继续
+        flow = _flow("缺引用", [
+            _step("s1", "check", {"ocr_expected": "@ghost/none"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        messages, agent = self._run(flow)
+        self.assertTrue(any("步骤执行异常" in m for m in messages))
+        self.assertTrue(any("ghost/none" in m for m in messages))
+        self.assertIn(("navigate_to_stream", "本丸"), agent.calls)
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
+        self.assertEqual(clicks[0][1].to_tuple(), (5, 6))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+    def test_pack_load_failure_aborts_before_steps(self):
+        flow = _flow("无包", [_step("s1", "click_point", {"x": 1, "y": 1})])
+        agent = FakeAgent()
+        with patch.object(flow_engine, "load_server_pack",
+                          side_effect=UnknownServerError("boom")):
+            messages = list(flow_engine.run_flow(agent, flow))
+        self.assertTrue(any("素材包" in m and "不跑" in m for m in messages))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+
+    def test_run_flow_uses_device_base_size(self):
+        # 设备自报日服基准：坐标校验与素材包一致性都按它走
+        device = FakeMaa()
+        device.base_size = (1600, 900)
+        pack = _make_pack(Path(self._tmp.name), base_size=(1600, 900))
+        flow = _flow("日服尺寸", [
+            _step("s1", "click_point", {"x": 1500, "y": 850}),
+        ])
+        messages, agent = self._run(flow, FakeAgent(device), pack=pack)
+        clicks = [c for c in device.calls if c[0] == "click"]
+        self.assertEqual(clicks[0][1].to_tuple(), (1500, 850))
+        self.assertTrue(any("全部跑完，全绿" in m for m in messages))
+
+    def test_run_flow_rejects_pack_size_mismatch(self):
+        device = FakeMaa()
+        device.base_size = (1600, 900)
+        flow = _flow("尺寸不合", [
+            _step("s1", "click_point", {"x": 100, "y": 100}),
+        ])
+        messages, agent = self._run(flow, FakeAgent(device))
+        self.assertTrue(any("基准分辨率" in m and "不一致" in m
+                            for m in messages))
+        self.assertFalse(any(c[0] == "click" for c in device.calls))
+
+
+class DefaultRecoveryTests(unittest.TestCase):
+    """缺省翻车策略 recover：回本丸收拾残局 → 跳过这步继续；回不去停止。"""
+
+    def setUp(self):
+        self._sleep = patch.object(flow_engine, "_sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _run(self, flow, agent=None):
+        agent = agent or FakeAgent()
+        return list(flow_engine.run_flow(agent, flow)), agent
+
+    def test_default_failure_recovers_home_and_continues(self):
+        flow = _flow("默认收拾", [
+            _step("s1", "click_template", {"template": "a/没了.png"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}, label="后续步"),
+        ])
+        messages, agent = self._run(flow)
+        self.assertIn(("navigate_to_stream", "本丸"), agent.calls)
+        self.assertTrue(any("回本丸收拾残局" in m for m in messages))
+        self.assertTrue(any("已回本丸" in m for m in messages))
+        # 跳过翻车步，后续步照跑；成绩单如实标翻车，不许假绿
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
+        self.assertEqual(clicks[0][1].to_tuple(), (5, 6))
+        self.assertTrue(any("认到就点（模板）: ✗" in m for m in messages))
+        self.assertTrue(any("后续步: ✓" in m for m in messages))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+    def test_default_failure_cannot_get_home_stops(self):
+        class LostAgent(FakeAgent):
+            def navigate_to_stream(self, target):
+                self.calls.append(("navigate_to_stream", target))
+                yield f"[NAV] 进入 {target} 失败"
+
+        flow = _flow("回不去", [
+            _step("s1", "click_template", {"template": "a/没了.png"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        messages, agent = self._run(flow, LostAgent())
+        self.assertIn(("navigate_to_stream", "本丸"), agent.calls)
+        self.assertTrue(any("没能回本丸" in m for m in messages))
+        self.assertTrue(any("剩余 1 步不跑" in m for m in messages))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+    def test_default_failure_recovery_navigation_exception_stops_cleanly(self):
+        # 回本丸收拾残局时导航自己炸了：不许生成器裸炸——记 ✗、
+        # 剩余步骤标跳过、成绩单照出（与「没能回本丸」同款收场）
+        class BoomAgent(FakeAgent):
+            def navigate_to_stream(self, target):
+                self.calls.append(("navigate_to_stream", target))
+                raise RuntimeError("导航表坏了")
+
+        flow = _flow("收拾翻车", [
+            _step("s1", "click_template", {"template": "a/没了.png"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        messages, agent = self._run(flow, BoomAgent())
+        self.assertIn(("navigate_to_stream", "本丸"), agent.calls)
+        self.assertTrue(any("收拾残局时导航炸了" in m for m in messages))
+        self.assertTrue(any("剩余 1 步不跑" in m for m in messages))
+        self.assertTrue(any("⏭" in m for m in messages))  # 后续步如实标跳过
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        self.assertTrue(any("========== 流程成绩单 ==========" in m
+                            for m in messages))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+        # 每条 ✗ 消息都必须能被翻车词表认出，不许假绿
+        fail_lines = [m for m in messages
+                      if "✗" in m and not m.startswith("  ")]
+        self.assertTrue(fail_lines)
+        for line in fail_lines:
+            self.assertTrue(_is_fail(line), line)
+
+    def test_explicit_continue_skips_without_recovery(self):
+        flow = _flow("显式跳过", [
+            _step("s1", "click_template", {"template": "a/没了.png"},
+                  on_fail="continue"),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        messages, agent = self._run(flow)
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
+        clicks = [c for c in agent.device.calls if c[0] == "click"]
+        self.assertEqual(clicks[0][1].to_tuple(), (5, 6))
+        self.assertTrue(any("按设定跳过继续" in m for m in messages))
+
+
+class UnrecoverableBuiltinTests(unittest.TestCase):
+    """安全出阵/开目录失败不可自动收拾：安全拦截不能带病继续。"""
+
+    def setUp(self):
+        self._sleep = patch.object(flow_engine, "_sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _run(self, flow, agent):
+        return list(flow_engine.run_flow(agent, flow)), agent
+
+    def test_safe_depart_failure_never_recovers(self):
+        flow = _flow("出阵", [
+            _step("s1", "builtin",
+                  {"name": "safe_depart", "activity": "raid"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        agent = FakeAgent(config={"raid": {}})
+        agent.depart_ok = False
+        messages, agent = self._run(flow, agent)
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        self.assertTrue(any("不可自动收拾" in m for m in messages))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+    def test_open_menu_failure_never_recovers(self):
+        class NoMenuAgent(FakeAgent):
+            def _open_menu(self, *args, **kwargs):
+                self.calls.append(("_open_menu",))
+                return False
+
+        flow = _flow("目录打不开", [
+            _step("s1", "builtin", {"name": "open_menu"}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        messages, agent = self._run(flow, NoMenuAgent())
+        self.assertIn(("_open_menu",), agent.calls)
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        self.assertTrue(any("不可自动收拾" in m for m in messages))
 
 
 if __name__ == "__main__":

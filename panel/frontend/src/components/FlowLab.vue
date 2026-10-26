@@ -5,7 +5,6 @@ import PanelHeader from './PanelHeader.vue'
 import PaperCard from './PaperCard.vue'
 import PixelControl from './PixelControl.vue'
 import ParamField from './ParamField.vue'
-import SegmentedControl from './SegmentedControl.vue'
 import type { FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepCategory, FlowStepDef, FlowTestResult, ParamField as Field, TemplateLabFrame, TemplateLabRoi, TemplateLabSession } from '../types'
 import { matchesRule } from '../visibility'
 import { applyResize, clampRect, HANDLE_CURSORS, HANDLE_SCREEN_PX, handlePoints, hitHandle } from './templateLabSelection'
@@ -79,8 +78,16 @@ function isVisible(field: Field, step: FlowStep) {
 function visibleFields(step: FlowStep) {
   return (defOf(step.type)?.params || []).filter(field => isVisible(field, step))
 }
+// click_point 的 point 由下方专属「命名点」区块渲染（带互斥提示），通用字段区跳过它，
+// 同个参数只留一个输入口
+function editorFields(step: FlowStep) {
+  return visibleFields(step).filter(field => step.type !== 'click_point' || field.key !== 'point')
+}
 function summary(step: FlowStep) {
-  return visibleFields(step).filter(field => field.type !== 'note').slice(0, 3).map(field => {
+  if (step.type === 'click_point' && hasNamedPoint(step)) {
+    return `命名点：${String(step.params.point).trim()}`
+  }
+  return editorFields(step).filter(field => field.type !== 'note').slice(0, 3).map(field => {
     const value = valueFor(step, field.key)
     const option = field.options?.find(option => String(Array.isArray(option) ? option[0] : option) === String(value))
     const label = Array.isArray(option) ? option[1] : option
@@ -237,7 +244,8 @@ function addStep(def: FlowStepDef) {
     if (field.type === 'note' || field.default == null) continue
     params[field.key] = clone(field.default)
   }
-  const step: FlowStep = { id: uniqueStepId(), type: def.type, params, on_fail: 'stop' }
+  // 不写 on_fail：翻车处置由引擎统一管（记一笔，能安全回本丸才继续）
+  const step: FlowStep = { id: uniqueStepId(), type: def.type, params }
   draft.value.steps.splice(insertAt.value++, 0, step)
   expanded.value = draft.value.steps[insertAt.value - 1]
   lastAdded.value = `已添加「${def.label}」，可以继续选`
@@ -272,6 +280,36 @@ function useRoiFromStore(step: FlowStep, field: Field, name: string) {
 function clearRoi(step: FlowStep, field: Field) {
   delete step.params[field.key]
   if (expanded.value === step) selection.value = null
+}
+
+// ---- 逻辑引用（@ 开头，素材包解析）：模板/ROI/命名点 ----
+// 原始值（模板路径、xyxy、x/y）照旧可用，与 @ 引用二选一填。
+function templatePreview(step: FlowStep, field: Field) {
+  const value = String(valueFor(step, field.key) ?? '').trim()
+  return value && !value.startsWith('@') ? value : ''
+}
+function roiValue(step: FlowStep, field: Field): number[] | string {
+  const value = valueFor(step, field.key)
+  if (Array.isArray(value)) return value as number[]
+  return typeof value === 'string' ? value : ''
+}
+function roiDisplay(step: FlowStep, field: Field) {
+  const value = roiValue(step, field)
+  if (Array.isArray(value)) return `[${value.join(', ')}]`
+  return value || '未框选（留空 = 全屏）'
+}
+function setRoiRef(step: FlowStep, field: Field, value: unknown) {
+  const text = String(value ?? '').trim()
+  if (text) step.params[field.key] = text
+  else if (typeof step.params[field.key] === 'string') delete step.params[field.key]
+}
+function setNamedPoint(step: FlowStep, value: unknown) {
+  const name = String(value ?? '').trim()
+  if (name) step.params.point = name
+  else delete step.params.point
+}
+function hasNamedPoint(step: FlowStep) {
+  return !!String(step.params.point ?? '').trim()
 }
 
 async function save(): Promise<boolean> {
@@ -744,7 +782,7 @@ onBeforeUnmount(() => {
                   <button type="button" class="fl-step-toggle" :aria-expanded="expanded === step" @click="expanded = expanded === step ? null : step">
                     <span class="fl-number">{{ String(index + 1).padStart(2, '0') }}</span>
                     <span class="fl-step-label">
-                      <strong><em class="fl-badge" :class="`cat-${categoryBadge[defOf(step.type)?.category || '点']}`">{{ defOf(step.type)?.category || '?' }}</em>{{ stepLabel(step) }}<small v-if="step.on_fail === 'continue'">翻车继续</small><small v-else-if="step.on_fail === 'retry'">翻车重试</small></strong>
+                      <strong><em class="fl-badge" :class="`cat-${categoryBadge[defOf(step.type)?.category || '点']}`">{{ defOf(step.type)?.category || '?' }}</em>{{ stepLabel(step) }}</strong>
                       <span>{{ summary(step) }}</span>
                     </span>
                     <span class="fl-chevron" aria-hidden="true">{{ expanded === step ? '−' : '＋' }}</span>
@@ -761,23 +799,23 @@ onBeforeUnmount(() => {
                   <p>{{ defOf(step.type)?.desc }}</p>
                   <p v-if="step.type === 'builtin' && builtinOf(step.params.name)" class="fl-builtin-note">{{ builtinOf(step.params.name)?.desc }}</p>
                   <div class="fields fl-params">
-                    <template v-for="field in visibleFields(step)" :key="field.key">
+                    <template v-for="field in editorFields(step)" :key="field.key">
                       <ParamField v-if="['select', 'number', 'text', 'toggle', 'checks'].includes(field.type)" :field="field" :model-value="valueFor(step, field.key)" @update:model-value="step.params[field.key] = $event" />
                       <div v-else-if="field.type === 'template'" class="fl-field">
                         <span class="fl-field-label">{{ field.label }}<button v-if="field.help" type="button" class="fl-help" :aria-label="`${field.label}说明`">?<span role="tooltip">{{ field.help }}</span></button></span>
                         <span class="fl-template-pick">
-                          <PixelControl as="select" :model-value="String(valueFor(step, field.key) ?? '')" @update:model-value="step.params[field.key] = $event">
-                            <option value="" disabled>选一个模板（先在模板工坊验分采纳）</option>
-                            <option v-for="tpl in templates" :key="tpl" :value="tpl">{{ tpl }}</option>
-                          </PixelControl>
-                          <img v-if="valueFor(step, field.key)" class="fl-template-preview" :src="api.flowLabTemplateImageUrl(String(valueFor(step, field.key)))" :alt="String(valueFor(step, field.key))" />
+                          <PixelControl :model-value="String(valueFor(step, field.key) ?? '')" list="fl-template-options" placeholder="选模板路径，或输入 @逻辑名" @update:model-value="step.params[field.key] = $event" />
+                          <img v-if="templatePreview(step, field)" class="fl-template-preview" :src="api.flowLabTemplateImageUrl(templatePreview(step, field))" :alt="templatePreview(step, field)" />
                         </span>
+                        <datalist id="fl-template-options">
+                          <option v-for="tpl in templates" :key="tpl" :value="tpl">{{ tpl }}</option>
+                        </datalist>
                       </div>
                       <div v-else-if="field.type === 'roi'" class="fl-field">
                         <span class="fl-field-label">{{ field.label }}<button v-if="field.help" type="button" class="fl-help" :aria-label="`${field.label}说明`">?<span role="tooltip">{{ field.help }}</span></button></span>
                         <span class="fl-roi-row">
-                          <code>{{ Array.isArray(valueFor(step, field.key)) ? `[${(valueFor(step, field.key) as number[]).join(', ')}]` : '未框选（留空 = 全屏）' }}</code>
-                          <button v-if="Array.isArray(valueFor(step, field.key))" type="button" class="fl-mini" @click="clearRoi(step, field)">清除</button>
+                          <code>{{ roiDisplay(step, field) }}</code>
+                          <button v-if="roiValue(step, field) !== ''" type="button" class="fl-mini" @click="clearRoi(step, field)">清除</button>
                         </span>
                         <span v-if="savedRois.length" class="fl-roi-row">
                           <PixelControl as="select" model-value="" @update:model-value="useRoiFromStore(step, field, String($event))">
@@ -785,7 +823,10 @@ onBeforeUnmount(() => {
                             <option v-for="roi in savedRois" :key="roi.name" :value="roi.name">{{ roi.name }}（{{ roi.w }}×{{ roi.h }}）</option>
                           </PixelControl>
                         </span>
-                        <span class="fl-hintline">展开这步后在右栏画布上拖框，自动回填。</span>
+                        <span class="fl-roi-row">
+                          <PixelControl placeholder="或填素材包 ROI 名（@开头）" :model-value="typeof roiValue(step, field) === 'string' ? roiValue(step, field) as string : ''" @update:model-value="setRoiRef(step, field, $event)" />
+                        </span>
+                        <span class="fl-hintline">展开这步后在右栏画布上拖框自动回填；填 @名字 直接用素材包里的识别区域。</span>
                       </div>
                       <div v-else-if="field.type === 'step'" class="fl-field">
                         <span class="fl-field-label">{{ field.label }}<button v-if="field.help" type="button" class="fl-help" :aria-label="`${field.label}说明`">?<span role="tooltip">{{ field.help }}</span></button></span>
@@ -796,7 +837,12 @@ onBeforeUnmount(() => {
                       </div>
                     </template>
                   </div>
-                  <div v-if="step.type === 'click_point' || step.type === 'swipe'" class="fl-point-tools">
+                  <div v-if="step.type === 'click_point'" class="fl-field fl-named-point">
+                    <span class="fl-field-label">命名点（素材包）</span>
+                    <PixelControl :model-value="String(step.params.point ?? '')" placeholder="@命名点，留空则用手填坐标" @update:model-value="setNamedPoint(step, $event)" />
+                    <span class="fl-hintline">填了命名点就按素材包里登记的坐标点，不再显示画布拾取；留空就用下面的 x/y 坐标。</span>
+                  </div>
+                  <div v-if="step.type === 'swipe' || (step.type === 'click_point' && !hasNamedPoint(step))" class="fl-point-tools">
                     <span>在画面里点坐标：</span>
                     <button v-if="step.type === 'click_point'" type="button" class="fl-mini" :class="{ active: pointPicking && expanded === step }" @click="startPointPicking('single')">在画布上点一下</button>
                     <template v-else>
@@ -805,18 +851,7 @@ onBeforeUnmount(() => {
                     </template>
                     <span v-if="pointPicking && expanded === step" class="fl-hintline">点画中…按 Esc 取消。</span>
                   </div>
-                  <div class="fl-error-policy">
-                    <span>这步没完成时</span>
-                    <SegmentedControl v-model="step.on_fail" label="翻车后的安排" :items="[
-                      { value: 'stop', label: '停下等我', caption: '后面的不跑' },
-                      { value: 'continue', label: '跳过继续', caption: '记一笔接着跑' },
-                      { value: 'retry', label: '重试', caption: '隔几秒再试' },
-                    ]" />
-                    <span v-if="step.on_fail === 'retry'" class="fl-retry-fields">
-                      <label>重试几次<PixelControl v-model="step.retry_times" type="number" numeric :min="1" :max="5" /></label>
-                      <label>间隔秒<PixelControl v-model="step.retry_interval_s" type="number" numeric :min="0" :max="60" /></label>
-                    </span>
-                  </div>
+                  <p class="fl-fail-policy">翻车处置不用逐步配：这步没跑成会记一笔——能安全回本丸就收拾残局继续跑，安全拦截（比如重伤保护）照样停下等你。</p>
                  </fieldset>
                 </div>
               </article>
@@ -986,12 +1021,8 @@ onBeforeUnmount(() => {
 .fl-hintline { font-size: 11px; color: var(--ink-dim); line-height: 1.7; margin: 0; }
 .fl-point-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
 .fl-point-tools > span:first-child { font-size: 12px; color: var(--ink-dim); }
-.fl-error-policy { margin-top: 15px; padding-top: 14px; border-top: 1px dashed var(--paper-line); display: grid; gap: 10px; }
-.fl-error-policy > span:first-child { color: var(--ink-dim); font-size: 11px; }
-.fl-error-policy :deep(.segmented-control) { max-width: 430px; }
-.fl-retry-fields { display: flex; gap: 14px; flex-wrap: wrap; }
-.fl-retry-fields label { display: grid; gap: 6px; font-size: 11px; color: var(--ink-dim); }
-.fl-retry-fields :deep(.pixel-control) { width: 90px; }
+.fl-named-point { margin-top: 12px; }
+.fl-fail-policy { margin: 15px 0 0; padding-top: 14px; border-top: 1px dashed var(--paper-line); font-size: 12px; color: var(--ink-dim); line-height: 1.8; }
 .fl-add { display: block; width: 100%; margin-top: 18px; border-style: dashed; background: transparent; color: var(--fox-gold); }
 .fl-toolbar { display: flex; position: sticky; bottom: 0; z-index: 3; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 15px 26px; background: var(--paper-card); border-top: 1px solid var(--paper-line); border-radius: 0 0 10px 10px; box-shadow: 0 -6px 14px #49382104; }
 .fl-save-state { font-size: 11px; color: var(--ink-dim); }

@@ -11,6 +11,13 @@ battle 的 _safe_depart_stream 安全出阵链），不新造轮子。
 - ROI 在 JSON 里统一 xyxy 四元数组，引擎内 roi_4to4 转 Region。
 - 步骤翻车消息必须 ✗ 开头、且能被 report_judge._is_fail 认出，不许假绿。
 - 出阵确认链是红线：builtin 积木写死注册表，流程里不准拿裸 click 手搓。
+- 双服素材走 ServerPack（touken/server_pack.py，docs/dual-server-pipeline.md 3.2）：
+  流程参数可以写 @逻辑名，识别/点击/ROI/导航执行前经 ctx["pack"] 解析成
+  本服的具体模板/OCR 词/ROI/坐标/导航目标；官方流程只准写 @逻辑名，
+  原始值（含盲点坐标这类逃生舱）只留给私货兼容。
+- 翻车收拾是引擎的事（设计文档 3.4）：步骤没显式写 on_fail 时默认
+  「回本丸收拾残局 → 跳过这步继续」；显式 stop/continue/retry 旧数据原样；
+  安全出阵和开目录失败不可自动收拾（安全拦截不能带病继续）。
 """
 
 import copy
@@ -24,11 +31,13 @@ from pathlib import Path
 from .flows.report_judge import _is_fail
 from .device_adapter import Point, Region, roi_4to4
 from .runtime_paths import RESOURCE_DIR, STATUS_DIR
+from .server_pack import load_server_pack
 
 MAX_STEPS = 50            # 单流程最多步数（保存时校验）
 MAX_EXEC_STEPS = 500      # 单轮最多执行步数（jump_if 死循环保险，超限按翻车停）
-FRAME_W, FRAME_H = 1280, 720  # 游戏画面固定尺寸（MuMu 1280×720）
-VALID_ON_FAIL = ("stop", "continue", "retry")
+FRAME_W, FRAME_H = 1280, 720  # 国服默认画面尺寸（MuMu 1280×720）
+DEFAULT_BASE_SIZE = (FRAME_W, FRAME_H)  # 坐标/ROI 校验的默认基准（normalize 可换）
+VALID_ON_FAIL = ("stop", "continue", "retry", "recover")
 RETRY_TIMES_MIN, RETRY_TIMES_MAX = 1, 5
 RETRY_INTERVAL_MIN, RETRY_INTERVAL_MAX = 0.0, 60.0
 
@@ -74,6 +83,26 @@ def _threshold(value, default: float = 0.7) -> float:
     return _fnum(value, "threshold", default, 0.0, 1.0)
 
 
+def _is_logical_ref(value) -> bool:
+    """是不是素材包逻辑引用（@名字）。"""
+    return isinstance(value, str) and value.startswith("@")
+
+
+def _check_ref_name(value, label: str) -> str:
+    """@引用在 normalize 期只做格式校验；存在性/越界执行时经素材包解析把关。"""
+    name = value[1:].strip()
+    if not name:
+        raise FlowError(f"{label}：@ 后面要接逻辑名，不能只写一个 @")
+    return "@" + name
+
+
+def _no_official_raw(official: bool, value, label: str):
+    """官方流程只准写 @逻辑名；原始值（路径/文字/坐标）一律拒。"""
+    if official and value not in (None, "") and not _is_logical_ref(value):
+        raise FlowError(f"{label}：官方流程只准写 @逻辑名（素材包引用），"
+                        f"不收服务器专属的原始值 {value!r}")
+
+
 def _template_path(value, label: str = "模板路径") -> str:
     """模板必须是 image/ 下的相对路径：不许绝对、不许 ..、限 .png。"""
     if not isinstance(value, str):
@@ -94,27 +123,35 @@ def clean_template_path(value) -> str:
     return _template_path(value)
 
 
-def _optional_template(params: dict, label: str = "模板路径") -> str | None:
+def _optional_template(params: dict, label: str = "模板路径",
+                       official: bool = False) -> str | None:
     value = params.get("template")
     if value in (None, ""):
         return None
+    if _is_logical_ref(value):
+        return _check_ref_name(value, label)
+    _no_official_raw(official, value, label)
     return _template_path(value, label)
 
 
-def _ocr_text(params: dict) -> str | None:
+def _ocr_text(params: dict, label: str = "要认的文字",
+              official: bool = False) -> str | None:
     value = params.get("ocr_expected")
     if value in (None, ""):
         return None
+    if _is_logical_ref(value):
+        return _check_ref_name(value, label)
+    _no_official_raw(official, value, label)
     if not isinstance(value, str):
-        raise FlowError("要认的文字必须是字符串")
+        raise FlowError(f"{label}必须是字符串")
     text = value.strip()
     if not text:
-        raise FlowError("要认的文字不能为空")
+        raise FlowError(f"{label}不能为空")
     return text
 
 
-def _xy(value, label: str) -> list:
-    """坐标点 [x, y]：数字、必须在 1280×720 画面内。"""
+def _xy(value, label: str, base_size: tuple = DEFAULT_BASE_SIZE) -> list:
+    """坐标点 [x, y]：数字、必须在基准画面内（含贴边，旧语义）。"""
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         raise FlowError(f"{label}必须是 [x, y] 两个数")
     out = []
@@ -124,13 +161,14 @@ def _xy(value, label: str) -> list:
         if isinstance(v, float) and not v.is_integer():
             raise FlowError(f"{label}的{axis}必须是整数坐标")
         out.append(int(v))
-    if not (0 <= out[0] <= FRAME_W and 0 <= out[1] <= FRAME_H):
-        raise FlowError(f"{label}越界：画面只有 {FRAME_W}×{FRAME_H}")
+    w, h = base_size
+    if not (0 <= out[0] <= w and 0 <= out[1] <= h):
+        raise FlowError(f"{label}越界：画面只有 {w}×{h}")
     return out
 
 
-def _xyxy(value, label: str = "roi") -> list:
-    """ROI xyxy 四元数组：0≤x1<x2≤1280、0≤y1<y2≤720。"""
+def _xyxy(value, label: str = "roi", base_size: tuple = DEFAULT_BASE_SIZE) -> list:
+    """ROI xyxy 四元数组：0≤x1<x2≤基准宽、0≤y1<y2≤基准高。"""
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         raise FlowError(f"{label}必须是 [x1, y1, x2, y2] 四个数")
     rect = []
@@ -140,26 +178,52 @@ def _xyxy(value, label: str = "roi") -> list:
         if isinstance(v, float) and not v.is_integer():
             raise FlowError(f"{label}必须是整数坐标")
         rect.append(int(v))
-    if not (0 <= rect[0] < rect[2] <= FRAME_W
-            and 0 <= rect[1] < rect[3] <= FRAME_H):
-        raise FlowError(f"{label}不合法：要满足 0≤x1<x2≤{FRAME_W}、"
-                        f"0≤y1<y2≤{FRAME_H}")
+    w, h = base_size
+    if not (0 <= rect[0] < rect[2] <= w
+            and 0 <= rect[1] < rect[3] <= h):
+        raise FlowError(f"{label}不合法：要满足 0≤x1<x2≤{w}、"
+                        f"0≤y1<y2≤{h}")
     return rect
 
 
-def _optional_roi(params: dict) -> list | None:
+def _optional_roi(params: dict, base_size: tuple = DEFAULT_BASE_SIZE,
+                  official: bool = False, label: str = "roi") -> list | None:
     value = params.get("roi")
     if value in (None, ""):
         return None
-    return _xyxy(value)
+    if _is_logical_ref(value):
+        return _check_ref_name(value, label)
+    _no_official_raw(official, value, label)
+    return _xyxy(value, label, base_size=base_size)
 
 
-def params_to_region(params: dict) -> Region | None:
-    """JSON 里的 xyxy ROI → Region；没有 ROI 返回 None（全屏）。"""
+def params_to_region(params: dict, pack=None) -> Region | None:
+    """JSON 里的 xyxy ROI → Region；@逻辑名 经素材包解析；没有 ROI 返回 None（全屏）。"""
     roi = (params or {}).get("roi")
     if not roi:
         return None
+    if _is_logical_ref(roi):
+        if pack is None:
+            raise FlowError(f"ROI 引用 {roi!r} 需要素材包，但本次执行没加载")
+        roi = pack.resolve_roi(roi)
     return roi_4to4(roi[0], roi[1], roi[2], roi[3])
+
+
+# ── 执行期 @引用解析 ──
+
+def _resolve_ref(ctx: dict, value, method: str):
+    """@逻辑名 经 ctx 里的素材包解析；缺引用/坏路径/越界抛 ValueError 子类。"""
+    pack = (ctx or {}).get("pack")
+    if pack is None:
+        raise FlowError(f"步骤引用了 {value!r} 但没加载素材包（内部错误）")
+    return getattr(pack, method)(value)
+
+
+def _maybe_resolve(ctx: dict, value, method: str):
+    """字符串以 @ 开头才走素材包解析，其余原样返回（旧语义，normalize 期已校验）。"""
+    if _is_logical_ref(value):
+        return _resolve_ref(ctx, value, method)
+    return value
 
 
 # ── 步骤注册表 ──
@@ -193,13 +257,16 @@ def step_catalog() -> list[dict]:
 
 # ── 「认」类 ──
 
-def _validate_wait_landmark(params: dict, i: int) -> dict:
-    template = _optional_template(params, f"第 {i + 1} 步的模板路径")
-    ocr_expected = _ocr_text(params)
+def _validate_wait_landmark(params: dict, i: int, *,
+                            base_size: tuple = DEFAULT_BASE_SIZE,
+                            official: bool = False) -> dict:
+    label = f"第 {i + 1} 步"
+    template = _optional_template(params, f"{label}的模板路径", official)
+    ocr_expected = _ocr_text(params, official=official)
     if not template and not ocr_expected:
-        raise FlowError(f"第 {i + 1} 步：等地标至少要给模板或要认的文字其一")
+        raise FlowError(f"{label}：等地标至少要给模板或要认的文字其一")
     out = {"template": template, "ocr_expected": ocr_expected,
-           "roi": _optional_roi(params),
+           "roi": _optional_roi(params, base_size, official),
            "threshold": _threshold(params.get("threshold")),
            "timeout_s": _int(params.get("timeout_s"), "timeout_s", 30, 1, 600),
            "stable_hits": _int(params.get("stable_hits"), "stable_hits", 2, 1, 10)}
@@ -212,10 +279,11 @@ def _run_wait_landmark(agent, params, ctx):
     语义照抄 navigator.wait_landmark_skipping（渐入式剧情会先露脸再被盖住，
     看一眼就动手会点进动画里卡死），但模板阈值按流程参数走——固定阈值的
     老封装表达不了这个，所以循环落在引擎里，注释指向出处。
+    模板/OCR/ROI 支持 @逻辑名（双服素材包），执行前经 ctx["pack"] 解析。
     """
-    template = params.get("template")
-    ocr_expected = params.get("ocr_expected")
-    roi = params_to_region(params)
+    template = _maybe_resolve(ctx, params.get("template"), "resolve_template")
+    ocr_expected = _maybe_resolve(ctx, params.get("ocr_expected"), "resolve_ocr")
+    roi = params_to_region(params, pack=(ctx or {}).get("pack"))
     threshold = params.get("threshold", 0.7)
     timeout_s = params.get("timeout_s", 30)
     stable_hits = params.get("stable_hits", 2)
@@ -272,22 +340,24 @@ _step("wait_landmark", "等地标",
                "help": "防渐入式剧情「先露脸再被盖住」：看一眼就动手会点进动画卡死。"}])
 
 
-def _validate_check(params: dict, i: int) -> dict:
-    template = _optional_template(params, f"第 {i + 1} 步的模板路径")
-    ocr_expected = _ocr_text(params)
+def _validate_check(params: dict, i: int, *,
+                    base_size: tuple = DEFAULT_BASE_SIZE,
+                    official: bool = False) -> dict:
+    template = _optional_template(params, f"第 {i + 1} 步的模板路径", official)
+    ocr_expected = _ocr_text(params, official=official)
     if not template and not ocr_expected:
         raise FlowError(f"第 {i + 1} 步：只认不点至少要给模板或要认的文字其一")
     out = {"template": template, "ocr_expected": ocr_expected,
-           "roi": _optional_roi(params),
+           "roi": _optional_roi(params, base_size, official),
            "threshold": _threshold(params.get("threshold"))}
     return {k: v for k, v in out.items() if v is not None or k == "threshold"}
 
 
 def _run_check(agent, params, ctx):
     """只认不点，结果存进 ctx 供后面的 jump_if 用。"""
-    template = params.get("template")
-    ocr_expected = params.get("ocr_expected")
-    roi = params_to_region(params)
+    template = _maybe_resolve(ctx, params.get("template"), "resolve_template")
+    ocr_expected = _maybe_resolve(ctx, params.get("ocr_expected"), "resolve_ocr")
+    roi = params_to_region(params, pack=(ctx or {}).get("pack"))
     threshold = params.get("threshold", 0.7)
     agent.device.screenshot(force=True)
     hit = False
@@ -337,55 +407,83 @@ def _run_click_hit(agent, params, ctx):
 
 _step("click_hit", "点刚认到的",
       "点击上一步「认一下」认到的位置。先认再分支、最后才点的玩法用它，不多认一次。",
-      "点", _run_click_hit, lambda params, i: {})
+      "点", _run_click_hit, lambda params, i, **_: {})
 
 
 # ── 「点」类 ──
 
-def _validate_click_point(params: dict, i: int) -> dict:
+def _validate_click_point(params: dict, i: int, *,
+                          base_size: tuple = DEFAULT_BASE_SIZE,
+                          official: bool = False) -> dict:
+    label = f"第 {i + 1} 步"
+    point = params.get("point")
+    if point not in (None, ""):
+        # @逻辑名：坐标收在素材包里，执行前解析（官方流程的唯一合法姿势）
+        if not _is_logical_ref(point):
+            raise FlowError(f"{label}：point 只准写 @逻辑名（素材包逻辑点），收到 {point!r}")
+        if "x" in params or "y" in params:
+            raise FlowError(f"{label}：point 和 x/y 二选一，别同时给")
+        return {"point": _check_ref_name(point, f"{label}的 point")}
+    if official:
+        raise FlowError(f"{label}：官方流程禁用裸坐标盲点，"
+                        f"请给 point=\"@逻辑名\"（坐标收进素材包）")
     if "x" not in params or "y" not in params:
-        raise FlowError(f"第 {i + 1} 步：盲点坐标要给 x 和 y")
-    return {"x": _xy([params["x"], params["y"]], "点击坐标")[0],
-            "y": _xy([params["x"], params["y"]], "点击坐标")[1]}
+        raise FlowError(f"{label}：盲点坐标要给 x 和 y（或 point=\"@逻辑名\"）")
+    return {"x": _xy([params["x"], params["y"]], "点击坐标",
+                     base_size=base_size)[0],
+            "y": _xy([params["x"], params["y"]], "点击坐标",
+                     base_size=base_size)[1]}
 
 
 def _run_click_point(agent, params, ctx):
-    x, y = params["x"], params["y"]
+    if params.get("point"):
+        x, y = _resolve_ref(ctx, params["point"], "resolve_point")
+        desc = f"{params['point']} ({x}, {y})"
+    else:
+        x, y = params["x"], params["y"]
+        desc = f"({x}, {y})"
     if agent.device.click(Point(x, y)):
-        yield f"✓ 已点击 ({x}, {y})"
+        yield f"✓ 已点击 {desc}"
         return True, None
-    yield f"✗ 点击 ({x}, {y}) 失败，没点成"
+    yield f"✗ 点击 {desc} 失败，没点成"
     return False, None
 
 
 _step("click_point", "盲点坐标",
-      "闭眼点一个固定坐标。只有位置永不变的东西才配用（比如已验证的兜底点）。",
+      "闭眼点一个固定坐标。只有位置永不变的东西才配用（比如已验证的兜底点）；官方流程只准用 point=\"@逻辑名\"。",
       "点", _run_click_point, _validate_click_point,
-      params=[{"key": "x", "type": "number", "label": "x 坐标",
+      params=[{"key": "point", "type": "text", "label": "逻辑点（@名）",
+               "help": "素材包里的逻辑点名，如 @signin/tab；填了它就优先于 x/y。"},
+              {"key": "x", "type": "number", "label": "x 坐标",
                "min": 0, "max": FRAME_W},
               {"key": "y", "type": "number", "label": "y 坐标",
                "min": 0, "max": FRAME_H}])
 
 
-def _validate_click_template(params: dict, i: int) -> dict:
+def _validate_click_template(params: dict, i: int, *,
+                             base_size: tuple = DEFAULT_BASE_SIZE,
+                             official: bool = False) -> dict:
     if not params.get("template"):
         raise FlowError(f"第 {i + 1} 步：认模板点击必须给模板")
-    out = {"template": _template_path(params["template"], f"第 {i + 1} 步的模板路径"),
-           "roi": _optional_roi(params),
+    out = {"template": _optional_template(params, f"第 {i + 1} 步的模板路径",
+                                          official),
+           "roi": _optional_roi(params, base_size, official),
            "threshold": _threshold(params.get("threshold"))}
     return {k: v for k, v in out.items() if v is not None or k == "threshold"}
 
 
-def _click_recognized(agent, params, mode: str):
-    roi = params_to_region(params)
+def _click_recognized(agent, params, ctx, mode: str):
+    roi = params_to_region(params, pack=(ctx or {}).get("pack"))
     if mode == "template":
-        pt = agent.device.template_match(params["template"], roi=roi,
+        template = _maybe_resolve(ctx, params.get("template"), "resolve_template")
+        pt = agent.device.template_match(template, roi=roi,
                                       threshold=params.get("threshold", 0.7))
-        desc = f"模板 {params['template']}"
+        desc = f"模板 {template}"
     else:
-        pt = agent.device.ocr(expected=params["ocr_expected"], roi=roi,
+        ocr_expected = _maybe_resolve(ctx, params.get("ocr_expected"), "resolve_ocr")
+        pt = agent.device.ocr(expected=ocr_expected, roi=roi,
                            match_mode=params.get("match_mode", "contains"))
-        desc = f"「{params['ocr_expected']}」"
+        desc = f"「{ocr_expected}」"
     if not pt:
         yield f"✗ 没找到可点的{desc}，没点"
         return False, None
@@ -397,7 +495,7 @@ def _click_recognized(agent, params, mode: str):
 
 
 def _run_click_template(agent, params, ctx):
-    return (yield from _click_recognized(agent, params, "template"))
+    return (yield from _click_recognized(agent, params, ctx, "template"))
 
 
 _step("click_template", "认到就点（模板）",
@@ -411,20 +509,21 @@ _step("click_template", "认到就点（模板）",
                "default": 0.7, "min": 0, "max": 1}])
 
 
-def _validate_click_ocr(params: dict, i: int) -> dict:
-    text = _ocr_text(params)
+def _validate_click_ocr(params: dict, i: int, *, base_size: tuple = DEFAULT_BASE_SIZE,
+                        official: bool = False) -> dict:
+    text = _ocr_text(params, official=official)
     if not text:
         raise FlowError(f"第 {i + 1} 步：认字点击必须给要认的文字")
     match_mode = params.get("match_mode") or "contains"
     if match_mode not in ("contains", "exact"):
         raise FlowError(f"第 {i + 1} 步：match_mode 只准 contains/exact")
     out = {"ocr_expected": text, "match_mode": match_mode,
-           "roi": _optional_roi(params)}
+           "roi": _optional_roi(params, base_size, official)}
     return {k: v for k, v in out.items() if v is not None}
 
 
 def _run_click_ocr(agent, params, ctx):
-    return (yield from _click_recognized(agent, params, "ocr"))
+    return (yield from _click_recognized(agent, params, ctx, "ocr"))
 
 
 _step("click_ocr", "认到就点（文字）",
@@ -438,14 +537,22 @@ _step("click_ocr", "认到就点（文字）",
                "help": "限定搜索范围，留空全屏。"}])
 
 
-def _validate_swipe(params: dict, i: int) -> dict:
+def _validate_swipe(params: dict, i: int, *, base_size: tuple = DEFAULT_BASE_SIZE,
+                    official: bool = False) -> dict:
+    if official:
+        raise FlowError(f"第 {i + 1} 步：官方流程禁用裸坐标滑动，"
+                        f"滑动类操作请做成素材包逻辑点或内置积木")
     for key in ("x1", "y1", "x2", "y2"):
         if key not in params:
             raise FlowError(f"第 {i + 1} 步：滑动要给 {key}")
-    return {"x1": _xy([params["x1"], params["y1"]], "滑动起点")[0],
-            "y1": _xy([params["x1"], params["y1"]], "滑动起点")[1],
-            "x2": _xy([params["x2"], params["y2"]], "滑动终点")[0],
-            "y2": _xy([params["x2"], params["y2"]], "滑动终点")[1],
+    return {"x1": _xy([params["x1"], params["y1"]], "滑动起点",
+                      base_size=base_size)[0],
+            "y1": _xy([params["x1"], params["y1"]], "滑动起点",
+                      base_size=base_size)[1],
+            "x2": _xy([params["x2"], params["y2"]], "滑动终点",
+                      base_size=base_size)[0],
+            "y2": _xy([params["x2"], params["y2"]], "滑动终点",
+                      base_size=base_size)[1],
             "duration_ms": _int(params.get("duration_ms"), "duration_ms",
                                 400, 50, 5000)}
 
@@ -472,7 +579,9 @@ _step("swipe", "滑动",
                "default": 400, "min": 50, "max": 5000}])
 
 
-def _validate_skip_safe(params: dict, i: int) -> dict:
+def _validate_skip_safe(params: dict, i: int, *,
+                        base_size: tuple = DEFAULT_BASE_SIZE,
+                        official: bool = False) -> dict:
     return {"times": _int(params.get("times"), "times", 3, 1, 30),
             "interval_s": _fnum(params.get("interval_s"), "interval_s",
                                 0.8, 0.1, 10.0)}
@@ -494,7 +603,9 @@ _step("skip_safe", "点安全区跳动画",
                "default": 0.8, "min": 0.1, "max": 10}])
 
 
-def _validate_sleep(params: dict, i: int) -> dict:
+def _validate_sleep(params: dict, i: int, *,
+                      base_size: tuple = DEFAULT_BASE_SIZE,
+                      official: bool = False) -> dict:
     return {"seconds": _fnum(params.get("seconds"), "seconds", 1.0, 0.1, 120.0)}
 
 
@@ -512,7 +623,9 @@ _step("sleep", "等一会儿",
                "default": 1, "min": 0.1, "max": 120}])
 
 
-def _validate_note(params: dict, i: int) -> dict:
+def _validate_note(params: dict, i: int, *,
+                   base_size: tuple = DEFAULT_BASE_SIZE,
+                   official: bool = False) -> dict:
     text = params.get("text")
     if not isinstance(text, str) or not text.strip():
         raise FlowError(f"第 {i + 1} 步：插播一句话要给文案")
@@ -537,15 +650,24 @@ _step("note", "插播一句",
 
 # ── 「结构」类 ──
 
-def _validate_navigate(params: dict, i: int) -> dict:
+def _validate_navigate(params: dict, i: int, *, base_size: tuple = DEFAULT_BASE_SIZE,
+                       official: bool = False) -> dict:
     target = params.get("target")
     if not isinstance(target, str) or not target.strip():
         raise FlowError(f"第 {i + 1} 步：导航要给目标界面名（如 本丸）")
-    return {"target": target.strip()}
+    target = target.strip()
+    if _is_logical_ref(target):
+        target = _check_ref_name(target, f"第 {i + 1} 步的导航目标")
+    else:
+        _no_official_raw(official, target, f"第 {i + 1} 步的导航目标")
+    return {"target": target}
 
 
 def _run_navigate(agent, params, ctx):
-    target = params["target"]
+    target = _maybe_resolve(ctx, params["target"], "resolve_navigation")
+    if not isinstance(target, str) or not target.strip():
+        yield f"✗ 导航目标 {params['target']!r} 解析出来不是界面名，没去"
+        return False, None
     for msg in agent.navigate_to_stream(target):
         yield msg
     if getattr(agent, "current_location", None) == target:
@@ -562,7 +684,9 @@ _step("navigate", "去界面",
                "help": "如 本丸 / 出阵 / 远征，与配置 navigation 表一致。"}])
 
 
-def _validate_jump_if(params: dict, i: int) -> dict:
+def _validate_jump_if(params: dict, i: int, *,
+                      base_size: tuple = DEFAULT_BASE_SIZE,
+                      official: bool = False) -> dict:
     when = params.get("when") or "hit"
     if when not in ("hit", "miss"):
         raise FlowError(f"第 {i + 1} 步：跳转条件只准 hit/miss，收到 {when!r}")
@@ -644,7 +768,9 @@ def _builtin_safe_depart(agent, params, ctx):
     return True
 
 
-def _validate_safe_depart(params: dict, i: int) -> dict:
+def _validate_safe_depart(params: dict, i: int, *,
+                          base_size: tuple = DEFAULT_BASE_SIZE,
+                          official: bool = False) -> dict:
     activity = params.get("activity")
     if not isinstance(activity, str) or not activity.strip():
         raise FlowError(f"第 {i + 1} 步：安全出阵要给出阵配置节名（游戏配置里的活动节）")
@@ -694,7 +820,7 @@ register_builtin({
     "name": "open_menu", "label": "开目录",
     "desc": "循环点目录按钮直到展开（含加载等待/弹窗救援），就是导航层的 _open_menu。进公告、编队这类菜单页面前用它。",
     "params": [],
-    "validate": lambda params, i: {},
+    "validate": lambda params, i, **_: {},
     "run": _builtin_open_menu,
 })
 
@@ -704,7 +830,7 @@ register_builtin({
     "desc": "关公告/礼物弹窗、点穿归来结算屏，确认落地才收工。",
     "params": [{"key": "max_rounds", "type": "number", "label": "最多扫几轮",
                 "default": 10, "min": 1, "max": 30}],
-    "validate": lambda params, i: {
+    "validate": lambda params, i, **_: {
         "max_rounds": _int(params.get("max_rounds"), "max_rounds", 10, 1, 30)},
     "run": _builtin_popup_sweep,
 })
@@ -729,7 +855,7 @@ register_builtin({
     "name": "home", "label": "回本丸",
     "desc": "导航回本丸，顺手把远征/内番/修行的归来结算屏记账点穿，别让它们挡着下一步。",
     "params": [],
-    "validate": lambda params, i: {},
+    "validate": lambda params, i, **_: {},
     "run": _builtin_home,
 })
 
@@ -745,17 +871,20 @@ register_builtin({
     "name": "reset_location", "label": "位置作废",
     "desc": "标记「当前位置已失效」——比如关公告后其实已回本丸，不告诉导航层，它会以为目录还开着乱点。等价旧代码的 current_location = None。",
     "params": [],
-    "validate": lambda params, i: {},
+    "validate": lambda params, i, **_: {},
     "run": _builtin_reset_location,
 })
 
 
-def _validate_builtin(params: dict, i: int) -> dict:
+def _validate_builtin(params: dict, i: int, *, base_size: tuple = DEFAULT_BASE_SIZE,
+                      official: bool = False) -> dict:
     name = params.get("name")
     if name not in BUILTIN_REGISTRY:
         raise FlowError(f"第 {i + 1} 步：未知内置积木 {name!r}，只准用目录里写死的")
     rest = {k: v for k, v in params.items() if k != "name"}
-    return {"name": name, **BUILTIN_REGISTRY[name]["validate"](rest, i)}
+    return {"name": name,
+            **BUILTIN_REGISTRY[name]["validate"](rest, i, base_size=base_size,
+                                                 official=official)}
 
 
 def _run_builtin(agent, params, ctx):
@@ -777,22 +906,31 @@ _step("builtin", "内置积木",
 
 # ── 校验（normalize）──
 
-def _normalize_step(step, i: int, require_id: bool = True) -> dict:
-    """校验并规范化一步；非法抛 FlowError。jump 目标存在性由 normalize_flow 统一查。"""
+def _normalize_step(step, i: int, require_id: bool = True,
+                    base_size: tuple = DEFAULT_BASE_SIZE,
+                    official: bool = False) -> dict:
+    """校验并规范化一步；非法抛 FlowError。jump 目标存在性由 normalize_flow 统一查。
+
+    on_fail 缺省是 "recover"（引擎级翻车收拾：回本丸→跳过这步继续）；
+    旧数据里显式写的 stop/continue/retry 原样保留（兼容红线）。
+    """
     if not isinstance(step, dict):
         raise FlowError(f"第 {i + 1} 步不是对象")
     type_ = step.get("type")
     if type_ not in STEP_REGISTRY:
         raise FlowError(f"第 {i + 1} 步：不支持的步骤类型 {type_!r}")
-    on_fail = step.get("on_fail") or "stop"
+    on_fail = step.get("on_fail") or "recover"
     if on_fail not in VALID_ON_FAIL:
-        raise FlowError(f"第 {i + 1} 步：翻车策略只准 stop/continue/retry，收到 {on_fail!r}")
+        raise FlowError(f"第 {i + 1} 步：翻车策略只准 stop/continue/retry"
+                        f"（缺省 recover 回本丸收拾），收到 {on_fail!r}")
     params = step.get("params") or {}
     if not isinstance(params, dict):
         raise FlowError(f"第 {i + 1} 步：参数必须是对象")
     out = {
         "type": type_,
-        "params": STEP_REGISTRY[type_]["validate"](params, i),
+        "params": STEP_REGISTRY[type_]["validate"](params, i,
+                                                   base_size=base_size,
+                                                   official=official),
         "on_fail": on_fail,
         "retry_times": _int(step.get("retry_times"), "retry_times", 2,
                             RETRY_TIMES_MIN, RETRY_TIMES_MAX),
@@ -817,8 +955,13 @@ def _normalize_step(step, i: int, require_id: bool = True) -> dict:
     return out
 
 
-def normalize_flow(flow) -> dict:
-    """校验并规范化一条流程；非法抛 FlowError（写入存储前必须过这关）。"""
+def normalize_flow(flow, base_size: tuple | None = None) -> dict:
+    """校验并规范化一条流程；非法抛 FlowError（写入存储前必须过这关）。
+
+    base_size 是坐标/ROI 校验用的基准分辨率，缺省 1280×720（国服旧语义）；
+    run_flow 会传 agent.device.base_size（日服基准随设备标定走）。
+    官方流程（official=True）只准写 @逻辑名，原始模板/文字/ROI/坐标一律拒。
+    """
     if not isinstance(flow, dict):
         raise FlowError("流程必须是对象")
     name = str(flow.get("name") or "").strip()
@@ -831,7 +974,10 @@ def normalize_flow(flow) -> dict:
         raise FlowError("流程至少要有一步")
     if len(steps) > MAX_STEPS:
         raise FlowError(f"流程最多 {MAX_STEPS} 步")
-    out_steps = [_normalize_step(step, i) for i, step in enumerate(steps)]
+    size = tuple(base_size) if base_size else DEFAULT_BASE_SIZE
+    official = flow.get("official") is True
+    out_steps = [_normalize_step(step, i, base_size=size, official=official)
+                 for i, step in enumerate(steps)]
     ids = set()
     for i, step in enumerate(out_steps):
         if step["id"] in ids:
@@ -1020,6 +1166,18 @@ def is_official_flow(flow_id) -> bool:
 
 # ── 执行 ──
 
+# 翻车不可自动收拾的内置积木：
+# - safe_depart：安全出阵链翻车 = 安全拦截，带病继续可能把重伤刀送出阵；
+# - open_menu：目录都打不开，回本丸的收拾残局本身也不可信（导航依赖目录）。
+_UNRECOVERABLE_BUILTINS = ("safe_depart", "open_menu")
+
+
+def _unrecoverable_step(step: dict) -> bool:
+    """这步翻车后是否禁止引擎默认的「回本丸收拾残局」。"""
+    return (step["type"] == "builtin"
+            and step["params"].get("name") in _UNRECOVERABLE_BUILTINS)
+
+
 def _run_step(defn: dict, agent, step: dict, ctx: dict):
     """执行一步：透传消息并判红，返回 (ok, info)。异常 = 翻车。"""
     failed_by_msg = False
@@ -1042,25 +1200,38 @@ def _run_step(defn: dict, agent, step: dict, ctx: dict):
     return bool(ok) and not failed_by_msg, info
 
 
-def run_flow(agent, flow):
+def run_flow(agent, flow, server: str = "cn"):
     """流式跑一条自定义流程。
 
     Args:
         agent: ToukenAgent（含 device/config/navigate_to_stream 那套）
         flow: {"name", "steps": [...]}，会先过 normalize_flow 校验
+        server: 素材包名（cn/jp）：@逻辑名从这包解析，加载一次全程复用
 
     Yields:
         str: 执行状态消息（带 [流程名] 前缀；翻车消息 ✗ 开头且进翻车词表）
     """
-    plan = normalize_flow(flow)
+    device = getattr(agent, "device", None)
+    device_base = getattr(device, "base_size", None)
+    plan = normalize_flow(flow, base_size=device_base)
     name = plan["name"]
     steps = plan["steps"]
+    try:
+        pack = load_server_pack(server)
+    except ValueError as exc:
+        yield f"[{name}] ✗ 素材包（{server}）加载翻车：{exc}，流程不跑"
+        return
+    if device_base is not None and tuple(device_base) != tuple(pack.base_size):
+        yield (f"[{name}] ✗ 设备基准分辨率 {tuple(device_base)} 与 {server} "
+               f"素材包基准 {tuple(pack.base_size)} 不一致，流程不跑")
+        return
     index_of = {s["id"]: pos for pos, s in enumerate(steps)}
-    ctx = {"check": None, "flow_name": f"[{name}]"}
+    ctx = {"check": None, "flow_name": f"[{name}]", "pack": pack,
+           "server": server}
     report: list[tuple] = []
     skipped: list[dict] = []
 
-    yield f"[{name}] ▶ 开跑「{name}」，共 {len(steps)} 步"
+    yield f"[{name}] ▶ 开跑「{name}」，共 {len(steps)} 步（素材包 {server}）"
     pc = 0
     executed = 0
     while pc < len(steps):
@@ -1097,11 +1268,38 @@ def run_flow(agent, flow):
             continue
 
         report.append((label, "✗"))
-        if step["on_fail"] == "continue":
+        on_fail = step["on_fail"]
+        if on_fail == "continue":
             yield f"[{name}] 「{label}」翻车，按设定跳过继续"
             pc += 1
             continue
-        # stop / retry 用尽：翻车即停，剩下的不跑
+        if on_fail == "recover":
+            if _unrecoverable_step(step):
+                # 安全出阵/开目录翻车不可自动收拾：安全拦截不能带病继续
+                skipped = steps[pc + 1:]
+                yield (f"[{name}] ✗ 「{label}」翻车，这步是安全出阵/开目录，"
+                       f"不可自动收拾，停止，剩余 {len(skipped)} 步不跑")
+                break
+            # 引擎级默认翻车收拾：回本丸 → 确认落地 → 跳过这步继续
+            yield f"[{name}] 「{label}」翻车，按引擎默认回本丸收拾残局"
+            try:
+                for msg in agent.navigate_to_stream("本丸"):
+                    yield msg
+            except Exception as exc:
+                # 收拾残局自己炸了也是翻车：记 ✗、剩余步骤标跳过，成绩单照出
+                skipped = steps[pc + 1:]
+                yield (f"[{name}] ✗ 「{label}」翻车，回本丸收拾残局时导航炸了"
+                       f"（{exc}），停止，剩余 {len(skipped)} 步不跑")
+                break
+            if getattr(agent, "current_location", None) == "本丸":
+                yield f"[{name}] ✓ 已回本丸，跳过「{label}」继续往下"
+                pc += 1
+                continue
+            skipped = steps[pc + 1:]
+            yield (f"[{name}] ✗ 「{label}」翻车，没能回本丸，"
+                   f"停止，剩余 {len(skipped)} 步不跑")
+            break
+        # stop（显式）/ retry 用尽：翻车即停，剩下的不跑
         skipped = steps[pc + 1:]
         yield (f"[{name}] ✗ 「{label}」翻车，按设定停止，"
                f"剩余 {len(skipped)} 步不跑")

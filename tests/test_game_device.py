@@ -154,6 +154,57 @@ def test_template_match_tolerates_png_suffix(device, monkeypatch):
     assert seen['name'] == 'menu/sally'
 
 
+def test_template_match_accepts_pack_relative_path(device, monkeypatch):
+    """素材包解析出的 image/ 相对路径 'jp/menu/sally(.png)'：剥 .png 和
+    开头 'jp/' 段，jp_vision 收到的必须是 'menu/sally'（坐标换算不变）。"""
+    seen = {}
+
+    def fake_find(frame, name, roi=None, threshold=0.85):
+        seen.update(name=name, roi=roi, size=frame.size)
+        return jp_vision.Match(name=name, score=0.99, nx=0.5, ny=0.25,
+                               nw=0.1, nh=0.05)
+
+    monkeypatch.setattr(jp_vision, 'find', fake_find)
+    hit = device.template_match('jp/menu/sally.png', Region(150, 108, 300, 200))
+    assert seen['name'] == 'menu/sally'
+    assert seen['roi'] == pytest.approx(
+        (150 / 1508, 108 / 1088, 300 / 1508, 200 / 1088))
+    assert hit == Point(754, 272)
+    device._last_frame = None
+    assert device.template_match('jp/menu/sally') == Point(754, 272)
+    assert seen['name'] == 'menu/sally'   # 不带 .png 的包路径同样剥前缀
+
+
+def test_template_match_pack_path_end_to_end_name(device, monkeypatch):
+    """真 jp_vision 链路（真实模板文件）：jp/ 前缀剥掉后按 menu/sally 取文件。"""
+    seen = {}
+
+    real_load = jp_vision.load_template
+
+    def spy_load(name):
+        seen['name'] = name
+        return real_load(name)
+
+    monkeypatch.setattr(jp_vision, 'load_template', spy_load)
+    monkeypatch.setattr(jp_vision, 'find', jp_vision.find)
+    # FakeBrowser 纯色帧配不上真模板 → None；关键是加载器收到的名字
+    assert device.template_match('jp/menu/sally.png') is None
+    assert seen['name'] == 'menu/sally'
+
+
+def test_template_match_legacy_name_untouched(device, monkeypatch):
+    """旧写法 'menu/sally(.png)' 原样到达 jp_vision，不被 jp/ 规则误伤。"""
+    seen = {}
+
+    def fake_find(frame, name, **kw):
+        seen['name'] = name
+        return None
+
+    monkeypatch.setattr(jp_vision, 'find', fake_find)
+    assert device.template_match('menu/sally') is None
+    assert seen['name'] == 'menu/sally'
+
+
 def test_template_match_missing_template_returns_none(device, monkeypatch):
     def missing(name):
         raise jp_vision.TemplateNotFound(name)

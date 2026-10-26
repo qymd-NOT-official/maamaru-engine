@@ -96,8 +96,15 @@ class JpGameDevice:
 
     def template_match(self, template: str, roi: Optional[Region] = None,
                        threshold: float = 0.7) -> Optional[Point]:
-        """模板匹配：命中返回基准空间中心点，模板缺失打日志返回 None。"""
+        """模板匹配：命中返回基准空间中心点，模板缺失打日志返回 None。
+
+        名字兼容三态：'menu/sally'、'menu/sally.png'（旧写法），以及
+        素材包解析出的 image/ 相对路径 'jp/menu/sally(.png)'——jp_vision
+        根目录已是 image/jp，包路径剥掉 '.png' 和开头 'jp/' 段再喂它。
+        """
         name = template[:-4] if template.endswith('.png') else template
+        if name.startswith('jp/'):
+            name = name[len('jp/'):]
         frame = self.screenshot()
         if frame is None:
             return None

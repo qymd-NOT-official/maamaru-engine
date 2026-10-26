@@ -1,0 +1,22 @@
+{
+  "server": "cn",
+  "base_size": [1280, 720],
+  "templates": {},
+  "ocr": {
+    "signin/announce": "公告",
+    "signin/claim": "领取奖励",
+    "signin/detail": "道具详情"
+  },
+  "rois": {
+    "signin/announce": [1100, 100, 1280, 680],
+    "signin/claim": [750, 550, 1100, 670],
+    "signin/detail": [450, 80, 830, 140]
+  },
+  "points": {
+    "signin/tab": [550, 55],
+    "signin/detail-close": [945, 105],
+    "signin/click-through": [640, 400],
+    "signin/close": [1195, 30]
+  },
+  "navigation": {}
+}

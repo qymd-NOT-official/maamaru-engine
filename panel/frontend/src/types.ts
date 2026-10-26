@@ -1341,14 +1341,17 @@ export interface TemplateLabCodeRoi {
 // ---- 流程工坊 /api/flow-lab（开发专用，打包版不启用）----
 
 export type FlowStepCategory = '认' | '点' | '结构'
-export type FlowOnFail = 'stop' | 'continue' | 'retry'
+// 后端 normalize 一定输出 on_fail，缺省 'recover'（引擎统一处置：翻车记一笔，能安全回本丸就收拾残局继续）；
+// 'stop' | 'continue' | 'retry' 是旧数据里显式写的策略，原样保留、继续兼容
+export type FlowOnFail = 'recover' | 'stop' | 'continue' | 'retry'
 
 export interface FlowStep {
   id: string
   type: string
   label?: string
   params: ScriptParams
-  on_fail: FlowOnFail
+  /** 后端 normalize 后的步骤必带；旧数据可能带显式旧策略，新建步骤不写，由引擎统一处置（缺省 recover：翻车记一笔，能回本丸就继续） */
+  on_fail?: FlowOnFail
   retry_times?: number
   retry_interval_s?: number
 }

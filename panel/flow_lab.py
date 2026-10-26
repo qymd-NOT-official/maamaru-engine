@@ -3,8 +3,10 @@
 流程工坊 —— 自定义流程（线性卡片流）的后端：流程 CRUD、步骤目录、
 模板/ROI 挑选、单步试跑。
 
-老大拼流程的调试闭环：模板先在模板工坊验分采纳 → 这里下拉挑模板、
+老大拼流程的调试闭环：模板先在模板工坊验分采纳 → 这里挑模板、
 引用模板工坊框好的 ROI → 单步试跑只认不点 → 整流交给 runner 排队跑。
+单步试跑认 @ 开头的逻辑引用（模板/OCR 词/ROI/命名点，按服务器素材包
+解析）；原始值（模板路径、xyxy、x/y）照旧可用。
 
 开发版调试工具（_is_dev 门禁，账房模式禁用试跑），流程只存用户数据目录
 STATUS_DIR/custom_flows.json，不进程序目录/发布包。
@@ -22,7 +24,7 @@ from fastapi.responses import FileResponse
 
 from touken import flow_engine
 from touken.flow_engine import FlowError
-from touken.device_adapter import Region
+from touken.device_adapter import Region, roi_4to4
 from touken.runtime_paths import RESOURCE_DIR
 
 from . import template_lab as _template_lab
@@ -71,10 +73,39 @@ def _image_dir() -> Path:
     return RESOURCE_DIR / "image"
 
 
-def _run_probe(adapter, step: dict, defn: dict) -> dict:
-    """单步试跑：「认」类真识别返回命中与分数；「点」类只预览将要点的位置，不真点。"""
+def _load_pack(server: str):
+    """素材包：@ 逻辑引用靠它翻译成具体模板/OCR 词/ROI/命名点。
+
+    懒加载 import——server_pack 与 flow_lab 平行开发，别在模块头互相卡死。
+    """
+    from touken.server_pack import load_server_pack
+    return load_server_pack(server=server or "cn")
+
+
+def _run_probe(adapter, step: dict, defn: dict, server: str = "cn") -> dict:
+    """单步试跑：「认」类真识别返回命中与分数；「点」类只预览将要点的位置，不真点。
+
+    逻辑引用（@ 开头）按素材包解析成具体素材；原始值（模板路径、OCR 词、
+    xyxy、x/y）一律走旧语义，不碰素材包。画面默认尺寸用 adapter.base_size，
+    老假 adapter 没有该属性时退回 1280×720。
+    """
     params = step["params"]
-    roi = flow_engine.params_to_region(params)
+    pack = None
+
+    def _pack():
+        nonlocal pack
+        if pack is None:
+            pack = _load_pack(server)
+        return pack
+
+    raw_roi = (params or {}).get("roi")
+    if isinstance(raw_roi, str) and raw_roi.startswith("@"):
+        rect = _pack().resolve_roi(raw_roi)
+        roi = roi_4to4(rect[0], rect[1], rect[2], rect[3])
+    else:
+        roi = flow_engine.params_to_region(params)
+    base_w, base_h = (getattr(adapter, "base_size", None)
+                      or (flow_engine.FRAME_W, flow_engine.FRAME_H))
     adapter.screenshot(force=True)
 
     if step["type"] in ("check", "wait_landmark"):
@@ -82,6 +113,8 @@ def _run_probe(adapter, step: dict, defn: dict) -> dict:
                   "point": None, "texts": None}
         template = params.get("template")
         if template:
+            if isinstance(template, str) and template.startswith("@"):
+                template = _pack().resolve_template(template)
             score = adapter.template_match_score(template, roi=roi)
             point = adapter.template_match(
                 template, roi=roi, threshold=params.get("threshold", 0.7))
@@ -91,8 +124,10 @@ def _run_probe(adapter, step: dict, defn: dict) -> dict:
                 result["point"] = point.to_list()
         ocr_expected = params.get("ocr_expected")
         if ocr_expected:
+            if isinstance(ocr_expected, str) and ocr_expected.startswith("@"):
+                ocr_expected = _pack().resolve_ocr(ocr_expected)
             texts = [text for text, _pt in adapter.ocr_all(
-                roi or Region(0, 0, flow_engine.FRAME_W, flow_engine.FRAME_H))]
+                roi or Region(0, 0, base_w, base_h))]
             point = adapter.ocr(expected=ocr_expected, roi=roi,
                                 match_mode=params.get("match_mode", "contains"))
             result["texts"] = texts
@@ -102,15 +137,27 @@ def _run_probe(adapter, step: dict, defn: dict) -> dict:
         return result
 
     if step["type"] == "click_point":
+        named = str(params.get("point") or "").strip()
+        if named:
+            resolved = _pack().resolve_point(
+                named if named.startswith("@") else f"@{named}")
+            return {"kind": "preview", "action": "click",
+                    "point": [int(resolved[0]), int(resolved[1])],
+                    "note": f"命名点 {named}（按素材包坐标，留空则用手填 x/y）"}
         return {"kind": "preview", "action": "click",
-                "point": [params["x"], params["y"]]}
+                "point": [params.get("x"), params.get("y")]}
     if step["type"] in ("click_template", "click_ocr"):
         if step["type"] == "click_template":
+            template = params["template"]
+            if isinstance(template, str) and template.startswith("@"):
+                template = _pack().resolve_template(template)
             point = adapter.template_match(
-                params["template"], roi=roi,
-                threshold=params.get("threshold", 0.7))
+                template, roi=roi, threshold=params.get("threshold", 0.7))
         else:
-            point = adapter.ocr(expected=params["ocr_expected"], roi=roi,
+            expected = params["ocr_expected"]
+            if isinstance(expected, str) and expected.startswith("@"):
+                expected = _pack().resolve_ocr(expected)
+            point = adapter.ocr(expected=expected, roi=roi,
                                 match_mode=params.get("match_mode", "contains"))
         return {"kind": "preview", "action": "click",
                 "hit": point is not None,
@@ -130,7 +177,7 @@ def _run_probe(adapter, step: dict, defn: dict) -> dict:
     raise HTTPException(400, f"步骤类型 {step['type']!r} 不支持单步试跑。")
 
 
-def _test_step_sync(step) -> dict:
+def _test_step_sync(step, server: str = "cn") -> dict:
     if not isinstance(step, dict):
         raise HTTPException(400, "step 必须是对象。")
     normalized = flow_engine.normalize_test_step(step)
@@ -145,7 +192,7 @@ def _test_step_sync(step) -> dict:
         raise
     except Exception as exc:
         raise HTTPException(503, f"截图通道起不来：{exc}") from exc
-    return _run_probe(adapter, normalized, defn)
+    return _run_probe(adapter, normalized, defn, server=server)
 
 
 def create_flow_lab_router() -> APIRouter:
@@ -253,12 +300,15 @@ def create_flow_lab_router() -> APIRouter:
     async def test_step(request: Request):
         _ensure_capture_available()
         body = await _json_body(request)
+        server = body.get("server") or "cn"
         try:
-            return await asyncio.to_thread(_test_step_sync, body.get("step"))
-        except FlowError as exc:
-            raise HTTPException(400, str(exc))
+            return await asyncio.to_thread(
+                _test_step_sync, body.get("step"), server)
         except HTTPException:
             raise
+        except ValueError as exc:
+            # FlowError 与素材包缺引用/坏值都是 ValueError 子类 → 400
+            raise HTTPException(400, str(exc))
         except Exception as exc:
             raise HTTPException(503, f"试跑失败：{exc}") from exc
 

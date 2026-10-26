@@ -386,7 +386,8 @@ class OfficialFlowTests(FlowLabTestBase):
     def test_official_step_test_run_works(self):
         official = flow_engine.load_official_flows()[0]
         step = next(s for s in official["steps"]
-                    if s["type"] == "check" and s["params"].get("ocr_expected") == "公告")
+                    if s["type"] == "check"
+                    and s["params"].get("ocr_expected") == "@signin/announce")
         adapter = FakeProbeAdapter()
         with patch.object(flow_lab, "_create_adapter", return_value=adapter):
             response = self.client.post("/api/flow-lab/test-step", json={"step": step})
