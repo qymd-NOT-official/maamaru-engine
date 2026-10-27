@@ -294,6 +294,9 @@ class OsakaMixin:
         if not self._confirm_departure(cfg):
             yield "[挖地] 没看到出阵二次确认，停止点击"
             return
+        # 圈速从出阵确认起表：导航、选层、部队准备都不算进第一层；手入/
+        # 整理后的递归续跑会重进本函数，在这里重新起表。
+        floor_started_at = time.time()
         yield f"[挖地] 部队{team_no}出发，狐之助的废话交给安全区慢慢跳过"
 
         floors = 0
@@ -413,12 +416,21 @@ class OsakaMixin:
                 total_completed = _completed_floors + floors
                 self._osaka_floors_total = total_completed
                 if hasattr(self, "record_event"):
-                    self.record_event(
-                        "osaka.floor_completed",
+                    completed_at = time.time()
+                    payload = dict(
                         completed=total_completed,
                         target=_target_floors,
                         selected_floor=target_floor if select_floor else None,
                     )
+                    # 第一层时长=出阵确认→层末结算；之后各层沿用相邻完成事件
+                    # 的口径（层末整理时间自然计入）。只记正数，旧事件没有
+                    # duration 字段时下游自动跳过、退回 run summary 回退。
+                    if floor_started_at is not None:
+                        duration = completed_at - floor_started_at
+                        if duration > 0:
+                            payload["duration_seconds"] = round(duration, 1)
+                    floor_started_at = completed_at
+                    self.record_event("osaka.floor_completed", **payload)
                 yield f"[挖地] ✓ 已完成 {total_completed}/{_target_floors} 层"
                 injury = self._osaka_injury_status(cfg, team_no)
                 goal_reached = total_completed >= _target_floors

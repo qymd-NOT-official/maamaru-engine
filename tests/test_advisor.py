@@ -726,6 +726,63 @@ class OsakaStockGoalTests(unittest.TestCase):
         self.assertEqual(planning["goals"][0]["estimated_seconds"], 12000)
         self.assertTrue(planning["goals"][0]["can_finish"])
 
+    def test_planning_prefers_direct_floor_duration_from_workflow_run(self):
+        """workflow 单层单跑：无 script='osaka' run summary，direct 事件顶上。"""
+        class _Store:
+            def resource_ledger(self, from_ts, to_ts):
+                return {"per_resource": [{"resource": "小判",
+                                           "opening": 9000, "closing": 9000}],
+                        "daily_series": []}
+
+            def recent_events(self, limit=100, event_type=None, **kwargs):
+                if event_type == "osaka.koban_session":
+                    return [{"ts": OsakaStockGoalTests.NOW.timestamp(),
+                             "payload": {"delta": 250, "floors": 10}}]
+                if event_type == "osaka.floor_completed":
+                    return [{"ts": OsakaStockGoalTests.NOW.timestamp() - 300,
+                             "payload": {"completed": 1, "target": 1,
+                                         "duration_seconds": 420.0}}]
+                return []
+        with tempfile.TemporaryDirectory() as tmp:
+            card = {"start_date": "2026-08-13", "end_date": "2026-08-27",
+                    "start_at": "2026-08-13T10:00:00+08:00",
+                    "end_at": "2026-08-27T05:00:00+08:00",
+                    "mechanics": "osaka"}
+            (Path(tmp) / advisor.EVENTS_META_LOCAL).write_text(
+                json.dumps({"大阪城": card}, ensure_ascii=False),
+                encoding="utf-8")
+            path = Path(tmp) / "planning_goals.json"
+            advisor.add_event_goal(
+                _Store(), path, "大阪城", target=10000,
+                today=self.NOW.date(), now=self.NOW)
+            planning = advisor.get_planning(
+                _Store(), path, today=self.NOW.date(), now=self.NOW)
+        self.assertEqual(planning["osaka_floor_speed"]["seconds_per_floor"],
+                         420.0)
+        self.assertEqual(planning["osaka_floor_speed"]["floors"], 1)
+        # 还差 1000 小判 ÷ 每层 25 → 40 层 × 420s
+        self.assertEqual(planning["goals"][0]["estimated_seconds"], 16800)
+
+    def test_planning_passes_floor_speed_to_window_impact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, _ = self._setup(tmp)
+            path = Path(tmp) / "planning_goals.json"
+            advisor.add_event_goal(
+                store, path, "大阪城", target=10000,
+                today=self.NOW.date(), now=self.NOW)
+            captured = {}
+            real = advisor.window_impact
+
+            def spy(name, card, **kwargs):
+                captured[name] = kwargs.get("floor_speed")
+                return real(name, card, **kwargs)
+
+            with patch.object(advisor, "window_impact", spy):
+                planning = advisor.get_planning(
+                    store, path, today=self.NOW.date(), now=self.NOW)
+        self.assertEqual(captured["大阪城"], planning["osaka_floor_speed"])
+        self.assertEqual(captured["大阪城"]["seconds_per_floor"], 300)
+
     def test_missing_target_and_closed_activity_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             store, _ = self._setup(tmp)
@@ -800,6 +857,37 @@ class OsakaFloorSpeedTests(unittest.TestCase):
 
     def test_store_without_run_summaries_has_no_speed(self):
         self.assertIsNone(advisor.latest_osaka_floor_speed(object()))
+
+    def test_direct_floor_duration_wins_without_osaka_run_summary(self):
+        """workflow 单层单跑只有事件没有 run summary，direct duration 照样有效。"""
+        class _Store:
+            def recent_events(self, limit=100, event_type=None, **kwargs):
+                self.kwargs = {"event_type": event_type, **kwargs}
+                return [{"ts": 5000.0,
+                         "payload": {"completed": 3, "target": 90,
+                                     "duration_seconds": 420.0}}]
+        store = _Store()
+        result = advisor.latest_osaka_floor_speed(store, now=1000000)
+        self.assertEqual(result, {"seconds_per_floor": 420.0, "floors": 1,
+                                  "run_started_at": 5000.0 - 420.0})
+        self.assertEqual(store.kwargs["event_type"], "osaka.floor_completed")
+        self.assertIn("from_ts", store.kwargs)
+        self.assertIn("to_ts", store.kwargs)
+
+    def test_dirty_or_legacy_direct_events_fall_back_to_run_summary(self):
+        """脏值/无 duration 的旧事件跳过，旧 run summary 回退不变。"""
+        class _Store:
+            def recent_events(self, limit=100, event_type=None, **kwargs):
+                return [{"ts": 5000.0, "payload": {"duration_seconds": -5}},
+                        {"ts": 4900.0, "payload": {"completed": 2}},
+                        {"ts": 4800.0, "payload": {"duration_seconds": "十分钟"}}]
+
+            def recent_run_summaries(self, **kwargs):
+                return [{"started_at": 2, "loops": 16,
+                         "average_loop_seconds": 300.0}]
+        result = advisor.latest_osaka_floor_speed(_Store(), now=1000000)
+        self.assertEqual(result, {"seconds_per_floor": 300.0, "floors": 16,
+                                  "run_started_at": 2})
 
 
 if __name__ == "__main__":
@@ -1371,6 +1459,17 @@ class WindowImpactTests(unittest.TestCase):
                                        today=self.TODAY)
         # 每晚 72 层 × 7 天 × 400 = 201600
         self.assertEqual(impact["delta"], 201600)
+
+    def test_osaka_impact_prefers_measured_floor_speed_over_default_lap(self):
+        card = {"mechanics": "osaka", "start_date": "2026-08-27",
+                "end_date": "2026-09-02",  # 开打后起 7 天
+                "hours_per_night": 6, "lap_minutes": 5}
+        impact = advisor.window_impact(
+            "大阪城", card, floor_yield={"per_floor": 400},
+            floor_speed={"seconds_per_floor": 600.0, "floors": 1},
+            today=self.TODAY)
+        # 实测 10 分钟/层 → 每晚 36 层 × 7 天 × 400 = 100800（不再按 5 分钟）
+        self.assertEqual(impact["delta"], 100800)
 
     def test_osaka_without_yield_or_dates_returns_none(self):
         card = {"mechanics": "osaka", "start_date": "2026-08-27",

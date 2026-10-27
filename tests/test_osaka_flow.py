@@ -72,6 +72,9 @@ class OsakaFlow(OsakaMixin):
     def _confirm_departure(self, cfg):
         return True
 
+    def _return_home_from_march(self, cfg):
+        return True
+
     def _deny_heavy_injury_warning(self, cfg):
         return False
 
@@ -183,6 +186,46 @@ class FloorEndDebounceTests(unittest.TestCase):
         # 真卡死是终点，后面不再有巡逻兜底消息
         last = msgs[-1]
         self.assertIn("30 秒没动静", last)
+
+
+class FloorDurationTests(unittest.TestCase):
+    """osaka.floor_completed 带 duration_seconds：第一层从出阵确认起算
+    （导航、选层、部队准备不塞进第一层），后续层按相邻完成事件口径；
+    事件原有 completed/target/selected_floor 字段不变。"""
+
+    def _run(self, flow, clock_values, max_floors):
+        clock = iter(clock_values)
+        # _open_osaka 吃掉第一拍，代表进场前准备耗时：谁要是从任务启动
+        # 就起表，第一层时长会把这 500 秒算进去。
+        flow._open_osaka = lambda cfg: (next(clock), True)[1]
+        with patch("touken.flows.osaka.time.sleep", lambda *_: None), \
+                patch("touken.flows.osaka.time.time", lambda: next(clock)):
+            return list(flow.osaka_stream(
+                max_floors=max_floors, team_no=3, select_floor=False,
+                auto_equip=False))
+
+    def test_first_floor_duration_starts_at_departure_confirmation(self):
+        flow = OsakaFlow(floor_done_seq=[True])
+        flow.wait_march_result = (1125, 592)
+        self._run(flow, [500.0, 1000.0, 1600.0], max_floors=90)
+        floors = [e for e in flow.events
+                  if e["event_type"] == "osaka.floor_completed"]
+        self.assertEqual(len(floors), 1)
+        self.assertEqual(floors[0]["payload"]["duration_seconds"], 600.0)
+        # 事件语义只增字段：原字段原样保留
+        self.assertEqual(floors[0]["payload"]["completed"], 1)
+        self.assertEqual(floors[0]["payload"]["target"], 90)
+        self.assertEqual(floors[0]["payload"]["selected_floor"], None)
+
+    def test_next_floor_duration_uses_previous_completion(self):
+        flow = OsakaFlow(floor_done_seq=[True, False, True])
+        flow.wait_march_result = (1125, 592)
+        self._run(flow, [500.0, 1000.0, 1600.0, 1900.0], max_floors=2)
+        floors = [e for e in flow.events
+                  if e["event_type"] == "osaka.floor_completed"]
+        self.assertEqual([f["payload"]["completed"] for f in floors], [1, 2])
+        self.assertEqual([f["payload"]["duration_seconds"] for f in floors],
+                         [600.0, 300.0])
 
 
 if __name__ == "__main__":

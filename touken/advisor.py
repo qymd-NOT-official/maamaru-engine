@@ -354,18 +354,55 @@ def koban_floor_yield(events: list[dict], *,
     return {"per_floor": delta_total / floors_total, "sessions": sessions}
 
 
+def _latest_direct_floor_speed(store, *, now_ts: float,
+                               window_days: int) -> dict | None:
+    """direct 层速：窗口内最近一条带有效 duration_seconds 的层完成事件。
+
+    osaka.floor_completed 在出阵确认起表，workflow 单层单跑也是有效样本，
+    不再要求整轮 run summary 的 average_loop_seconds。事件 ts 即层末时刻，
+    run_started_at 用 ts-duration 反推。旧事件没有 duration 字段自然落选，
+    交回 recent_run_summaries 回退。
+    """
+    getter = getattr(store, "recent_events", None)
+    if not callable(getter):
+        return None
+    try:
+        events = getter(limit=10, event_type="osaka.floor_completed",
+                        from_ts=now_ts - window_days * 86400, to_ts=now_ts + 1)
+    except (TypeError, ValueError):
+        return None
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        duration = payload.get("duration_seconds")
+        ts = event.get("ts")
+        if (not isinstance(duration, (int, float))
+                or isinstance(duration, bool) or duration <= 0
+                or not isinstance(ts, (int, float)) or isinstance(ts, bool)):
+            continue
+        return {"seconds_per_floor": round(float(duration), 1), "floors": 1,
+                "run_started_at": float(ts) - float(duration)}
+    return None
+
+
 def latest_osaka_floor_speed(store, *, now: float | None = None,
                              window_days: int = RATE_WINDOW_DAYS) -> dict | None:
     """取最近一轮有效的大阪城实测层速。
 
-    规划要回答的是「剩余层数还要挂多久」，所以这里沿用成绩单已经算好的
-    average_loop_seconds。失败或手动停止的轮次只要确实跑出了层数，层速仍然
-    是有效样本；零层、脏数字和过期记录不参与。
+    优先用 osaka.floor_completed 事件的 duration_seconds（workflow 单层单跑
+    也有效）；direct 样本缺席时退回成绩单 recent_run_summaries(script=
+    'osaka') 的 average_loop_seconds。失败或手动停止的轮次只要确实跑出了
+    层数，层速仍是有效样本；零层、脏数字和过期记录不参与。
     """
+    now_ts = now if now is not None else time.time()
+    direct = _latest_direct_floor_speed(store, now_ts=now_ts,
+                                        window_days=window_days)
+    if direct is not None:
+        return direct
     getter = getattr(store, "recent_run_summaries", None)
     if not callable(getter):
         return None
-    now_ts = now if now is not None else time.time()
     try:
         runs = getter(limit=10, script="osaka",
                       from_ts=now_ts - window_days * 86400, to_ts=now_ts + 1)
@@ -955,8 +992,8 @@ def get_planning(store, goals_path: Path, *,
     window_impacts = {}
     for name, card in cards.items():
         impact = window_impact(name, card, measured_keys=resolutions.get(name),
-                               floor_yield=floor_yield, today=today,
-                               now=now_dt)
+                               floor_yield=floor_yield, floor_speed=floor_speed,
+                               today=today, now=now_dt)
         if impact:
             window_impacts[name] = impact
     saved_goals = load_goals(goals_path)
@@ -1791,6 +1828,7 @@ def event_abacus(name: str, card: dict, *, measured: dict | None,
 
 def window_impact(name: str, card: dict, *, measured_keys: dict | None = None,
                   floor_yield: dict | None = None,
+                  floor_speed: dict | None = None,
                   today: date | None = None,
                   now: datetime | None = None) -> dict | None:
     """按知识卡机理算活动窗口的资源净影响（§25 活动感知规划）。
@@ -1823,7 +1861,15 @@ def window_impact(name: str, card: dict, *, measured_keys: dict | None = None,
         if not days:
             return None
         hours = float(card.get("hours_per_night") or 6)
-        lap_min = float(card.get("lap_minutes") or 5)
+        # 层速优先实测（direct 单层事件或整轮平均），实测缺席才退回卡上
+        # 的 lap_minutes 旧默认——workflow 单层单跑也有样本，不再一律 5 分钟。
+        seconds_per_floor = (floor_speed or {}).get("seconds_per_floor")
+        if (isinstance(seconds_per_floor, (int, float))
+                and not isinstance(seconds_per_floor, bool)
+                and seconds_per_floor > 0):
+            lap_min = float(seconds_per_floor) / 60
+        else:
+            lap_min = float(card.get("lap_minutes") or 5)
         if lap_min <= 0:
             return None
         floors = hours * 60 / lap_min * days
