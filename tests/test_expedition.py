@@ -231,7 +231,9 @@ class _InjuryMaa(DispatchVerifyTests.Maa):
 
     def template_match(self, template, roi=None, threshold=0.7):
         self.tpl_calls.append(template)
-        if template == "重伤.png" and self.stamp_hit:
+        # 流程路径经素材包解析，重伤章是真实路径 battle/ui重伤.png；
+        # 测试配置里的 "重伤.png" 是同一个章的简写，两种名字都算命中。
+        if template in ("重伤.png", "battle/ui重伤.png") and self.stamp_hit:
             return Point(1, 1)
         return None
 
@@ -284,7 +286,7 @@ class DispatchJsonInjuryTests(unittest.TestCase):
                              return_value={"payload": {"status": 0}}), \
                 patch.object(flow, "_record_dispatch") as save:
             logs = list(flow.expedition_stream(era=1, map_name="鸟羽", team_no=2))
-        self.assertIn("重伤.png", device.tpl_calls)  # 数据过旧，回退画面兜底
+        self.assertIn("battle/ui重伤.png", device.tpl_calls)  # 数据过旧，回退画面兜底
         self.assertTrue(any("已出发" in m for m in logs))
         save.assert_called_once()
 

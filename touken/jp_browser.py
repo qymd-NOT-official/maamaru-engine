@@ -150,7 +150,9 @@ class JpBrowser:
         while time.monotonic() < deadline:
             try:
                 view = self._read_view()
-            except BrowserError:
+            except (BrowserError, TimeoutError):
+                # 页面加载主线程忙时 CDP 应答会超时（慢链路实测常态），
+                # 与「读数失败」同等对待：等它，别炸。
                 view = None
             if view and view == last:
                 return view

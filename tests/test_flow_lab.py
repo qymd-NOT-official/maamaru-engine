@@ -149,13 +149,17 @@ class StepCatalogTests(FlowLabTestBase):
         for step in body["steps"]:
             self.assertEqual(set(step), {"type", "label", "desc", "category", "params"})
         self.assertEqual([b["name"] for b in body["builtins"]],
-                         ["home", "open_menu", "popup_sweep", "reset_location", "safe_depart"])
+                         ["expedition_pick_map", "expedition_safe_dispatch",
+                          "home", "open_menu", "popup_sweep", "reset_location",
+                          "safe_depart"])
 
     def test_builtin_step_params_offer_select_with_all_three(self):
         steps = {s["type"]: s for s in
                  self.client.get("/api/flow-lab/steps").json()["steps"]}
         names = [opt[0] for opt in steps["builtin"]["params"][0]["options"]]
-        self.assertEqual(names, ["home", "open_menu", "popup_sweep", "reset_location", "safe_depart"])
+        self.assertEqual(names, ["expedition_pick_map", "expedition_safe_dispatch",
+                                 "home", "open_menu", "popup_sweep",
+                                 "reset_location", "safe_depart"])
 
 
 class DevGateTests(FlowLabTestBase):
@@ -352,10 +356,12 @@ class OfficialFlowTests(FlowLabTestBase):
 
     def test_official_listed_first_readonly_and_copyable(self):
         body = self.client.get("/api/flow-lab/flows").json()
-        self.assertEqual(body["flows"][0]["id"], "builtin-signin")
+        # 官方流程（签到、远征…）整体排在私货前面，不再假设只有一条官方
         self.assertIs(body["flows"][0]["official"], True)
+        signin = next(f for f in body["flows"] if f["id"] == "builtin-signin")
+        self.assertIs(signin["official"], True)
         self.assertEqual(body["warnings"], [])
-        self.assertGreaterEqual(len(body["flows"][0]["steps"]), 10)
+        self.assertGreaterEqual(len(signin["steps"]), 10)
         put = self.client.put("/api/flow-lab/flows/builtin-signin", json={"name": "改"})
         self.assertEqual(put.status_code, 403, put.text)
         delete = self.client.delete("/api/flow-lab/flows/builtin-signin")
@@ -366,10 +372,11 @@ class OfficialFlowTests(FlowLabTestBase):
         self.assertNotEqual(flow["id"], "builtin-signin")
         self.assertNotIn("official", flow)
         self.assertIn("副本", flow["name"])
-        self.assertEqual(flow["steps"], body["flows"][0]["steps"])
+        self.assertEqual(flow["steps"], signin["steps"])
         # 官方还在最前，副本以私货身份进列表和存储
         listed = self.client.get("/api/flow-lab/flows").json()["flows"]
-        self.assertEqual(listed[0]["id"], "builtin-signin")
+        self.assertIs(listed[0]["official"], True)
+        self.assertIn("builtin-signin", [f["id"] for f in listed])
         self.assertIn(flow["id"], [f["id"] for f in listed])
         self.assertIn(flow["id"], [f["id"] for f in flow_engine.load_flows()])
 
@@ -384,7 +391,8 @@ class OfficialFlowTests(FlowLabTestBase):
         self.assertTrue(any("撞了编号" in w for w in body["warnings"]))
 
     def test_official_step_test_run_works(self):
-        official = flow_engine.load_official_flows()[0]
+        official = next(f for f in flow_engine.load_official_flows()
+                        if f["id"] == "builtin-signin")
         step = next(s for s in official["steps"]
                     if s["type"] == "check"
                     and s["params"].get("ocr_expected") == "@signin/announce")

@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """日服点击出阵（sally）：画面识别 + 点击的状态机，无 OCR。
 
+JpNavigator 是这层已实证的导航底座（画面分类、认了就点、启动序列、
+黑屏/起手陌生自动刷新一次、卡死熔断），远征（jp_expedition）直接继承复用；
+Sally 只保留出阵自己的路线表和行军逻辑。
+
 安全底线（复刻国服 _safe_depart_stream 的安全语义）：
 
 - 只在认得出的画面上点击；认不出就停，绝不盲点。
@@ -66,6 +70,17 @@ SCREENS = (
 MARCH_PASSABLE = frozenset(
     {'loading', 'battle', 'result', 'field', 'mapview', 'team', 'unknown'})
 
+# 导航点击路线：画面名 → ('hit', 模板, 说辞) 或 ('near', 锚点, 偏移, 说辞)。
+# 出阵/远征各自一张表，共用 _navigate 的弹窗处理/黑屏刷新/卡死熔断。
+SALLY_ROUTE = {
+    'home': ('hit', 'home/catalog', '目录按钮'),
+    'directory': ('hit', 'directory/sally', '目录出阵入口'),
+    'formation': ('near', 'formation/label', BACK_ARROW_OFFSET, '编成页返回箭头'),
+    'shiki_menu': ('hit', 'menu/sally', '出阵入口'),
+    'era': ('hit', 'era/decide', '时代决定'),
+    'map': ('hit', 'map/team-select', '部队选择入口'),
+}
+
 
 class SallyStop(RuntimeError):
     """出阵中止；文案面向玩家。"""
@@ -75,9 +90,12 @@ def _digest(image) -> str:
     return hashlib.sha256(image.tobytes()).hexdigest()
 
 
-class Sally:
-    """一轮/多轮出阵状态机。device 只需 screenshot(force=...) 与 click(Point)
-    （基准分辨率像素，见 game_device.GameDevice）。"""
+class JpNavigator:
+    """日服画面导航底座：画面分类、认了就点、启动序列、黑屏/陌生自动刷新、
+    卡死熔断。出阵（Sally）与远征（jp_expedition.JpExpedition）共用这套
+    已实证的目录接续与安全语义，route 表决定每层画面点什么。"""
+
+    SCREENS = SCREENS
 
     def __init__(self, device, log=print, poll: float = 2.0,
                  stuck_seconds: float = STUCK_SECONDS,
@@ -88,6 +106,15 @@ class Sally:
         self.stuck_seconds = stuck_seconds
         self._save_debug = save_debug or self._default_save_debug
 
+    @staticmethod
+    def _default_save_debug(image) -> None:
+        try:
+            path = frames.JP_DATA_DIR / 'debug' / 'frames' / f"sally-stop-{time.strftime('%Y%m%d-%H%M%S')}.png"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(path)
+        except OSError:
+            pass
+
     # ---- 画面识别 ----
 
     def classify(self, image) -> str:
@@ -95,7 +122,7 @@ class Sally:
         if jp_vision.near_black(image) or jp_vision.mostly_dark(image):
             return 'loading'
         normalized = jp_vision.normalize_frame(image)
-        for name, templates in SCREENS:
+        for name, templates in self.SCREENS:
             try:
                 hits = [jp_vision.match(normalized, jp_vision.load_template(t))
                         for t in templates]
@@ -228,17 +255,12 @@ class Sally:
         self._save_debug(self.device.screenshot(force=True))
         raise SallyStop('游戏重新启动超时，已停止；请人工查看游戏')
 
-    def _navigate_to_team(self) -> None:
-        """走到部队选择页。支持从本丸/目录/指挥菜单/时代/地域/编成任意一层接续。
+    def _navigate(self, route: dict, targets: frozenset, what: str) -> str:
+        """沿 route 表走到 targets 之一；弹窗即停、卡死熔断。
 
-        本丸一律走「目録」大页进出阵：目录页不透明，景趣怎么换都影响不到；
-        指挥菜单是半透明浮层，模板会被景趣透出来的背景干扰（2026-10-12 西式
-        景趣事故），只作为菜单已被手动打开时的接续路径。
-
-        黑屏加载（转场/挂起后页面重载）是正常路过的画面；但持续黑屏超过
-        RELOAD_AFTER 说明游戏多半挂在加载上（闲置掉线、渲染上下文丢失），
-        自动刷新一次页面让它重进本丸。起手就认不出的画面（登录问候、滞留
-        陌生页）同理等 UNKNOWN_STABLE 后刷新一次。刷新后仍认不出则安全停止。"""
+        支持从本丸/目录/指挥菜单/时代/地域/编成任意一层接续；黑屏加载过久
+        或起手就认不出时自动刷新一次页面重走启动序列（各一次，绝不反复刷）。
+        只点 route 里认得出的按钮；认不出/素材缺失就安全停车（截图存 debug）。"""
         deadline = time.monotonic() + NAV_TIMEOUT * 5
         last = (None, None)
         last_change = time.monotonic()
@@ -249,10 +271,10 @@ class Sally:
         while time.monotonic() < deadline:
             image = self.device.screenshot(force=True)
             screen = self.classify(image)
-            if screen == 'team':
-                return
+            if screen in targets:
+                return screen
             if screen == 'dialog':
-                raise SallyStop('前往出阵时出现了确认弹窗，已停止；请人工查看游戏')
+                raise SallyStop(f'{what}时出现了确认弹窗，已停止；请人工查看游戏')
             if screen == 'loading':
                 unknown_since = None
                 if loading_since is None:
@@ -298,22 +320,20 @@ class Sally:
             elif screen == 'confirm':
                 self.log('确认窗默认选否，继续')
                 self._click_hit('dialog/decline', '确认窗いいえ', image=image)
-            elif screen == 'home':
-                self._click_hit('home/catalog', '目录按钮', image=image)
-            elif screen == 'directory':
-                self._click_hit('directory/sally', '目录出阵入口', image=image)
-            elif screen == 'formation':
-                self._click_near('formation/label', BACK_ARROW_OFFSET,
-                                 '编成页返回箭头', image=image)
-            elif screen == 'shiki_menu':
-                self._click_hit('menu/sally', '出阵入口', image=image)
-            elif screen == 'era':
-                self._click_hit('era/decide', '时代决定', image=image)
-            elif screen == 'map':
-                self._click_hit('map/team-select', '部队选择入口', image=image)
+            elif screen in route:
+                action = route[screen]
+                try:
+                    if action[0] == 'hit':
+                        self._click_hit(action[1], action[2], image=image)
+                    else:
+                        self._click_near(action[1], action[2], action[3],
+                                         image=image)
+                except jp_vision.TemplateNotFound as exc:
+                    self._save_debug(image)
+                    raise SallyStop(f'{what}需要的素材还没标定（{exc}），已停止')
             else:
                 self._save_debug(image)
-                raise SallyStop('前往出阵时遇到了不认识的画面，已停止（截图已存到 debug）')
+                raise SallyStop(f'{what}时遇到了不认识的画面，已停止（截图已存到 debug）')
             progressed = True
             digest = _digest(image)
             if (screen, digest) != last:
@@ -323,7 +343,25 @@ class Sally:
                 self._save_debug(image)
                 raise SallyStop('导航时画面卡住不动了，已停止；请人工查看游戏')
             time.sleep(self.poll)
-        raise SallyStop('前往出阵超时，已停止；若游戏一直黑屏请手动刷新页面后重试')
+        raise SallyStop(f'{what}超时，已停止；若游戏一直黑屏请手动刷新页面后重试')
+
+
+class Sally(JpNavigator):
+    """一轮/多轮出阵状态机。device 只需 screenshot(force=...) 与 click(Point)
+    （基准分辨率像素，见 game_device.GameDevice）。"""
+
+    def _navigate_to_team(self) -> None:
+        """走到部队选择页。支持从本丸/目录/指挥菜单/时代/地域/编成任意一层接续。
+
+        本丸一律走「目録」大页进出阵：目录页不透明，景趣怎么换都影响不到；
+        指挥菜单是半透明浮层，模板会被景趣透出来的背景干扰（2026-10-12 西式
+        景趣事故），只作为菜单已被手动打开时的接续路径。
+
+        黑屏加载（转场/挂起后页面重载）是正常路过的画面；但持续黑屏超过
+        RELOAD_AFTER 说明游戏多半挂在加载上（闲置掉线、渲染上下文丢失），
+        自动刷新一次页面让它重进本丸。起手就认不出的画面（登录问候、滞留
+        陌生页）同理等 UNKNOWN_STABLE 后刷新一次。刷新后仍认不出则安全停止。"""
+        self._navigate(SALLY_ROUTE, frozenset({'team'}), '前往出阵')
 
     def _select_team(self, team_no: int) -> None:
         self._click_near('team/depart', TEAM_TAB_OFFSETS[team_no],
@@ -445,17 +483,6 @@ class Sally:
             self._watch_march()
             self.log(f'第 {round_no}/{rounds} 轮回本丸')
         self.log(f'出阵完成，共 {rounds} 轮')
-
-    # ---- 调试帧 ----
-
-    @staticmethod
-    def _default_save_debug(image) -> None:
-        try:
-            path = frames.JP_DATA_DIR / 'debug' / 'frames' / f"sally-stop-{time.strftime('%Y%m%d-%H%M%S')}.png"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            image.save(path)
-        except OSError:
-            pass
 
 
 def run_script(config_path=None, params: dict | None = None):

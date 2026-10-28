@@ -1347,6 +1347,34 @@ register_script("jp-sally", "日服出阵",
                 hidden=True, server="jp")
 
 
+# 日服远征手动派遣：与国服设备链路完全分离，走 touken.jp_expedition。
+# 只派一支部队（选时代+小图卡位），出发前验出重伤绝不派遣；
+# 不收菜、不排班、不补花（共同契约：双服阶段2「远征手动派遣」）。
+def _build_jp_expedition(config_path, params):
+    from touken import jp_expedition
+    return jp_expedition.run_script(config_path, params)
+
+
+register_script("jp-expedition", "日服远征",
+                "日服远征手动派遣：选时代和小图卡位，派一支部队去跑远征。"
+                "出发前验出重伤绝不派遣；验伤或结果不明确就停，绝不假绿。"
+                "不收菜、不排班、不补花",
+                _build_jp_expedition,
+                params=[{"key": "team_no", "type": "select", "label": "部队",
+                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "era", "type": "select", "label": "时代",
+                         "options": [[str(i), f"时代{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "map_slot", "type": "select", "label": "小图卡位",
+                         "options": [[str(i), f"卡位{'一二三四'[i - 1]}"] for i in range(1, 5)],
+                         "default": "1"},
+                        {"key": "map_name", "type": "text", "label": "日文图名",
+                         "default": "鳥羽・伏見",
+                         "help": "选完图后用来确认选中了目标图；默认 鳥羽・伏見（时代一卡位一）"}],
+                hidden=True, server="jp")
+
+
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
 # 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
@@ -4314,8 +4342,8 @@ async def api_save_settings(request: Request, server: str = ""):
         extra = set(body) - allowed
         if extra == {"params"}:
             params = body.get("params")
-            if not isinstance(params, dict) or set(params) - {"jp-sally"}:
-                raise HTTPException(400, "日服只能保存日服出阵的参数")
+            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition"}:
+                raise HTTPException(400, "日服只能保存日服脚本的参数")
         elif extra:
             raise HTTPException(400, "日服暂不支持自动执行设置")
     existing.pop("_saved_at", None)

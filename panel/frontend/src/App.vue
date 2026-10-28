@@ -24,6 +24,7 @@ import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vu
 import HonmaruHome from './components/HonmaruHome.vue'
 import SwordArchivePanel from './components/SwordArchivePanel.vue'
 import JpSallyCard from './components/JpSallyCard.vue'
+import JpExpeditionCard from './components/JpExpeditionCard.vue'
 import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
@@ -36,6 +37,14 @@ const jpScripts = ref<Record<string, ScriptInfo>>({})
 const jpSelected = ref('jp-sally')
 const jpSallyRunning = ref(false)
 const jpSallyStopping = ref(false)
+const jpExpeditionRunning = ref(false)
+const jpExpeditionStopping = ref(false)
+// 日志面板跟着选中卡走：只显示当前脚本的日志，状态栏也只报当前脚本，
+// 出阵/远征两块卡互不串台（同一时刻只有一支脚本能跑）。
+const jpCardRunning = computed(() => (jpSelected.value === 'jp-expedition' ? jpExpeditionRunning.value : jpSallyRunning.value))
+const jpCardStopping = computed(() => (jpSelected.value === 'jp-expedition' ? jpExpeditionStopping.value : jpSallyStopping.value))
+const jpCardScript = computed(() => (jpSelected.value === 'jp-expedition' ? 'jp-expedition' : 'jp-sally'))
+const jpCardLabel = computed(() => (jpSelected.value === 'jp-expedition' ? '日服远征' : '日服出阵'))
 const jpScriptKeys = computed(() => Object.keys(jpScripts.value))
 
 const scripts = ref<Record<string, ScriptInfo>>({})
@@ -810,15 +819,16 @@ watch(tab, value => {
         <div class="home-functions-head"><h2>常用功能</h2></div>
         <nav>
           <button v-for="key in jpScriptKeys" :key="key" type="button" :class="{ active: jpSelected === key }" @click="jpSelected = key">
-            <span>{{ jpScripts[key]?.label || key }}</span><small v-if="key === 'jp-sally' && jpSallyRunning">运行中</small>
+            <span>{{ jpScripts[key]?.label || key }}</span><small v-if="(key === 'jp-sally' && jpSallyRunning) || (key === 'jp-expedition' && jpExpeditionRunning)">运行中</small>
           </button>
         </nav>
         <p v-if="!jpScriptKeys.length" class="home-functions-hidden-note">日服任务还没备好，稍后再来看看</p>
       </aside>
       <section class="home-center">
-        <JpSallyCard v-if="jpScripts[jpSelected]" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
+        <JpSallyCard v-if="jpSelected === 'jp-sally'" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
+        <JpExpeditionCard v-else-if="jpSelected === 'jp-expedition'" v-model:running="jpExpeditionRunning" v-model:stopping="jpExpeditionStopping" />
         <p v-else class="task-empty-state">日服任务还没备好，稍后再来看看</p>
-        <LogPanel :running="jpSallyRunning" :stopping="jpSallyStopping" task-label="日服出阵" only-script="jp-sally" />
+        <LogPanel :running="jpCardRunning" :stopping="jpCardStopping" :task-label="jpCardLabel" :only-script="jpCardScript" />
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel @open-dismantle-list="openDismantleList" :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>

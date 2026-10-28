@@ -11,6 +11,13 @@
   → "出发远征"卷轴过场（不用跳过，几秒自己完）
   → 验证：小图卡上"远征时间"变成红色"远征中"
 
+双服阶段 2（docs/dual-server-pipeline.md）：派遣已收编为官方流程
+resource/base/flows/expedition.json（去远征 → 内置选图 → 内置安全派遣），
+expedition_stream 只剩配置门、补花前置和填参数跑流程；选图/派遣两块活是
+ ExpeditionMixin._expedition_pick_map_stream / _expedition_safe_dispatch_stream
+（流程引擎 builtin 按契约调用，识别素材经素材包 @expedition/* 解析）。
+验伤、游戏结果证明和记账是数据层的事，留在代码不进 DSL。
+
 备注：
   - 时代卡/小图卡坐标已实测校准；OCR 点名字和按卡位坐标点两种选图方式都支持。
   - 收菜（collect_expedition_stream）支持"收完顺手再派"：读结算界面上的
@@ -20,6 +27,7 @@
     "即刻出阵"按钮的相似皮肤串台。
 """
 
+import copy
 import json
 import re
 import subprocess
@@ -32,10 +40,13 @@ import numpy as np
 from ..runtime_paths import STATUS_DIR
 
 from ..device_adapter import roi_4to4
+from ..flow_engine import FlowError, find_flow, normalize_flow, run_flow
 
 _MAPS_TABLE = Path(__file__).parent.parent / "data" / "expedition_maps.json"
 _STATUS_DIR = STATUS_DIR
 _EXP_RECORD = _STATUS_DIR / "expeditions.json"
+
+EXPEDITION_FLOW_ID = "expedition"
 
 _NUMERALS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5}
 
@@ -118,7 +129,13 @@ def _map_slot(era, name):
 
 
 class ExpeditionMixin:
-    """远征派遣。依赖宿主类的 navigate_to_stream、_click_point。"""
+    """远征派遣。依赖宿主类的 navigate_to_stream、_click_point、_find_deploy_button。"""
+
+    # 地图元数据走 self.* 供日服宿主覆盖：日服收益表/图名与国服不同，
+    # 继承时覆写这三个（docs/dual-server-pipeline.md 阶段 2 共同契约），
+    # 绝不让国服数据写进日服账本。
+    _map_meta = staticmethod(_map_meta)
+    _map_slot = staticmethod(_map_slot)
 
     def expedition_stream(self, era: int, map_name: str = None, team_no: int = 2,
                           map_slot: int = None, sakura_before_dispatch: bool = False,
@@ -158,16 +175,7 @@ class ExpeditionMixin:
             return
         time.sleep(1.0)
 
-        # ========== 2/3. 选时代卡 → 选小图（点完必须看到图名才算数） ==========
-        # 时代卡和小图卡位都是盲点坐标；点歪了会把队伍派去错误的图，
-        # 而第 9 步的"远征中"验证只认红字不认图，派错了也假绿。
-        # 所以选完必须全屏 OCR 对一遍图名，对不上重选一次，再不行就停。
-        expect_name = map_name
-        if not expect_name and map_slot is not None:
-            _, expect_name, _ = _map_meta(era, map_slot)
-        # 卡位派图时 map_name 本来就没有，回填查到的图名，
-        # 免得收工日志打出「None」
-        map_name = map_name or expect_name
+        # ========== 2/3 前置门：小图卡位坐标 / 图名二选一（保持旧配置门）==========
         slots = cfg.get("map_slots", {})
         if map_slot is not None and str(map_slot) not in slots:
             yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
@@ -176,6 +184,7 @@ class ExpeditionMixin:
             yield "[远征] 既没给地图名字也没给卡位，不知道去哪，停"
             return
 
+        # ========== 补花前置（pending 恢复 / 续派前练兵），语义不动 ==========
         from ..expedition_sakura import pending_restore, recover_stream, train_stream
         pending = pending_restore()
         if pending:
@@ -192,6 +201,66 @@ class ExpeditionMixin:
             if self.current_location != '远征':
                 yield '[远征] ✗ 补花后未回到远征页，暂不派遣'
                 return
+
+        # ========== 选图 + 安全派遣：官方流程单填入实际参数后交给流程引擎 ==========
+        # 流程单本身是展品（资源目录只读），深拷贝一份填参，不动官方原件；
+        # 选图/安全语义在 _expedition_pick_map_stream / _expedition_safe_dispatch_stream。
+        flow = find_flow(EXPEDITION_FLOW_ID)
+        if flow is None:
+            yield ("[远征] ✗ 找不到官方远征流程"
+                   "（resource/base/flows/expedition.json 缺失），暂不派遣")
+            return
+        plan = copy.deepcopy(flow)
+        for step in plan["steps"]:
+            if step.get("type") != "builtin":
+                continue
+            params = step.get("params") or {}
+            if params.get("name") == "expedition_pick_map":
+                params.update({"era": era, "map_slot": map_slot,
+                               "map_name": map_name})
+            elif params.get("name") == "expedition_safe_dispatch":
+                params.update({"team_no": team_no, "era": era,
+                               "map_slot": map_slot, "map_name": map_name})
+        try:
+            plan = normalize_flow(plan)
+        except FlowError as exc:
+            yield f"[远征] ✗ 官方远征流程校验翻车: {exc}"
+            return
+        yield from run_flow(self, plan, server='cn')
+
+    def _expedition_pick_map_stream(self, era, map_slot=None, map_name=None,
+                                    pack=None):
+        """选时代卡 → 选小图（卡位盲点或 OCR 点名字）→ 全屏 OCR 对图名。
+
+        从 expedition_stream 抽出（双服阶段 2，流程引擎 expedition_pick_map
+        积木按契约调用）。时代卡/小图卡位是盲点坐标，点歪了会把队伍派去错误
+        的图，而结果验证只认红字不认图，派错了也假绿——所以选完必须全屏 OCR
+        对一遍图名，对不上重选一次，再不行就停。
+        识别素材优先经素材包 @expedition/* 解析（pack=None 回退配置旧值）；
+        地图元数据（图名回填）保持代码现状。前置：游戏已在远征页。
+        返回 True/False。
+        """
+        cfg = (getattr(self, "config", None) or {}).get("expedition", {})
+        if not cfg:
+            yield "[远征] 未配置远征"
+            return False
+        if str(era) not in cfg.get("eras", {}):
+            yield f"[远征] 配置里没有时代{era}的坐标"
+            return False
+        expect_name = map_name
+        if not expect_name and map_slot is not None:
+            _, expect_name, _ = self._map_meta(era, map_slot)
+        # 卡位派图时 map_name 本来就没有，回填查到的图名，
+        # 免得收工日志打出「None」
+        map_name = map_name or expect_name
+        slots = cfg.get("map_slots", {})
+        if map_slot is not None and str(map_slot) not in slots:
+            yield f"[远征] 配置里没有小图卡位{map_slot}的坐标"
+            return False
+        if map_slot is None and not map_name:
+            yield "[远征] 既没给地图名字也没给卡位，不知道去哪，停"
+            return False
+
         selected = False
         for attempt in range(2):
             if attempt:
@@ -206,7 +275,10 @@ class ExpeditionMixin:
                 time.sleep(1.0)
             else:
                 yield f"[远征] 🔍 找小图「{map_name}」..."
-                map_roi = roi_4to4(*cfg["map_ocr_roi"])
+                if pack is not None:
+                    map_roi = roi_4to4(*pack.resolve_roi("@expedition/map-ocr"))
+                else:
+                    map_roi = roi_4to4(*cfg["map_ocr_roi"])
                 map_pt = None
                 for _ in range(6):
                     self.device.screenshot(force=True)
@@ -216,7 +288,7 @@ class ExpeditionMixin:
                     time.sleep(0.5)
                 if not map_pt:
                     yield f"[远征] 没找到小图「{map_name}」（名字写错了？时代不对？要翻页？），停"
-                    return
+                    return False
                 self.device.click(map_pt)
                 time.sleep(1.0)
 
@@ -225,27 +297,66 @@ class ExpeditionMixin:
                 break
         if not selected:
             yield f"[远征] 两次都没确认选中「{expect_name}」，怕派错队伍，停"
-            return
+            return False
+        return True
+
+    def _expedition_safe_dispatch_stream(self, team_no, era, map_slot=None,
+                                         map_name=None, pack=None):
+        """开部队选择 → 选部队 →【保命】重伤检查 → 远征开始 → 二次确认
+        → 游戏响应确认 → 记账。
+
+        从 expedition_stream 抽出（双服阶段 2，流程引擎
+        expedition_safe_dispatch 积木按契约调用）。前置：选图已成功。
+        识别素材优先经素材包 @expedition/* 解析（pack=None 回退配置旧值）；
+        验伤/结果证明/记账是数据层的事留在代码（日服宿主覆盖这三处 CN 专属
+        实现，绝不让国服数据写进日服账本）。返回 True/False。
+        """
+        cfg = (getattr(self, "config", None) or {}).get("expedition", {})
+        if not cfg:
+            yield "[远征] 未配置远征"
+            return False
+        teams = (getattr(self, "config", None) or {}).get(
+            "team_select", {}).get("teams", {})
+        if str(team_no) not in teams:
+            yield f"[远征] 配置里没有部队{team_no}的坐标"
+            return False
+        expect_name = map_name
+        if not expect_name and map_slot is not None:
+            _, expect_name, _ = self._map_meta(era, map_slot)
+        map_name = map_name or expect_name
 
         # ========== 4. 点"部队选择" → 等部队选择界面 ==========
-        ocr_cfg = cfg["team_ui_ocr"]
-        team_roi = roi_4to4(*ocr_cfg["roi"])
+        if pack is not None:
+            team_expected = pack.resolve_ocr("@expedition/team-ui")
+            team_roi = roi_4to4(*pack.resolve_roi("@expedition/team-ui"))
+        else:
+            ocr_cfg = cfg["team_ui_ocr"]
+            team_expected = ocr_cfg["expected"]
+            team_roi = roi_4to4(*ocr_cfg["roi"])
         team_ui_ok = False
         for attempt in range(12):
             self.device.screenshot(force=True)
-            if self.device.ocr(expected=ocr_cfg["expected"], roi=team_roi):
+            if self.device.ocr(expected=team_expected, roi=team_roi):
                 team_ui_ok = True
                 break
-            # 前两次还没进就找"部队选择"按钮点（远征界面是按钮进入，不是直通）
+            # 前几次还没进就找"部队选择"按钮点（远征界面是按钮进入，不是直通）
             if attempt <= 3:
-                deploy = self._find_deploy_button(cfg)
+                deploy_ocr = (cfg.get("deploy_button", {}).get("ocr", {}) or {})
+                deploy_words = deploy_ocr.get("expected", ["部队", "选择"])
+                if pack is not None:
+                    deploy_roi = pack.resolve_roi("@expedition/deploy")
+                else:
+                    deploy_roi = deploy_ocr.get("roi", [1110, 580, 1279, 710])
+                deploy = self._find_deploy_button(
+                    {"deploy_button": {"ocr": {"expected": deploy_words,
+                                               "roi": list(deploy_roi)}}})
                 if deploy:
                     self.device.click(deploy)
                     time.sleep(1.5)
             time.sleep(0.5)
         if not team_ui_ok:
             yield "[远征] 部队选择界面没打开（条件不满足按钮可能是灰的？），停"
-            return
+            return False
 
         # ========== 5. 选部队 ==========
         self._click_point(teams[str(team_no)])
@@ -256,73 +367,96 @@ class ExpeditionMixin:
         # ========== 6. 【保命】重伤检查 ==========
         # 游戏数据新鲜就先信数据（全队血量一个不缺才算数，缺一员都算「不知道」）；
         # 数据缺失、过旧才回退重伤章模板。宁停不放，两条路判出重伤都拒派。
+        if pack is not None:
+            stamp_template = pack.resolve_template("@expedition/injury-stamp")
+        else:
+            stamp_template = cfg["injury_stamp"]["template"]
         log_injury, detail = self._dispatch_injury_report(team_no, {})
         if detail is not None:
             yield f"[远征] 📋 日志验伤：{detail}"
             if log_injury == "重伤":
                 yield "[远征] 🛑 游戏数据验出重伤！按规矩绝不派遣，停。去修刀吧"
-                return
+                return False
         else:
             self.device.screenshot(force=True)
-            if self.device.template_match(cfg["injury_stamp"]["template"]):
+            if self.device.template_match(stamp_template):
                 yield "[远征] 🛑 检测到重伤标记！按规矩绝不派遣，停。去修刀吧"
-                return
+                return False
 
         # ========== 7. 点"远征开始" ==========
-        start = self.device.template_match(cfg["start_button"]["template"])
+        if pack is not None:
+            start_template = pack.resolve_template("@expedition/start")
+            start_expected = pack.resolve_ocr("@expedition/start")
+            start_roi = roi_4to4(*pack.resolve_roi("@expedition/start"))
+        else:
+            start_template = cfg["start_button"]["template"]
+            start_expected = cfg["start_ocr"]["expected"]
+            start_roi = roi_4to4(*cfg["start_ocr"]["roi"])
+        start = self.device.template_match(start_template)
         if not start:
-            start_ocr = cfg["start_ocr"]
-            start = self.device.ocr(expected=start_ocr["expected"],
-                                 roi=roi_4to4(*start_ocr["roi"]),
-                                 match_mode="exact")
+            start = self.device.ocr(expected=start_expected, roi=start_roi,
+                                    match_mode="exact")
         if not start:
             yield ("[远征] 找不到可用的远征开始按钮；这支部队可能不满足该图条件，"
                    "或仍在远征，停止派遣")
-            return
+            return False
         self.device.click(start)
         time.sleep(1.5)
 
         # ========== 8. 二次确认弹窗：点"确认"（道具复选框不碰，默认不用） ==========
-        confirm_ocr = cfg["confirm_ocr"]
+        if pack is not None:
+            confirm_expected = pack.resolve_ocr("@expedition/confirm")
+            confirm_roi = roi_4to4(*pack.resolve_roi("@expedition/confirm"))
+        else:
+            confirm_ocr = cfg["confirm_ocr"]
+            confirm_expected = confirm_ocr["expected"]
+            confirm_roi = roi_4to4(*confirm_ocr["roi"])
         confirm = None
         for _ in range(8):
             self.device.screenshot(force=True)
-            confirm = self.device.ocr(expected=confirm_ocr["expected"],
-                                   roi=roi_4to4(*confirm_ocr["roi"]))
+            confirm = self.device.ocr(expected=confirm_expected, roi=confirm_roi)
             if confirm:
                 break
             time.sleep(0.5)
         if not confirm:
             yield "[远征] 确认弹窗没出现，停，你去看看卡哪了"
-            return
+            return False
         confirmed_at = int(time.time())
         self.device.click(confirm)
         yield "[远征] 🐎 确认完毕，出发远征！过场动画跑着..."
 
         # ========== 9. 游戏响应确认结果，缺数据才看画面 ==========
         time.sleep(1.0)
-        selected_slot = map_slot if map_slot is not None else _map_slot(era, expect_name)
+        selected_slot = (map_slot if map_slot is not None
+                       else self._map_slot(era, expect_name))
         proof = self._dispatch_game_result(team_no, era, selected_slot, confirmed_at)
         if proof is False:
             yield "[远征] ✗ 游戏未确认本次部队和地图派遣成功，停止派遣"
-            return
+            return False
         if proof is not None:
             yield f"[远征] ✅ 部队{team_no}已出发：时代{era}「{map_name}」，收工"
             self._record_dispatch(team_no, era, selected_slot, map_name)
-            return
-        running_ocr = cfg["running_ocr"]
-        running_roi = roi_4to4(*running_ocr["roi"])
+            return True
+        if pack is not None:
+            running_expected = pack.resolve_ocr("@expedition/running")
+            running_roi = roi_4to4(*pack.resolve_roi("@expedition/running"))
+        else:
+            running_ocr = cfg["running_ocr"]
+            running_expected = running_ocr["expected"]
+            running_roi = roi_4to4(*running_ocr["roi"])
         for _ in range(20):  # 过场几秒，给足 10 秒
             time.sleep(0.5)
             self.device.screenshot(force=True)
-            if self.device.ocr(expected=running_ocr["expected"], roi=running_roi):
+            if self.device.ocr(expected=running_expected, roi=running_roi):
                 yield f"[远征] ✅ 部队{team_no}已出发：时代{era}「{map_name}」，收工"
                 self._record_dispatch(team_no, era, selected_slot, map_name)
-                return
+                return True
 
         # 过场后可能回了本丸也可能还在目的地界面，找不到"远征中"就截个图让人看
+        # （这条提醒在翻车词表白名单里：派遣已点确认，结果不确定 ≠ 翻车，
+        #   保持旧语义不记红——但也没记账，玩家优先，去看一眼）
         yield "[远征] ⚠️ 没看到「远征中」字样，可能派遣失败也可能已回本丸，你去看一眼"
-        return
+        return True
 
     def _dispatch_game_result(self, team_no, era, slot, after):
         if slot is None or not getattr(self.device, "adb_address", None):

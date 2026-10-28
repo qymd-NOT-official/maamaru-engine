@@ -45,6 +45,16 @@ it('keeps JP sally params on the JP settings file', async () => {
   ])
 })
 
+it('keeps JP expedition params on the JP settings file', async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
+  vi.stubGlobal('fetch', fetcher)
+  await api.saveSettings({ 'jp-expedition': { team_no: '1', era: '1', map_slot: '1', map_name: '鳥羽・伏見' } }, 'jp')
+  await api.saveSettings({ 'jp-sally': { team_no: '2', rounds: 1 } }, 'jp')
+  expect(fetcher.mock.calls.map(call => String((call as unknown[])[0]))).toEqual([
+    '/api/saved-settings?server=jp', '/api/saved-settings?server=jp',
+  ])
+})
+
 it('routes JP script list to the JP filter', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
   vi.stubGlobal('fetch', fetcher)

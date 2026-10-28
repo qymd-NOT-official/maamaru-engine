@@ -65,6 +65,7 @@ class FakeAgent:
         self.depart_ok = True
         self.confirm_ok = True
         self.sweep_ok = True
+        self.expedition_ok = True
 
     def _skip_point(self, point=None):
         return (775, 695)
@@ -91,6 +92,20 @@ class FakeAgent:
     def _confirm_departure(self, cfg):
         self.calls.append(("_confirm_departure", cfg))
         return self.confirm_ok
+
+    def _expedition_pick_map_stream(self, era, map_slot=None, map_name=None,
+                                    pack=None):
+        self.calls.append(("_expedition_pick_map_stream", era, map_slot,
+                           map_name, pack))
+        yield f"[远征] 🗺️ 图选好了"
+        return self.expedition_ok
+
+    def _expedition_safe_dispatch_stream(self, team_no, era, map_slot=None,
+                                         map_name=None, pack=None):
+        self.calls.append(("_expedition_safe_dispatch_stream", team_no, era,
+                           map_slot, map_name, pack))
+        yield f"[远征] ✅ 已出发"
+        return self.expedition_ok
 
 
 def _step(id_, type_, params=None, on_fail=None, label=None, **extra):
@@ -495,6 +510,126 @@ class BuiltinTests(unittest.TestCase):
         self.assertTrue(fail_lines)
         for line in fail_lines:
             self.assertTrue(_is_fail(line), line)
+
+
+class ExpeditionBuiltinTests(unittest.TestCase):
+    """远征选图/安全派遣积木：参数校验、按契约传参（含 pack 透传）。"""
+
+    def setUp(self):
+        self._sleep = patch.object(flow_engine, "_sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _run(self, flow, agent):
+        return list(flow_engine.run_flow(agent, flow)), agent
+
+    def test_params_validated_and_clamped(self):
+        plan = flow_engine.normalize_flow(_flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_pick_map", "era": 9, "map_slot": 7,
+                   "map_name": "  鸟羽  ", "team_no": 0}),
+            _step("s2", "builtin",
+                  {"name": "expedition_safe_dispatch", "era": 3,
+                   "map_name": None, "team_no": 4}),
+        ]))
+        pick, dispatch = plan["steps"]
+        self.assertEqual(pick["params"]["era"], 5)      # 越界收进 1-5
+        self.assertEqual(pick["params"]["map_slot"], 4)  # 越界收进 1-4
+        self.assertEqual(pick["params"]["map_name"], "鸟羽")
+        self.assertEqual(pick["params"]["team_no"], 1)   # 越界收进 1-5
+        self.assertIsNone(dispatch["params"]["map_slot"])  # 留空走卡位缺省 None
+        self.assertEqual(dispatch["params"]["team_no"], 4)
+
+    def test_bad_map_name_rejected(self):
+        with self.assertRaises(FlowError):
+            flow_engine.normalize_flow(_flow("远征", [
+                _step("s1", "builtin",
+                      {"name": "expedition_pick_map", "map_name": 123})]))
+
+    def test_pick_map_calls_host_with_pack(self):
+        flow = _flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_pick_map", "era": 2, "map_slot": 3,
+                   "map_name": None, "team_no": 1}),
+        ])
+        agent = FakeAgent()
+        messages, agent = self._run(flow, agent)
+        call = next(c for c in agent.calls
+                    if c[0] == "_expedition_pick_map_stream")
+        self.assertEqual(call[1:4], (2, 3, None))
+        self.assertIsNotNone(call[4])  # pack 从 ctx 透传（cn 素材包）
+        self.assertTrue(any("全部跑完，全绿" in m for m in messages))
+
+    def test_safe_dispatch_calls_host_with_team_and_pack(self):
+        flow = _flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_safe_dispatch", "era": 1, "map_slot": 1,
+                   "map_name": "鸟羽", "team_no": 5}),
+        ])
+        agent = FakeAgent()
+        messages, agent = self._run(flow, agent)
+        call = next(c for c in agent.calls
+                    if c[0] == "_expedition_safe_dispatch_stream")
+        self.assertEqual(call[1:5], (5, 1, 1, "鸟羽"))
+        self.assertIsNotNone(call[5])  # pack 从 ctx 透传
+        self.assertTrue(any("全部跑完，全绿" in m for m in messages))
+
+    def test_pick_map_failure_is_failure(self):
+        flow = _flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_pick_map", "era": 1, "map_slot": 1}),
+        ])
+        agent = FakeAgent()
+        agent.expedition_ok = False
+        messages, agent = self._run(flow, agent)
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+
+class UnrecoverableExpeditionBuiltinTests(unittest.TestCase):
+    """选图失败绝不能继续派遣：两远征积木翻车不可自动收拾。"""
+
+    def setUp(self):
+        self._sleep = patch.object(flow_engine, "_sleep")
+        self._sleep.start()
+        self.addCleanup(self._sleep.stop)
+
+    def _run(self, flow, agent):
+        return list(flow_engine.run_flow(agent, flow)), agent
+
+    def test_pick_map_failure_never_recovers(self):
+        flow = _flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_pick_map", "era": 1, "map_slot": 1}),
+            _step("s2", "builtin",
+                  {"name": "expedition_safe_dispatch", "era": 1, "map_slot": 1,
+                   "team_no": 1}),
+        ])
+        agent = FakeAgent()
+        agent.expedition_ok = False
+        messages, agent = self._run(flow, agent)
+        # 不触发回本丸收拾、不再点任何坐标
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        # 安全派遣一步没轮到跑
+        self.assertFalse(any(c[0] == "_expedition_safe_dispatch_stream"
+                             for c in agent.calls))
+        self.assertTrue(any("不可自动收拾" in m for m in messages))
+        self.assertTrue(any("有翻车项" in m for m in messages))
+
+    def test_safe_dispatch_failure_never_recovers(self):
+        flow = _flow("远征", [
+            _step("s1", "builtin",
+                  {"name": "expedition_safe_dispatch", "era": 1, "map_slot": 1,
+                   "team_no": 2}),
+            _step("s2", "click_point", {"x": 5, "y": 6}),
+        ])
+        agent = FakeAgent()
+        agent.expedition_ok = False
+        messages, agent = self._run(flow, agent)
+        self.assertFalse(any(c[0] == "navigate_to_stream" for c in agent.calls))
+        self.assertFalse(any(c[0] == "click" for c in agent.device.calls))
+        self.assertTrue(any("不可自动收拾" in m for m in messages))
+        self.assertTrue(any("有翻车项" in m for m in messages))
 
 
 class StorageTests(unittest.TestCase):

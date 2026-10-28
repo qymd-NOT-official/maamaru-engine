@@ -876,6 +876,93 @@ register_builtin({
 })
 
 
+# ── 远征派遣积木（docs/dual-server-pipeline.md 阶段 2）──
+# 流程单：navigate(@expedition/nav) → expedition_pick_map → expedition_safe_dispatch。
+# 选图/派遣的具体活在宿主玩法层（agent._expedition_pick_map_stream /
+# _expedition_safe_dispatch_stream），那里管配置门、地图元数据、重伤拦截、
+# 游戏结果证明和记账；引擎只负责按契约传参（含 ctx["pack"]）和兜底语义。
+
+def _validate_expedition_dispatch_params(params: dict, i: int, *,
+                                         base_size: tuple = DEFAULT_BASE_SIZE,
+                                         official: bool = False) -> dict:
+    """远征两积木共用参数：时代 1-5、卡位 1-4、部队 1-5 整数收界；
+    map_name 可空（留空按卡位走，名字由玩法层按地图元数据解析）。"""
+    map_name = params.get("map_name")
+    if map_name is not None:
+        if not isinstance(map_name, str) or not map_name.strip():
+            raise FlowError(f"第 {i + 1} 步：map_name 要给地图名字或留空")
+        map_name = map_name.strip()
+    return {"era": _int(params.get("era"), "era", 1, 1, 5),
+            "map_slot": (None if params.get("map_slot") is None
+                         else _int(params.get("map_slot"), "map_slot", 1, 1, 4)),
+            "map_name": map_name,
+            "team_no": _int(params.get("team_no"), "team_no", 1, 1, 5)}
+
+
+def _builtin_expedition_pick_map(agent, params, ctx):
+    """选时代卡 → 点小图（卡位或按名字 OCR）→ 全屏 OCR 对图名，对不上重选再停。"""
+    tag = ctx.get("flow_name", "[流程]")
+    ok = yield from agent._expedition_pick_map_stream(
+        era=params.get("era", 1),
+        map_slot=params.get("map_slot"),
+        map_name=params.get("map_name"),
+        pack=(ctx or {}).get("pack"))
+    if not ok:
+        yield f"{tag} ✗ 选远征图没成，绝不继续派遣，停"
+        return False
+    yield f"{tag} ✓ 远征图已选定"
+    return True
+
+
+def _builtin_expedition_safe_dispatch(agent, params, ctx):
+    """部队选择 → 重伤拦截 → 远征开始 → 二次确认 → 游戏结果证明 → 记账。"""
+    tag = ctx.get("flow_name", "[流程]")
+    ok = yield from agent._expedition_safe_dispatch_stream(
+        team_no=params.get("team_no", 1),
+        era=params.get("era", 1),
+        map_slot=params.get("map_slot"),
+        map_name=params.get("map_name"),
+        pack=(ctx or {}).get("pack"))
+    if not ok:
+        yield f"{tag} ✗ 安全派遣没成，停"
+        return False
+    return True
+
+
+_EXPEDITION_BUILTIN_PARAMS = [
+    {"key": "era", "type": "select", "label": "时代",
+     "options": [["1", "时代一"], ["2", "时代二"], ["3", "时代三"],
+                 ["4", "时代四"], ["5", "时代五"]], "default": "1"},
+    {"key": "map_slot", "type": "select", "label": "小图卡位",
+     "options": [["1", "卡位一"], ["2", "卡位二"], ["3", "卡位三"],
+                 ["4", "卡位四"]], "default": "1",
+     "help": "小图卡一行四张；选了卡位就按坐标点， map_name 留空即可。"},
+    {"key": "map_name", "type": "text", "label": "小图名字",
+     "help": "OCR 点名字选图（包含匹配，不用写全）；给了 map_slot 就留空。"},
+    {"key": "team_no", "type": "select", "label": "派遣部队",
+     "options": [["1", "部队一"], ["2", "部队二"], ["3", "部队三"],
+                 ["4", "部队四"], ["5", "部队五"]], "default": "1"},
+]
+
+register_builtin({
+    "name": "expedition_pick_map", "label": "远征选图",
+    "desc": "选时代卡→点小图卡位或按名字 OCR 点图→全屏 OCR 对图名，对不上重选一次再停。"
+            "前置：流程已把游戏带到远征页。具体识别经素材包 @expedition/* 解析。",
+    "params": _EXPEDITION_BUILTIN_PARAMS,
+    "validate": _validate_expedition_dispatch_params,
+    "run": _builtin_expedition_pick_map,
+})
+
+register_builtin({
+    "name": "expedition_safe_dispatch", "label": "远征安全派遣",
+    "desc": "开部队选择→选部队→重伤拦截（数据优先、重伤章兜底）→点远征开始→二次确认→"
+            "游戏结果证明→记账。涉及派遣只准用这块，不许裸点手搓。",
+    "params": _EXPEDITION_BUILTIN_PARAMS,
+    "validate": _validate_expedition_dispatch_params,
+    "run": _builtin_expedition_safe_dispatch,
+})
+
+
 def _validate_builtin(params: dict, i: int, *, base_size: tuple = DEFAULT_BASE_SIZE,
                       official: bool = False) -> dict:
     name = params.get("name")
@@ -1168,8 +1255,11 @@ def is_official_flow(flow_id) -> bool:
 
 # 翻车不可自动收拾的内置积木：
 # - safe_depart：安全出阵链翻车 = 安全拦截，带病继续可能把重伤刀送出阵；
-# - open_menu：目录都打不开，回本丸的收拾残局本身也不可信（导航依赖目录）。
-_UNRECOVERABLE_BUILTINS = ("safe_depart", "open_menu")
+# - open_menu：目录都打不开，回本丸的收拾残局本身也不可信（导航依赖目录）；
+# - expedition_pick_map / expedition_safe_dispatch：选图失败绝不能继续派遣，
+#   派遣链翻车（重伤拦截/没确认出发）带病继续可能把队伍派错或假绿。
+_UNRECOVERABLE_BUILTINS = ("safe_depart", "open_menu",
+                           "expedition_pick_map", "expedition_safe_dispatch")
 
 
 def _unrecoverable_step(step: dict) -> bool:
@@ -1275,10 +1365,10 @@ def run_flow(agent, flow, server: str = "cn"):
             continue
         if on_fail == "recover":
             if _unrecoverable_step(step):
-                # 安全出阵/开目录翻车不可自动收拾：安全拦截不能带病继续
+                # 安全出阵/开目录/远征选图派遣翻车不可自动收拾：安全拦截不能带病继续
                 skipped = steps[pc + 1:]
-                yield (f"[{name}] ✗ 「{label}」翻车，这步是安全出阵/开目录，"
-                       f"不可自动收拾，停止，剩余 {len(skipped)} 步不跑")
+                yield (f"[{name}] ✗ 「{label}」翻车，这步是安全出阵/开目录/"
+                       f"远征选图派遣，不可自动收拾，停止，剩余 {len(skipped)} 步不跑")
                 break
             # 引擎级默认翻车收拾：回本丸 → 确认落地 → 跳过这步继续
             yield f"[{name}] 「{label}」翻车，按引擎默认回本丸收拾残局"

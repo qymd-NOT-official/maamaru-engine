@@ -11,8 +11,13 @@
     "dialog/decline": "jp/dialog/decline.png",
     "dialog/no": "jp/dialog/no.png",
     "dialog/yes": "jp/dialog/yes.png",
+    "directory/expedition": "jp/directory/expedition.png",
     "directory/sally": "jp/directory/sally.png",
     "era/decide": "jp/era/decide.png",
+    "expedition/depart": "jp/expedition/depart.png",
+    "expedition/screen": "jp/expedition/screen.png",
+    "expedition/team-screen": "jp/expedition/team-screen.png",
+    "expedition/team-select": "jp/expedition/team-select.png",
     "formation/label": "jp/formation/label.png",
     "home/badge": "jp/home/badge.png",
     "home/catalog": "jp/home/catalog.png",
@@ -20,6 +25,7 @@
     "map/label": "jp/map/label.png",
     "map/team-select": "jp/map/team-select.png",
     "march/advance": "jp/march/advance.png",
+    "menu/expedition": "jp/menu/expedition.png",
     "menu/sally": "jp/menu/sally.png",
     "notice/close": "jp/notice/close.png",
     "notice/hide-forever": "jp/notice/hide-forever.png",
@@ -27,6 +33,24 @@
   },
   "ocr": {},
   "rois": {},
-  "points": {},
-  "navigation": {}
+  "points": {
+    "expedition/era-1": [378, 303],
+    "expedition/era-2": [600, 303],
+    "expedition/era-3": [819, 303],
+    "expedition/era-4": [1036, 303],
+    "expedition/era-5": [1256, 303],
+    "expedition/map-1": [291, 558],
+    "expedition/map-2": [620, 558],
+    "expedition/map-3": [947, 558],
+    "expedition/map-4": [1276, 558],
+    "expedition/team-1": [242, 168],
+    "expedition/team-2": [334, 168],
+    "expedition/team-3": [427, 168],
+    "expedition/team-4": [521, 168],
+    "expedition/team-5": [617, 168],
+    "expedition/skip": [296, 859]
+  },
+  "navigation": {
+    "expedition/nav": "远征"
+  }
 }

@@ -64,19 +64,84 @@ class RealPacksTest(unittest.TestCase):
         self.assertEqual(pack.resolve_point("@signin/click-through"), (640, 400))
         self.assertEqual(pack.resolve_point("@signin/close"), (1195, 30))
 
+    def test_cn_expedition_entries_match_example_config(self):
+        """远征派遣抽出的识别素材必须能在 cn 包按逻辑名取回，值与
+        touken_config.example.json 的 expedition 节逐一相同（不硬造新值）。"""
+        pack = load_server_pack("cn")
+        self.assertEqual(pack.resolve_navigation("@expedition/nav"), "远征")
+        self.assertEqual(pack.resolve_ocr("@expedition/team-ui"), "部队选择")
+        self.assertEqual(pack.resolve_ocr("@expedition/start"), "远征开始")
+        self.assertEqual(pack.resolve_ocr("@expedition/confirm"), "确认")
+        self.assertEqual(pack.resolve_ocr("@expedition/running"), "远征中")
+        self.assertEqual(pack.resolve_roi("@expedition/team-ui"), [506, 1, 774, 77])
+        self.assertEqual(pack.resolve_roi("@expedition/deploy"),
+                         [1110, 580, 1279, 710])
+        self.assertEqual(pack.resolve_roi("@expedition/start"),
+                         [1100, 560, 1280, 700])
+        self.assertEqual(pack.resolve_roi("@expedition/confirm"),
+                         [650, 520, 950, 640])
+        self.assertEqual(pack.resolve_roi("@expedition/running"),
+                         [60, 280, 1230, 580])
+        self.assertEqual(pack.resolve_roi("@expedition/map-ocr"),
+                         [60, 280, 1230, 580])
+
+    def test_cn_expedition_templates_exist_on_disk(self):
+        """cn 包收录的远征模板必须真实存在（同源铁律，不虚构素材）。"""
+        pack = load_server_pack("cn")
+        for rel in ("battle/ui重伤.png", "远征开始.png"):
+            self.assertTrue((RESOURCE_DIR / "image" / rel).is_file(), rel)
+
+    def test_cn_pack_referenced_by_official_expedition_flow(self):
+        """官方远征流程单引用的每个 @逻辑名都能在 cn 包解析（加载期已全量校验，
+        这里守的是「流程单 ↔ 包」两边的契约对齐）。"""
+        flow_path = RESOURCE_DIR / "flows" / "expedition.json"
+        flow = json.loads(flow_path.read_text(encoding="utf-8"))
+        pack = load_server_pack("cn")
+        refs = set()
+        for step in flow["steps"]:
+            params = step["params"]
+            for key in ("template", "ocr_expected", "roi", "point"):
+                value = params.get(key)
+                if isinstance(value, str) and value.startswith("@"):
+                    refs.add(value[1:])
+            if step["type"] == "navigate":
+                target = params.get("target", "")
+                self.assertTrue(target.startswith("@"), target)
+                refs.add(target[1:])
+        self.assertIn("expedition/nav", refs)
+        for name in sorted(refs):
+            self.assertTrue(name.startswith("expedition/"), name)
+            # 解析不抛错即存在（模板还顺带验了文件在盘上）
+            if name in pack.templates:
+                pack.resolve_template("@" + name)
+            elif name in pack.ocr:
+                pack.resolve_ocr("@" + name)
+            elif name in pack.rois:
+                pack.resolve_roi("@" + name)
+            elif name in pack.points:
+                pack.resolve_point("@" + name)
+            elif name in pack.navigation:
+                pack.resolve_navigation("@" + name)
+            else:
+                self.fail(f"cn 包里没有 {name}")
+
     def test_jp_templates_all_exist_on_disk(self):
         """jp 包收录的模板必须真实存在（同源铁律，不虚构素材）。"""
         pack = load_server_pack("jp")
-        self.assertEqual(len(pack.templates), 22)
+        self.assertEqual(len(pack.templates), 28)
         for rel in pack.templates.values():
             self.assertTrue((RESOURCE_DIR / "image" / rel).is_file(), rel)
 
     def test_jp_pack_has_no_invented_signin_assets(self):
+        """jp 包不虚构 signin 素材：五张表一律不准出现 signin/ 开头的键。
+        （旧断言要求整表为空太死——双服阶段 2 契约收录的远征导航项是合法内容。）"""
         pack = load_server_pack("jp")
-        self.assertEqual(pack.ocr, {})
-        self.assertEqual(pack.rois, {})
-        self.assertEqual(pack.points, {})
-        self.assertEqual(pack.navigation, {})
+        for table in (pack.templates, pack.ocr, pack.rois, pack.points,
+                      pack.navigation):
+            for key in table:
+                self.assertFalse(key.startswith("signin/"), key)
+        # 远征官方流程单（两服共用）的导航目标，jp 包按契约收录
+        self.assertEqual(pack.navigation.get("expedition/nav"), "远征")
 
     def test_all_errors_are_value_error_subclass(self):
         for cls in (UnknownServerError, UnknownReferenceError,

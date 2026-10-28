@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""日服出阵前的队伍状态确认：随出阵导航被动读取游戏返回的队伍数据。
+"""日服出阵前的队伍状态确认：随出阵导航读取游戏返回的队伍数据。
 
-与账房同一手法、同一红线：浏览器级 CDP 连接只读订阅 Network 事件，
-不注入脚本、不改请求、不向服务器多发任何东西。队伍数据来自游戏
-进出阵菜单时自己拉取的响应（/sally 必带全量刀帐与编制），
-解析成共用的 TeamSnapshot 契约，供出发前确认伤势与队伍状态。
+与账房同一红线：不注入脚本、不改请求内容、不向服务器多发任何东西。
+手法是浏览器级 CDP 的 Fetch 域响应拦截——游戏对 /conquest 流式读完
+就主动 abort，Network.loadingFinished 从不触发，纯被动订阅拿不到
+body（2026-10-28 晚真机实证），只能响应阶段拦一下、取完 body 原样
+放行；代价是被拦端点的响应会被按住取 body 的几十毫秒到几秒。
+队伍数据来自游戏进出阵菜单/远征画面时自己拉取的响应（/sally、
+/conquest 必带全量刀帐与编制），解析成共用的 TeamSnapshot 契约，
+供出发前确认伤势与队伍状态。
 """
 from __future__ import annotations
 
@@ -13,11 +17,17 @@ import json
 import threading
 import time
 
-from . import jp_import, jp_listener, sword_db, youzu_log
+from . import jp_listener, sword_db, youzu_log
 from .team_state import TeamMemberSnapshot, TeamSnapshot
 
 GAME_HOST_MARK = 'touken-ranbu.jp'
-SALLY_PATH = '/sally'               # 进出阵菜单必刷新（全量刀帐 + 编制）
+# 队伍数据来源端点（2026-10-28 真机抓包确认，均实测响应顶层带 party）：
+# - /sally：进出阵菜单必刷新（全量刀帐 + 编制）
+# - /conquest：进远征画面必刷新——远征流程导航到位即自动重报，
+#   多数时候不必刷新页面等 /login/start。
+# /login/start 曾是兜底第三端点，换 Fetch 拦截后移除：拦截=按住游戏
+# 响应等 body，有成本，而它顶层不带 party 纯亏本。
+PARTY_PATHS = frozenset({'/sally', '/conquest'})
 RESWEEP_SECONDS = 10.0              # 兜底重扫目标清单的间隔
 
 
@@ -118,7 +128,6 @@ class PartyWatch:
     def __init__(self):
         self._sock: jp_listener._CdpSocket | None = None
         self._session_id: str | None = None     # 游戏 iframe 的挂靠会话
-        self._pending: dict[str, str] = {}      # requestId -> path
         self._latest: tuple[float, dict] | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -182,7 +191,10 @@ class PartyWatch:
         if session_id is None:
             session_id = self._sock.call('Target.attachToTarget', {
                 'targetId': target_id, 'flatten': True})['sessionId']
-        self._sock.call('Network.enable', session_id=session_id)
+        patterns = [{'urlPattern': f'*{GAME_HOST_MARK}{path}*',
+                     'requestStage': 'Response'} for path in PARTY_PATHS]
+        self._sock.call('Fetch.enable', {'patterns': patterns},
+                        session_id=session_id)
         self._session_id = session_id
 
     def _loop(self) -> None:
@@ -231,22 +243,30 @@ class PartyWatch:
         if method == 'Target.detachedFromTarget':
             if params.get('sessionId') == self._session_id:
                 self._session_id = None
-                self._pending.clear()
             return
         if msg.get('sessionId') != self._session_id:
             return
-        if method == 'Network.requestWillBeSent':
-            url = params.get('request', {}).get('url', '')
-            if GAME_HOST_MARK in url \
-                    and jp_import.endpoint_path(url) == SALLY_PATH:
-                self._pending[params['requestId']] = url
+        if method == 'Fetch.requestPaused':
+            self._handle_paused(params)
+
+    def _handle_paused(self, params: dict) -> None:
+        """响应阶段拦截：抢先取 body，无论如何原样放行。
+
+        红线：continueRequest 必须在 finally 里——拦了不放行会把游戏
+        吊死在「通信中」。会话万一断在拦截期间，Chrome 会自己放行，
+        游戏最多卡一下，不会死。
+        """
+        request_id = params.get('requestId')
+        if not request_id:
             return
-        if method == 'Network.loadingFinished':
-            if self._pending.pop(params.get('requestId'), None) is None:
-                return
-            result = self._sock.call('Network.getResponseBody',
-                                     {'requestId': params['requestId']},
-                                     session_id=self._session_id)
+        try:
+            # 队伍数据是全量包（/conquest 约 130KB，/sally 更大），慢链路上
+            # CDP 回 base64 需要时间——超时被 _loop 吞掉会造成
+            # 「请求明明发了却永远没数据」（2026-10-28 真机踩坑）。
+            result = self._sock.call('Fetch.getResponseBody',
+                                     {'requestId': request_id},
+                                     session_id=self._session_id,
+                                     timeout=60.0)
             raw = result.get('body', '')
             body = (base64.b64decode(raw) if result.get('base64Encoded')
                     else raw.encode('utf-8'))
@@ -254,3 +274,12 @@ class PartyWatch:
             if isinstance(payload, dict) and isinstance(payload.get('party'), dict):
                 with self._lock:
                     self._latest = (time.time(), payload)
+        except Exception:
+            pass  # 取不到/解析不了都不要紧，下次拦截再说
+        finally:
+            try:
+                self._sock.call('Fetch.continueRequest',
+                                {'requestId': request_id},
+                                session_id=self._session_id, timeout=10.0)
+            except Exception:
+                pass  # 请求已随会话消失，Chrome 自会放行

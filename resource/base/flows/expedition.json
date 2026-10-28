@@ -1,0 +1,15 @@
+{
+  "id": "expedition",
+  "name": "远征派遣",
+  "official": true,
+  "steps": [
+    {"id": "go-expedition", "type": "navigate", "label": "去远征",
+     "params": {"target": "@expedition/nav"}},
+    {"id": "pick-map", "type": "builtin", "label": "选远征图",
+     "params": {"name": "expedition_pick_map", "era": 1, "map_slot": 1,
+                "map_name": null, "team_no": 1}},
+    {"id": "safe-dispatch", "type": "builtin", "label": "安全派遣",
+     "params": {"name": "expedition_safe_dispatch", "team_no": 1, "era": 1,
+                "map_slot": 1, "map_name": null}}
+  ]
+}

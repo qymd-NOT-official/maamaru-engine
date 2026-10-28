@@ -1,16 +1,29 @@
 {
   "server": "cn",
   "base_size": [1280, 720],
-  "templates": {},
+  "templates": {
+    "expedition/injury-stamp": "battle/ui重伤.png",
+    "expedition/start": "远征开始.png"
+  },
   "ocr": {
     "signin/announce": "公告",
     "signin/claim": "领取奖励",
-    "signin/detail": "道具详情"
+    "signin/detail": "道具详情",
+    "expedition/team-ui": "部队选择",
+    "expedition/start": "远征开始",
+    "expedition/confirm": "确认",
+    "expedition/running": "远征中"
   },
   "rois": {
     "signin/announce": [1100, 100, 1280, 680],
     "signin/claim": [750, 550, 1100, 670],
-    "signin/detail": [450, 80, 830, 140]
+    "signin/detail": [450, 80, 830, 140],
+    "expedition/team-ui": [506, 1, 774, 77],
+    "expedition/deploy": [1110, 580, 1279, 710],
+    "expedition/start": [1100, 560, 1280, 700],
+    "expedition/confirm": [650, 520, 950, 640],
+    "expedition/running": [60, 280, 1230, 580],
+    "expedition/map-ocr": [60, 280, 1230, 580]
   },
   "points": {
     "signin/tab": [550, 55],
@@ -18,5 +31,7 @@
     "signin/click-through": [640, 400],
     "signin/close": [1195, 30]
   },
-  "navigation": {}
+  "navigation": {
+    "expedition/nav": "远征"
+  }
 }
