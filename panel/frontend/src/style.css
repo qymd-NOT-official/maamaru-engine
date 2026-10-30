@@ -187,6 +187,18 @@ button { cursor: pointer; }
 .overview-details { margin: -3px 0 4px; padding: 1px 4px; color: var(--ink-dim); background: transparent; border: 0; font-size: 10px; }
 .overview-task-card footer { display: flex; justify-content: flex-end; gap: 8px; }
 .overview-task-card footer button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--btn-border, var(--line-strong)); }
+.jp-task-card { min-width: 0; }
+.jp-task-card > p { line-height: 1.6; overflow-wrap: anywhere; }
+.jp-task-card header { margin-bottom: 6px; }
+.jp-task-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 16px; margin: 12px 0; }
+.jp-task-fields .field { min-width: 0; font-size: 12px; }
+.jp-task-fields .pixel-control { min-width: 0; min-height: 36px; box-sizing: border-box; border-radius: var(--r-sm); font: inherit; }
+.jp-task-card .jp-task-status { margin-top: 10px; }
+.jp-task-card .jp-task-note { margin-top: 6px; color: var(--danger, #b4452f); }
+@media (max-width: 480px) {
+  .jp-task-fields { grid-template-columns: 1fr; }
+  .jp-task-card footer { flex-wrap: wrap; }
+}
 .single-layout, .layout { flex: 1; min-height: 0; height: auto; background: var(--paper-panel); border: 1px solid var(--paper-line); border-top: 0; border-radius: 0 0 12px 12px; overflow: auto; }
 .single-layout { padding: 22px; }
 .dashboard-panel, .log-panel, .chat-panel, .lists-panel, .schedule-panel, .system-panel { min-width: 0; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: var(--r-lg); box-shadow: var(--shadow-card); }

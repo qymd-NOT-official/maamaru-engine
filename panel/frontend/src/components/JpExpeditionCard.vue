@@ -150,32 +150,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="jp-expedition-card">
-    <h3>日服远征</h3>
+  <section class="overview-task-card jp-task-card">
+    <header><h2><img :src="'/static/img/ui/expedition.png'" alt="">日服远征</h2></header>
     <p>手动派遣一支部队去指定远征图：选时代和小图卡位，图名用来确认选中了目标图。出发前验出重伤绝不派遣；验伤或结果不明确就停，绝不假绿。不收菜、不排班、不补花。</p>
-    <div class="expedition-fields">
-      <label>派遣部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
-      <label>时代<PixelControl as="select" :model-value="era" @update:model-value="pickEra"><option v-for="(name, index) in ERA_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
-      <label>小图卡位<PixelControl as="select" :model-value="mapSlot" @update:model-value="pickSlot"><option v-for="(name, index) in SLOT_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
-      <label>日文图名<PixelControl :model-value="mapName" type="text" placeholder="鳥羽・伏見" @update:model-value="pickMapName" /></label>
+    <div class="jp-task-fields">
+      <label class="field">派遣部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
+      <label class="field">时代<PixelControl as="select" :model-value="era" @update:model-value="pickEra"><option v-for="(name, index) in ERA_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
+      <label class="field">小图卡位<PixelControl as="select" :model-value="mapSlot" @update:model-value="pickSlot"><option v-for="(name, index) in SLOT_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
+      <label class="field">日文图名<PixelControl :model-value="mapName" type="text" placeholder="鳥羽・伏見" @update:model-value="pickMapName" /></label>
     </div>
-    <div class="expedition-actions">
+    <footer>
       <button class="primary" :disabled="starting || stopping || expeditionRunning || otherRunning" @click="start">{{ starting ? '出发中…' : '开始派遣' }}</button>
       <button class="danger" :disabled="stopping || !expeditionRunning" @click="stop">{{ stopping ? '正在停止…' : '停止' }}</button>
-    </div>
-    <p class="expedition-status" role="status">{{ statusText }}<template v-if="lastLine"> · 最后动静：{{ lastLineAt ? `${new Date(lastLineAt * 1000).toLocaleTimeString()} ` : '' }}{{ lastLine }}</template></p>
-    <p v-if="note" class="expedition-note">{{ note }}</p>
+    </footer>
+    <p class="jp-task-status" role="status">{{ statusText }}<template v-if="lastLine"> · 最后动静：{{ lastLineAt ? `${new Date(lastLineAt * 1000).toLocaleTimeString()} ` : '' }}{{ lastLine }}</template></p>
+    <p v-if="note" class="jp-task-note">{{ note }}</p>
   </section>
 </template>
-
-<style scoped>
-.jp-expedition-card { margin: 4px 0 20px; padding: 16px 18px; background: var(--paper-panel); border-left: 3px solid var(--fox-gold); }
-.jp-expedition-card > p { margin: 6px 0; color: var(--ink-dim); font-size: 12px; }
-.expedition-fields { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0; }
-.expedition-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.expedition-actions { display: flex; gap: 10px; margin: 10px 0; }
-.expedition-note { color: var(--danger, #b4452f); }
-@media (max-width: 720px) {
-  .jp-expedition-card { padding: 14px; }
-}
-</style>

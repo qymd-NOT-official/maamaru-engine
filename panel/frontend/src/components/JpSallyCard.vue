@@ -127,30 +127,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="jp-sally-card">
-    <h3>日服出阵</h3>
+  <section class="overview-task-card jp-task-card">
+    <header><h2><img :src="'/static/img/ui/sortie.png'" alt="">日服出阵</h2></header>
     <p>选定部队后按当前记忆的图反复出阵，自动行军。行军中任何弹窗（包括重伤警告）都会停等人工，不会替你点继续行军。</p>
-    <div class="sally-fields">
-      <label>出阵部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
-      <label>连刷轮数<PixelControl :model-value="rounds" type="number" numeric :min="1" :max="200" @update:model-value="pickRounds" /></label>
+    <div class="jp-task-fields">
+      <label class="field">出阵部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
+      <label class="field">连刷轮数<PixelControl :model-value="rounds" type="number" numeric :min="1" :max="200" @update:model-value="pickRounds" /></label>
     </div>
-    <div class="sally-actions">
+    <footer>
       <button class="primary" :disabled="starting || stopping || sallyRunning || otherRunning" @click="start">{{ starting ? '出发中…' : '开始出阵' }}</button>
       <button class="danger" :disabled="stopping || !sallyRunning" @click="stop">{{ stopping ? '正在停止…' : '停止' }}</button>
-    </div>
-    <p class="sally-status" role="status">{{ statusText }}<template v-if="lastLine"> · 最后动静：{{ lastLineAt ? `${new Date(lastLineAt * 1000).toLocaleTimeString()} ` : '' }}{{ lastLine }}</template></p>
-    <p v-if="note" class="sally-note">{{ note }}</p>
+    </footer>
+    <p class="jp-task-status" role="status">{{ statusText }}<template v-if="lastLine"> · 最后动静：{{ lastLineAt ? `${new Date(lastLineAt * 1000).toLocaleTimeString()} ` : '' }}{{ lastLine }}</template></p>
+    <p v-if="note" class="jp-task-note">{{ note }}</p>
   </section>
 </template>
-
-<style scoped>
-.jp-sally-card { margin: 4px 0 20px; padding: 16px 18px; background: var(--paper-panel); border-left: 3px solid var(--fox-gold); }
-.jp-sally-card > p { margin: 6px 0; color: var(--ink-dim); font-size: 12px; }
-.sally-fields { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0; }
-.sally-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.sally-actions { display: flex; gap: 10px; margin: 10px 0; }
-.sally-note { color: var(--danger, #b4452f); }
-@media (max-width: 720px) {
-  .jp-sally-card { padding: 14px; }
-}
-</style>

@@ -650,9 +650,9 @@ watch(tab, value => {
         <a v-if="!ledgerMode && !jpMode" href="/legacy">旧版备用</a>
       </div>
     </header>
-    <nav v-if="!ledgerMode && !jpMode && workshopActive" class="workshop-nav" aria-label="功能">
-      <div class="workshop-title"><strong>功能</strong><small>看实况、搭流程，需要时再调玩法</small></div>
-      <div class="workshop-tabs">
+    <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
+      <div class="workshop-title"><strong>功能</strong><small>{{ jpMode ? '选好部队，看看出阵和远征的动静' : '看实况、搭流程，需要时再调玩法' }}</small></div>
+      <div v-if="!jpMode" class="workshop-tabs">
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
         <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
@@ -819,7 +819,7 @@ watch(tab, value => {
         <div class="home-functions-head"><h2>常用功能</h2></div>
         <nav>
           <button v-for="key in jpScriptKeys" :key="key" type="button" :class="{ active: jpSelected === key }" @click="jpSelected = key">
-            <span>{{ jpScripts[key]?.label || key }}</span><small v-if="(key === 'jp-sally' && jpSallyRunning) || (key === 'jp-expedition' && jpExpeditionRunning)">运行中</small>
+            <span><img class="task-menu-icon" :src="taskIcon(key === 'jp-expedition' ? 'expedition' : 'sortie')" alt="">{{ jpScripts[key]?.label || key }}</span><small v-if="(key === 'jp-sally' && jpSallyRunning) || (key === 'jp-expedition' && jpExpeditionRunning)">运行中</small>
           </button>
         </nav>
         <p v-if="!jpScriptKeys.length" class="home-functions-hidden-note">日服任务还没备好，稍后再来看看</p>
