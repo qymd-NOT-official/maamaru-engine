@@ -188,6 +188,7 @@ button { cursor: pointer; }
 .overview-task-card footer { display: flex; justify-content: flex-end; gap: 8px; }
 .overview-task-card footer button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--btn-border, var(--line-strong)); }
 .jp-task-card { min-width: 0; }
+.jp-task-card h2 img { width: 24px; height: 24px; flex: 0 0 24px; object-fit: contain; image-rendering: pixelated; }
 .jp-task-card > p { line-height: 1.6; overflow-wrap: anywhere; }
 .jp-task-card header { margin-bottom: 6px; }
 .jp-task-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 16px; margin: 12px 0; }

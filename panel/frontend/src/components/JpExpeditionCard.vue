@@ -3,11 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import PixelControl from './PixelControl.vue'
 
-// 日服远征手动派遣任务卡：只在 ?server=jp 的「功能 · 执务台」挂载。
+// 日服远征任务卡：执务台显示摘要，玩法设置编辑同一份配置。
 // 只派一支部队去指定远征图（选时代 + 小图卡位，图名用于选中确认），
 // 出发前验出重伤绝不派遣；不收菜、不排班、不补花。与出阵卡同款
 // 自盯状态/自收日志尾行，运行/停止经 v-model 同步给外层喂日志面板。
-const emit = defineEmits<{ 'update:running': [value: boolean]; 'update:stopping': [value: boolean] }>()
+withDefaults(defineProps<{ settings?: boolean }>(), { settings: false })
+const emit = defineEmits<{ configure: []; office: [];  'update:running': [value: boolean]; 'update:stopping': [value: boolean] }>()
 const SCRIPT = 'jp-expedition'
 const TEAM_NAMES = ['部队一', '部队二', '部队三', '部队四', '部队五']
 const ERA_NAMES = ['时代一', '时代二', '时代三', '时代四', '时代五']
@@ -150,16 +151,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="overview-task-card jp-task-card">
+  <section class="jp-task-card" :class="settings ? 'task-card' : 'overview-task-card'">
     <header><h2><img :src="'/static/img/ui/expedition.png'" alt="">日服远征</h2></header>
     <p>手动派遣一支部队去指定远征图：选时代和小图卡位，图名用来确认选中了目标图。出发前验出重伤绝不派遣；验伤或结果不明确就停，绝不假绿。不收菜、不排班、不补花。</p>
-    <div class="jp-task-fields">
+    <div v-if="!settings" class="overview-summary">
+      <span><small>派遣部队</small><b>{{ TEAM_NAMES[Number(teamNo) - 1] }}</b></span>
+      <span><small>时代 / 卡位</small><b>{{ ERA_NAMES[Number(era) - 1] }} / {{ SLOT_NAMES[Number(mapSlot) - 1] }}</b></span>
+      <span><small>远征图</small><b>{{ mapName.trim() || DEFAULT_MAP_NAME }}</b></span>
+    </div>
+    <div v-else class="jp-task-fields">
       <label class="field">派遣部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
       <label class="field">时代<PixelControl as="select" :model-value="era" @update:model-value="pickEra"><option v-for="(name, index) in ERA_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
       <label class="field">小图卡位<PixelControl as="select" :model-value="mapSlot" @update:model-value="pickSlot"><option v-for="(name, index) in SLOT_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
       <label class="field">日文图名<PixelControl :model-value="mapName" type="text" placeholder="鳥羽・伏見" @update:model-value="pickMapName" /></label>
     </div>
     <footer>
+      <button v-if="!settings" type="button" class="secondary" @click="emit('configure')">调整配置</button>
+      <button v-else type="button" class="secondary" @click="emit('office')">返回执务台</button>
       <button class="primary" :disabled="starting || stopping || expeditionRunning || otherRunning" @click="start">{{ starting ? '出发中…' : '开始派遣' }}</button>
       <button class="danger" :disabled="stopping || !expeditionRunning" @click="stop">{{ stopping ? '正在停止…' : '停止' }}</button>
     </footer>

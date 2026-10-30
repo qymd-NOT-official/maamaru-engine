@@ -3,10 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api'
 import PixelControl from './PixelControl.vue'
 
-// 日服出阵任务卡：只在 ?server=jp 的「功能 · 执务台」挂载。
+// 日服出阵任务卡：执务台显示摘要，玩法设置编辑同一份配置。
 // 日服模式下 App.vue 不轮询脚本状态，这张卡自己盯状态、自己收日志尾行，
 // 运行/停止状态通过 v-model 同步给外层，喂执务台的日志面板状态栏。
-const emit = defineEmits<{ 'update:running': [value: boolean]; 'update:stopping': [value: boolean] }>()
+withDefaults(defineProps<{ settings?: boolean }>(), { settings: false })
+const emit = defineEmits<{ configure: []; office: [];  'update:running': [value: boolean]; 'update:stopping': [value: boolean] }>()
 const TEAM_NAMES = ['部队一', '部队二', '部队三', '部队四', '部队五']
 const teamNo = ref('1')
 const rounds = ref(1)
@@ -127,14 +128,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="overview-task-card jp-task-card">
+  <section class="jp-task-card" :class="settings ? 'task-card' : 'overview-task-card'">
     <header><h2><img :src="'/static/img/ui/sortie.png'" alt="">日服出阵</h2></header>
     <p>选定部队后按当前记忆的图反复出阵，自动行军。行军中任何弹窗（包括重伤警告）都会停等人工，不会替你点继续行军。</p>
-    <div class="jp-task-fields">
+    <div v-if="!settings" class="overview-summary">
+      <span><small>出阵部队</small><b>{{ TEAM_NAMES[Number(teamNo) - 1] }}</b></span>
+      <span><small>连刷轮数</small><b>{{ rounds }} 圈</b></span>
+    </div>
+    <div v-else class="jp-task-fields">
       <label class="field">出阵部队<PixelControl as="select" :model-value="teamNo" @update:model-value="pickTeam"><option v-for="(name, index) in TEAM_NAMES" :key="name" :value="String(index + 1)">{{ name }}</option></PixelControl></label>
       <label class="field">连刷轮数<PixelControl :model-value="rounds" type="number" numeric :min="1" :max="200" @update:model-value="pickRounds" /></label>
     </div>
     <footer>
+      <button v-if="!settings" type="button" class="secondary" @click="emit('configure')">调整配置</button>
+      <button v-else type="button" class="secondary" @click="emit('office')">返回执务台</button>
       <button class="primary" :disabled="starting || stopping || sallyRunning || otherRunning" @click="start">{{ starting ? '出发中…' : '开始出阵' }}</button>
       <button class="danger" :disabled="stopping || !sallyRunning" @click="stop">{{ stopping ? '正在停止…' : '停止' }}</button>
     </footer>

@@ -627,7 +627,7 @@ watch(tab, value => {
         <button v-if="ledgerMode" class="nav-report active">本丸账房</button>
         <template v-else-if="jpMode">
           <button class="nav-home" :class="{ active: tab === 'home' }" @click="tab = 'home'">我的本丸</button>
-          <button class="nav-workshop" :class="{ active: tab === 'office' }" @click="tab = 'office'">功能</button>
+          <button class="nav-workshop" :class="{ active: workshopActive }" @click="openWorkshop">功能</button>
           <button class="nav-planning" :class="{ active: tab === 'planning' }" @click="tab = 'planning'">规划</button>
           <button class="nav-report" :class="{ active: tab === 'report' }" @click="tab = 'report'">仓库</button>
           <button class="nav-swords" :class="{ active: tab === 'swords' }" @click="tab = 'swords'">刀剑</button>
@@ -652,11 +652,11 @@ watch(tab, value => {
     </header>
     <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
       <div class="workshop-title"><strong>功能</strong><small>{{ jpMode ? '选好部队，看看出阵和远征的动静' : '看实况、搭流程，需要时再调玩法' }}</small></div>
-      <div v-if="!jpMode" class="workshop-tabs">
+      <div class="workshop-tabs">
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
-        <button type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
+        <button v-if="!jpMode" type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
         <button type="button" :class="{ active: tab === 'tasks' }" @click="selected === 'daily' && (selected = 'sortie'); openWorkshopTab('tasks')">玩法设置</button>
-        <button v-if="devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
+        <button v-if="!jpMode && devToolsEnabled" type="button" :class="{ active: tab === 'devtools' }" @click="openWorkshopTab('devtools')">开发工具</button>
       </div>
     </nav>
     <nav v-if="!ledgerMode && (tab === 'swords' || tab === 'archive')" class="workshop-nav swords-nav" aria-label="刀剑">
@@ -666,7 +666,7 @@ watch(tab, value => {
         <button type="button" :class="{ active: swordView === 'formation' }" @click="swordView = 'formation'">部队预设</button>
       </div>
     </nav>
-    <MaamaruFrame v-if="!loading && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onStageScroll">
+    <MaamaruFrame v-if="!loading && !jpMode && tab === 'tasks'" variant="tasks" page-class="layout" @scroll="onStageScroll">
       <nav class="sidebar">
         <template v-for="group in scriptGroups" :key="group.label">
           <details class="task-nav-group" open>
@@ -814,9 +814,9 @@ watch(tab, value => {
         <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
-    <MaamaruFrame v-else-if="!loading && jpMode && tab === 'office'" variant="overview" page-class="overview-layout" @scroll="onStageScroll">
-      <aside class="home-functions">
-        <div class="home-functions-head"><h2>常用功能</h2></div>
+    <MaamaruFrame v-else-if="!loading && jpMode && (tab === 'office' || tab === 'tasks')" :variant="tab === 'office' ? 'overview' : 'tasks'" :page-class="tab === 'office' ? 'overview-layout' : 'layout'" @scroll="onStageScroll">
+      <aside :class="tab === 'office' ? 'home-functions' : 'sidebar'">
+        <div class="home-functions-head"><h2>{{ tab === 'office' ? '常用功能' : '玩法设置' }}</h2></div>
         <nav>
           <button v-for="key in jpScriptKeys" :key="key" type="button" :class="{ active: jpSelected === key }" @click="jpSelected = key">
             <span><img class="task-menu-icon" :src="taskIcon(key === 'jp-expedition' ? 'expedition' : 'sortie')" alt="">{{ jpScripts[key]?.label || key }}</span><small v-if="(key === 'jp-sally' && jpSallyRunning) || (key === 'jp-expedition' && jpExpeditionRunning)">运行中</small>
@@ -824,11 +824,11 @@ watch(tab, value => {
         </nav>
         <p v-if="!jpScriptKeys.length" class="home-functions-hidden-note">日服任务还没备好，稍后再来看看</p>
       </aside>
-      <section class="home-center">
-        <JpSallyCard v-if="jpSelected === 'jp-sally'" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
-        <JpExpeditionCard v-else-if="jpSelected === 'jp-expedition'" v-model:running="jpExpeditionRunning" v-model:stopping="jpExpeditionStopping" />
+      <section :class="tab === 'office' ? 'home-center' : 'content'">
+        <JpSallyCard v-if="jpSelected === 'jp-sally'" :settings="tab === 'tasks'" @configure="tab = 'tasks'" @office="tab = 'office'" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
+        <JpExpeditionCard v-else-if="jpSelected === 'jp-expedition'" :settings="tab === 'tasks'" @configure="tab = 'tasks'" @office="tab = 'office'" v-model:running="jpExpeditionRunning" v-model:stopping="jpExpeditionStopping" />
         <p v-else class="task-empty-state">日服任务还没备好，稍后再来看看</p>
-        <LogPanel :running="jpCardRunning" :stopping="jpCardStopping" :task-label="jpCardLabel" :only-script="jpCardScript" />
+        <LogPanel v-if="tab === 'office'" :running="jpCardRunning" :stopping="jpCardStopping" :task-label="jpCardLabel" :only-script="jpCardScript" />
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel @open-dismantle-list="openDismantleList" :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
