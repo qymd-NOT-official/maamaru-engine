@@ -373,7 +373,7 @@ class DropSwordRecognitionTests(unittest.TestCase):
             badge=False)
 
         with patch("touken.flows.sortie.time.sleep"), \
-             patch("touken.flows.sortie.sword_db.find_by_name",
+             patch("touken.flows.sortie_cn.sword_db.find_by_name",
                    side_effect=RuntimeError("recognizer boom")):
             result = flow._read_drop_sword()
 
@@ -476,7 +476,7 @@ class _MilestoneMaa:
         self.clicks.append((point.x, point.y))
 
     def template_match(self, template, roi=None, threshold=0.7):
-        if template == "通用_确定.png" and self._frames:
+        if template == "common/confirm.png" and self._frames:
             return Point(640, 500) if self._frames.pop(0) else None
         return None
 

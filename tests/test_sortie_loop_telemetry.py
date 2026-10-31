@@ -188,7 +188,7 @@ class _LoopHost(SortieMixin, BattleMixin):
 def _run(host, **kwargs):
     kwargs.setdefault("auto_equip", False)
     with patch("touken.flows.sortie.time.sleep"), \
-         patch("touken.flows.sortie.find_deploy_button",
+         patch("touken.flows.sortie_cn.find_deploy_button",
                return_value=Point(1, 1)):
         return list(host.sortie_stream(chapter=1, map_no=1, team_no=3,
                                        **kwargs))
@@ -216,7 +216,7 @@ class LoopFactTests(unittest.TestCase):
 
         host._confirm_yosari_departure = confirm
         with patch("touken.flows.sortie.time.sleep"), patch(
-                "touken.flows.sortie.find_deploy_button", return_value=Point(1, 1)):
+                "touken.flows.sortie_cn.find_deploy_button", return_value=Point(1, 1)):
             list(host.yosari_stream(map_no=4, auto_march=False,
                                    auto_equip=False, auto_refill=True))
         self.assertEqual(host._pick_team.call_count, 2)
@@ -241,7 +241,7 @@ class LoopFactTests(unittest.TestCase):
 
         host._confirm_yosari_departure = confirm
         with patch("touken.flows.sortie.time.sleep"), patch(
-                "touken.flows.sortie.find_deploy_button", return_value=Point(1, 1)):
+                "touken.flows.sortie_cn.find_deploy_button", return_value=Point(1, 1)):
             list(host.yosari_stream(map_no=4, auto_march=False,
                                    auto_equip=False, auto_refill=True))
         host._click_depart.assert_called_once()
@@ -285,8 +285,8 @@ class LoopFactTests(unittest.TestCase):
     def test_retreat_before_boss_records_own_outcome(self):
         frames = PRE + [{"result", "march"}, {"march"}]
         host = _LoopHost(frames)
-        with patch("touken.flows.sortie.CV2_AVAILABLE", True), \
-             patch("touken.flows.sortie.boss_distance_from_image",
+        with patch("touken.flows.sortie_cn.CV2_AVAILABLE", True), \
+             patch("touken.flows.sortie_cn.boss_distance_from_image",
                    side_effect=[2, 1]):
             _run(host, auto_march=True, max_loops=1, retreat_before_boss=True)
 
@@ -521,7 +521,7 @@ class DropHonestyTests(unittest.TestCase):
         host.config["map_select"]["异去"] = {"chapters": {"1": [10, 10]},
                                              "maps": {"4": [20, 20]}}
         with patch("touken.flows.sortie.time.sleep"), \
-             patch("touken.flows.sortie.find_deploy_button",
+             patch("touken.flows.sortie_cn.find_deploy_button",
                    return_value=Point(1, 1)):
             list(host.yosari_stream(map_no=4, auto_march=False, max_loops=1))
         facts = host.by_type("sword.drop_unrecognized")
@@ -536,7 +536,7 @@ class DropHonestyTests(unittest.TestCase):
             PRE + [{"result", "march"}, {}, {"plate"}, {"home"}],
             production_drop_reader=True)
         host.device.plate_tokens_by_marker = {"plate": ("太刀", "乱码丼")}
-        with patch("touken.flows.sortie.sword_db.find_by_name",
+        with patch("touken.flows.sortie_cn.sword_db.find_by_name",
                    side_effect=RuntimeError("recognizer boom")):
             _run(host, auto_march=False, max_loops=1)
         payload = self._completed(host)
