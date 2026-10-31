@@ -290,6 +290,16 @@ class EdocastleMixin:
             return False, team_record_saved
 
         departure_cfg = dict(cfg)
+        # 2026-10-31 DeviceAdapter 显存运行帧：新确认窗增加二倍/五倍调查道具，
+        # 老标题模板不再适用。正文与底部「确定」必须在同一帧分别认出；只点
+        # OCR 返回的按钮中心，不触碰调查道具复选框，也不沿用旧按钮 ROI。
+        # 运行时绑定让既有用户配置直接适配，不改写配置或依赖模板补键。
+        departure_cfg["confirm_ui"] = {"ocr": {
+            "expected": "出阵会消耗通行令牌", "roi": [340, 150, 960, 205],
+            "match_mode": "contains"}}
+        departure_cfg["confirm_button"] = {"ocr": {
+            "expected": "确定", "roi": [540, 580, 740, 655],
+            "match_mode": "exact"}}
         departure_cfg["ticket_recover"] = self.config.get(
             "raid", {}).get("ticket_recover", {})
         # 当前江户城每次恢复一个手形固定消耗 300 小判。老配置还没有这个
@@ -304,8 +314,8 @@ class EdocastleMixin:
         if not ok:
             return False, team_record_saved
 
-        # 江户城没有手形和自动行军；通用二次确认（模板优先，未配兜底坐标）
-        if not self._confirm_departure(cfg):
+        # 继续走公共二次确认；识别失败绝不使用旧坐标兜底。
+        if not self._confirm_departure(departure_cfg):
             yield "[江户城] 没看到出阵二次确认，停止点击"
             return False, team_record_saved
 

@@ -104,7 +104,7 @@ class BattleMixin:
             template, roi, threshold=float(item.get("threshold", 0.7)))
 
     def _match_departure_prompt(self, cfg: dict):
-        """确认页可用原有模板，或用限定区域识别顶部「出阵」。"""
+        """确认页可用原有模板，或在限定区域识别正文/标题并核对按钮。"""
         prompt = cfg.get("confirm_ui", {})
         ocr_cfg = prompt.get("ocr", {})
         if ocr_cfg:
@@ -117,8 +117,20 @@ class BattleMixin:
             if not title:
                 return None
             # 顶部标题也会出现在其他出阵相关弹窗；同时核对确认按钮。
-            return self._match_template_config(cfg.get("confirm_button", {}))
+            return self._match_departure_button(cfg)
         return self._match_template_config(prompt)
+
+    def _match_departure_button(self, cfg: dict):
+        """确认按钮可按限定 ROI 读字；未配置 OCR 的玩法保持原模板识别。"""
+        button = cfg.get("confirm_button", {})
+        marker = button.get("ocr", {})
+        if marker:
+            if not marker.get("roi") or not marker.get("expected"):
+                return None
+            return self.device.ocr(
+                marker["expected"], roi_4to4(*marker["roi"]),
+                match_mode=marker.get("match_mode", "exact"))
+        return self._match_template_config(button)
 
     def _wait_for_team_record_page(self, record_config: dict,
                                    attempts: int = 10) -> bool:
@@ -967,7 +979,8 @@ class BattleMixin:
 
         已用专属标题确认弹窗后，模板失配时才允许点实测坐标兜底
         （比如大阪城确认窗的绿色“确定”与通用灰按钮不是同一皮肤）；
-        没配 target 的玩法只用模板，绝不盲点。
+        没配 target 的玩法只用识别结果，绝不盲点；按钮配置 OCR 时
+        必须读到按钮文字，不允许退回旧坐标。
         text_prompt 用于限定区域正文确认页，同样必须先认文字再点目标。
         """
         prompt = cfg.get("confirm_ui", {})
@@ -985,13 +998,13 @@ class BattleMixin:
                 continue
             if not prompt or self._match_departure_prompt(cfg):
                 confirm = cfg.get("confirm_button", {})
-                button = self._match_template_config(confirm)
+                button = self._match_departure_button(cfg)
                 if button:
                     self.device.click(button)
                     time.sleep(1.5)
                     return True
                 target = confirm.get("target")
-                if target:
+                if target and not confirm.get("ocr"):
                     self._click_point(target)
                     time.sleep(1.5)
                     return True
