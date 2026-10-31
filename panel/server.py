@@ -354,35 +354,38 @@ def _wrap_inventory(tag: str, runner, inventory=False, scheduled_startup=False):
         try:
             yield from runner(agent, config_path, params)
         finally:
-            if enabled and hasattr(agent, "status_snapshot_stream"):
+            if getattr(agent, '_preserve_game_scene', False) is True:
+                yield f"[{tag}] 保留当前游戏现场，跳过收尾操作"
+            else:
+                if enabled and hasattr(agent, "status_snapshot_stream"):
+                    try:
+                        yield f"[{tag}] 收工后再盘点一次，准备结算"
+                        yield from agent.status_snapshot_stream(phase="after")
+                    except Exception as exc:
+                        yield f"[{tag}] ⚠️ 收工盘点失败（不影响任务结果）：{exc}"
                 try:
-                    yield f"[{tag}] 收工后再盘点一次，准备结算"
-                    yield from agent.status_snapshot_stream(phase="after")
+                    yield f"[{tag}] 收尾：导航回本丸"
+                    for nav_msg in agent.navigate_to_stream("本丸"):
+                        yield nav_msg
+                    if getattr(agent, "current_location", None) == "本丸":
+                        yield from _sweep_return_screens(agent, tag)
+                        yield f"[{tag}] 收尾：已回本丸，同步已有资源数据"
+                        if hasattr(agent, "quick_peek"):
+                            agent.quick_peek(tag=f"{tag}·收尾", force=True, data_only=True)
+                    else:
+                        yield (f"[{tag}] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
+                               "去看看")
                 except Exception as exc:
-                    yield f"[{tag}] ⚠️ 收工盘点失败（不影响任务结果）：{exc}"
-            try:
-                yield f"[{tag}] 收尾：导航回本丸"
-                for nav_msg in agent.navigate_to_stream("本丸"):
-                    yield nav_msg
-                if getattr(agent, "current_location", None) == "本丸":
-                    yield from _sweep_return_screens(agent, tag)
-                    yield f"[{tag}] 收尾：已回本丸，同步已有资源数据"
-                    if hasattr(agent, "quick_peek"):
-                        agent.quick_peek(tag=f"{tag}·收尾", force=True, data_only=True)
-                else:
-                    yield (f"[{tag}] ⚠️ 收尾没能回到本丸，可能卡在某个界面了，"
-                           "去看看")
-            except Exception as exc:
-                yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
-            if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札", "炼糖", "收杂物"}:
-                try:
-                    from touken.game_state import read_events
-                    from touken.sword_receipts import sync_receipts
-                    result = sync_receipts(read_events(agent.device.adb_path, agent.device.adb_address))
-                    if result["written"] or result["reconciled"]:
-                        yield f"[{tag}] 锻刀和掉落记录已同步到账房"
-                except Exception:
-                    yield f"[{tag}] ⚠️ 刀剑进账同步失败，可收工后再同步近况"
+                    yield f"[{tag}] ⚠️ 收尾导航/Peek 失败（不影响任务结果）：{exc}"
+                if tag in {"出阵", "锻刀", "刷花", "异去", "挖地", "RAID", "南瓜", "江户城", "花札", "炼糖", "收杂物"}:
+                    try:
+                        from touken.game_state import read_events
+                        from touken.sword_receipts import sync_receipts
+                        result = sync_receipts(read_events(agent.device.adb_path, agent.device.adb_address))
+                        if result["written"] or result["reconciled"]:
+                            yield f"[{tag}] 锻刀和掉落记录已同步到账房"
+                    except Exception:
+                        yield f"[{tag}] ⚠️ 刀剑进账同步失败，可收工后再同步近况"
     return _fn
 
 
@@ -539,7 +542,9 @@ def _build_daily_standalone(config_path, params):
     try:
         yield from _build_daily(agent, config_path, params)
     finally:
-        if after != "none":
+        if getattr(agent, '_preserve_game_scene', False) is True:
+            yield "[日课] 保留当前游戏现场，跳过收尾操作"
+        elif after != "none":
             yield f"[日课] 已安排「{after}」下班，跳过收尾回本丸"
         else:
             try:

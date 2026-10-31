@@ -292,6 +292,24 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertEqual(set(report),
                          {"run_id", "finished_at", "finished", "all_green", "steps"})
 
+    def test_preserved_scene_never_recovers_navigates_or_runs_after_action(self):
+        from touken.flow_control import FlowAborted
+
+        class HeldAgent(_FakeAgent):
+            def claim_free_gift_stream(self):
+                self._preserve_game_scene = True
+                yield "结果未确认，停止任务"
+                raise FlowAborted("保留现场")
+
+        agent = HeldAgent()
+        messages = list(workflow.run_workflow(
+            "fake-config.json", [_node('free_gift'), _node('naihanka')],
+            lambda _: agent, after='sleep'))
+        self.assertFalse(any(call[0] in ('navigate_to_stream', 'naihanka_stream', 'logout_stream')
+                             for call in agent.calls))
+        self.assertTrue(any('保留当前游戏现场' in message for message in messages))
+        self.assertFalse(self._latest_report()['all_green'])
+
     def test_failure_stops_and_marks_rest_skipped(self):
         """翻车 + 回本丸失败 = 现场失控：收摊，后续 ⏭ 跳过。"""
 

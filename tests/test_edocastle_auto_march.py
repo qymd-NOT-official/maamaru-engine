@@ -9,6 +9,7 @@ from test_edocastle_confirmation import Host, OLD_CONFIG
 from touken.device_adapter import Point
 from touken.flows.edocastle import EdocastleMixin, EDO_AUTO_MARCH_SWITCHES
 from touken.flows.report_judge import _is_fail
+from touken.flow_control import FlowAborted
 from touken.auto_march_settings import apply_details
 
 
@@ -102,7 +103,7 @@ class MonitorDevice:
 
 
 @pytest.mark.parametrize('frames,ok', [
-    ([set(), {'end'}], True),
+    ([set(), {'end'}], False),
     ([{'stopped'}], False),
     ([{'entry'}], False),
     ([set()], False),
@@ -148,7 +149,16 @@ def test_full_auto_path_skips_old_archive_and_manual_route(monkeypatch, succeede
 
     host._enter_map_stream = entered
     host._watch_edocastle_auto_march = watched
-    messages = list(host.edocastle_stream(team_no=2, max_runs=2, auto_march=True))
+    host._save_debug_shot = Mock()
+    stream = host.edocastle_stream(team_no=2, max_runs=2, auto_march=True)
+    messages = []
+    if succeeded:
+        messages = list(stream)
+    else:
+        with pytest.raises(FlowAborted):
+            while True:
+                messages.append(next(stream))
+        assert host._preserve_game_scene is True
     host._map_run_stream.assert_not_called()
     if succeeded:
         assert [call.kwargs['keys'] for call in host.record_event.call_args_list] == [7, 8]

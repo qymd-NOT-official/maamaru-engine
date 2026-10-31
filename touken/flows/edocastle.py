@@ -8,7 +8,7 @@
   →「调查完了！」横幅→结算→回入场屏→下一圈（令牌够的话）
 
 安全规矩：
-  - v1 只做难度四，不主动用道具，不主动返回本丸
+  - 只做难度四，不主动用调查道具；新结算确认后返回本丸
   - 出阵走 BattleMixin 的通用安全出阵链（_safe_depart_stream）：选队验证、
     出阵前伤势检查、刀装未满处理、重伤弹窗拦截一个不少；二次确认用通用
     _confirm_departure。虚拟伤害活动不碎刀，默认只拦重伤（repair_threshold
@@ -126,31 +126,9 @@ class EdocastleMixin:
             load_event_cards(STATE_DIR).get("江户城潜入调查") or {},
         ) or f"江户城潜入调查@{time.strftime('%Y-%m-%d')}"
 
-        # ========== 1. 导航到出阵 ==========
-        yield "[江户城] 正在导航到出阵…"
-        for nav_msg in self.navigate_to_stream("出阵"):
-            yield nav_msg
-        if self.current_location != "出阵":
-            yield "[江户城] 到达出阵失败"
+        self._preserve_game_scene = False
+        if not (yield from self._open_edocastle_entry(cfg)):
             return
-
-        # ========== 2. 进入活动界面 ==========
-        entered = False
-        for _ in range(8):
-            self.device.screenshot(force=True)
-            if self.device.template_match(cfg["ui_title"]["template"]):
-                entered = True
-                break
-            entry = self.device.template_match(cfg["activity_entry"]["template"])
-            if entry:
-                self.device.click(entry)
-                time.sleep(2.0)
-            else:
-                time.sleep(1.0)
-        if not entered:
-            yield "[江户城] 进不去活动界面，停"
-            return
-        yield "[江户城] 到达江户城潜入调查入口"
         self.set_progress("edocastle")
 
         # ========== 3. 主循环：一圈一圈跑 ==========
@@ -168,6 +146,11 @@ class EdocastleMixin:
                 yield "[江户城] 🚩 远征排班请求接管：不开新圈，安全收工"
                 break
 
+            if self.current_location == "本丸":
+                if not (yield from self._open_edocastle_entry(cfg)):
+                    return
+
+            self._edocastle_settlement = None
             # 读入场屏钥匙总数（本圈 before）
             keys_before = self._read_key_total(cfg)
             if keys_before is None:
@@ -180,6 +163,9 @@ class EdocastleMixin:
             # 每圈重新点难度四卡片→部队选择→通用安全出阵链→二次确认。
             # 票尽时游戏会自己弹补票窗，由安全链按 auto_refill 处理
             # （确定补一张再出阵 / 取消收工），不用提前数令牌。
+            if auto_march:
+                # 从出发准备到结算验收之间，任何异常都不得触发通用导航收尾。
+                self._preserve_game_scene = True
             entered, team_record_saved = yield from self._enter_map_stream(
                 cfg, team_no, skip_point,
                 repair_threshold, auto_equip, team_record_saved,
@@ -188,6 +174,8 @@ class EdocastleMixin:
                 formation=formation, auto_march=auto_march)
             if not entered:
                 yield "[江户城] 没能进地图，安全收工"
+                if auto_march:
+                    self._abort_edocastle_scene("江户城自动行军出发未确认，保留现场")
                 break
 
             # ========== 4. 地图巡游 ==========
@@ -195,7 +183,7 @@ class EdocastleMixin:
                 run_keys, ok = yield from self._watch_edocastle_auto_march(cfg)
                 if not ok:
                     yield "[江户城] 自动行军未确认完成，停止任务，请手动查看游戏"
-                    return
+                    self._abort_edocastle_scene("江户城自动行军结果未确认，保留现场")
             else:
                 run_keys, ok = yield from self._map_run_stream(
                     cfg, archive, tour, boss, skip_point,
@@ -234,12 +222,21 @@ class EdocastleMixin:
                     yield "[江户城] 本圈收不回已知状态，已停手，请手动看一眼游戏"
                     return
 
-            if not self._wait_entry_screen(cfg, skip_point, timeout_s=30):
-                self._save_debug_shot(debug_dir, "entry_screen_missing")
-                yield "[江户城] 结算后没回到入场屏，停"
-                return
-
-            keys_after = self._read_key_total(cfg)
+            self._preserve_game_scene = True
+            settlement = getattr(self, '_edocastle_settlement', None)
+            if settlement is None:
+                if not self._wait_entry_screen(cfg, skip_point, timeout_s=30):
+                    yield "[江户城] 结算后页面未确认，停止任务"
+                    self._abort_edocastle_scene("江户城结算后页面未确认，保留现场")
+                settlement = getattr(self, '_edocastle_settlement', None)
+            if settlement is not None:
+                if not self._return_from_edocastle_settlement(cfg):
+                    yield "[江户城] 新结算页没能确认返回本丸，停止任务"
+                    self._abort_edocastle_scene("江户城新结算收尾未确认，保留现场")
+                keys_after = self._edocastle_settlement['keys']
+            else:
+                keys_after = self._read_key_total(cfg)
+            self._preserve_game_scene = False
             delta = keys_after - keys_before if keys_after is not None and keys_before is not None else None
             if delta is not None:
                 total_keys += delta
@@ -286,6 +283,40 @@ class EdocastleMixin:
         yield (
             f"[江户城] 收工，跑了 {runs_done} 圈，已确认带回 {total_keys} 把钥匙"
         )
+
+    def _open_edocastle_entry(self, cfg):
+        """打开江户城入口；新结算先回本丸，下一圈仍从相同入口重新验收。"""
+        # ========== 1. 导航到出阵 ==========
+        yield "[江户城] 正在导航到出阵…"
+        for nav_msg in self.navigate_to_stream("出阵"):
+            yield nav_msg
+        if self.current_location != "出阵":
+            yield "[江户城] 到达出阵失败"
+            return False
+
+        # ========== 2. 进入活动界面 ==========
+        entered = False
+        for _ in range(8):
+            self.device.screenshot(force=True)
+            if self.device.template_match(cfg["ui_title"]["template"]):
+                entered = True
+                break
+            entry = self.device.template_match(cfg["activity_entry"]["template"])
+            if entry:
+                self.device.click(entry)
+                time.sleep(2.0)
+            else:
+                time.sleep(1.0)
+        if not entered:
+            yield "[江户城] 进不去活动界面，停"
+            return False
+        yield "[江户城] 到达江户城潜入调查入口"
+        return True
+
+    def _abort_edocastle_scene(self, message):
+        self._preserve_game_scene = True
+        self._save_debug_shot(None, 'auto_settlement_unknown')
+        raise FlowAborted(message)
 
     # ---------- 内部：入场 → 地图 ----------
 
@@ -390,6 +421,7 @@ class EdocastleMixin:
 
     def _watch_edocastle_auto_march(self, cfg: dict, timeout_s: float = 1200):
         """只观察委托；没见本圈调查完成证据，不计完成、不改走脚本巡游。"""
+        self._edocastle_settlement = None
         marker = self.config.get('sortie', {}).get('march_stop_ocr', {
             'expected': '自动行军停止', 'roi': [600, 150, 950, 260]})
         deadline = time.monotonic() + max(1.0, float(timeout_s))
@@ -398,18 +430,96 @@ class EdocastleMixin:
             if self._deny_heavy_injury_warning(cfg):
                 yield '[江户城] 重伤行军警告已拦截，停止自动行军任务'
                 return 0, False
-            if self.device.template_match(cfg['round_end']['template']):
-                yield '[江户城] 已确认本圈调查完成，准备结算'
+            settlement = self._read_edocastle_settlement()
+            if settlement is not None:
+                self._edocastle_settlement = settlement
+                yield '[江户城] 已确认新版调查结算，准备返回本丸'
                 return 0, True
+            # 旧「调查完了」横幅仍会在新结算前闪过，不能据此结束观察。
+            # 必须等钥匙栏与三个结算按钮同帧出现，才交给收尾处理。
             if self.device.ocr(marker['expected'], roi_4to4(*marker['roi'])):
                 yield '[江户城] 游戏自动行军已停止，本圈尚未确认完成'
                 return 0, False
-            if self.device.template_match(cfg['ui_title']['template']):
-                yield '[江户城] 已回入场屏，但没看到本圈完成证据，不记作完成'
-                return 0, False
+            # 活动标题也会出现在出发过渡页和地图背景，不能单独据此判断回城。
             time.sleep(0.9)
         yield '[江户城] 等待自动行军结算超时，停止任务'
         return 0, False
+
+    def _read_edocastle_settlement(self):
+        """2026-10-31 显存运行帧：钥匙栏与三个专属按钮同时出现才认新结算。
+
+        只读，不点击继续调查或部队恢复；钥匙读不清时仍可安全返回，但不估数。
+        """
+        reader = getattr(self.device, 'ocr_all', None)
+        if not callable(reader):
+            return None
+
+        def rows(box):
+            result = reader(roi_4to4(*box))
+            return result if isinstance(result, (list, tuple)) else []
+
+        keys = rows((800, 285, 1280, 365))
+        if not any('所持钥匙' in str(text) for text, _ in keys):
+            return None
+        more = rows((1040, 505, 1220, 690))
+        home = rows((1145, 380, 1280, 525))
+        restore = rows((980, 380, 1120, 525))
+        if not all(all(word in ''.join(str(text) for text, _ in group) for word in words)
+                   for group, words in ((more, ('继续', '调查')), (home, ('返回', '本丸')),
+                                        (restore, ('部队', '恢复')))):
+            return None
+        digits = [int(str(text).replace(',', '')) for text, _ in keys
+                  if re.fullmatch(r'\d[\d,]*', str(text).strip())]
+        points = [point for text, point in home if '返回' in str(text) or '本丸' in str(text)]
+        if not points:
+            return None
+        from ..device_adapter import Point
+        return {'keys': digits[0] if len(digits) == 1 else None,
+                'home': Point(sum(p.x for p in points) // len(points),
+                              sum(p.y for p in points) // len(points))}
+
+    def _return_from_edocastle_settlement(self, cfg):
+        """只从重新验收的新结算页点返回本丸；后续只观察，绝不点继续调查。"""
+        def return_prompt():
+            return self.device.ocr('确认返回本丸', roi_4to4(500, 285, 790, 360))
+
+        def accept_return():
+            yes = self.device.ocr('是', roi_4to4(395, 430, 600, 510), match_mode='exact')
+            if not yes:
+                return False
+            self.device.click(yes)
+            return True
+
+        self.device.screenshot(force=True)
+        confirmed = False
+        if return_prompt():
+            if not accept_return():
+                return False
+            confirmed = True
+        else:
+            current = self._read_edocastle_settlement()
+            if current is None:
+                return False
+            self._edocastle_settlement = current
+            self.device.click(current['home'])
+        marker = self.config.get('sortie', {}).get('home_ui', {'template': 'ui本丸.png'})
+        hits = 0
+        for _ in range(20):
+            time.sleep(0.5)
+            self.device.screenshot(force=True)
+            if not confirmed and return_prompt():
+                if not accept_return():
+                    return False
+                confirmed = True
+                continue
+            if self.device.template_match(marker['template']):
+                hits += 1
+                if hits >= 2:
+                    self.current_location = '本丸'
+                    return True
+            else:
+                hits = 0
+        return False
 
     # ---------- 内部：地图巡游核心 ----------
 
@@ -739,7 +849,8 @@ class EdocastleMixin:
     def _save_debug_shot(self, debug_dir: str | None, name: str):
         """异常现场存证：优先 debug_dir，否则用户数据目录 debug/。"""
         try:
-            out = Path(debug_dir) if debug_dir else Path(self._root) / "debug"
+            from ..runtime_paths import DEBUG_DIR
+            out = Path(debug_dir) if debug_dir else DEBUG_DIR / "edocastle"
             out.mkdir(parents=True, exist_ok=True)
             self.device.save_screenshot(
                 str(out / f"edo_{name}_{time.strftime('%H%M%S')}.png"))
@@ -848,14 +959,18 @@ class EdocastleMixin:
 
     def _wait_entry_screen(self, cfg: dict, skip_point: list,
                            timeout_s: float = 30.0) -> bool:
-        """等回到入场屏标题。"""
-        return self.wait_landmark_skipping(
-            template=cfg["ui_title"]["template"],
-            skip_point=skip_point,
-            timeout_s=timeout_s,
-            stable_hits=1,
-            interval=0.9,
-        )
+        """脚本巡游后也先等新结算，不再用旧安全区盲点跳过结算。"""
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        while time.monotonic() < deadline:
+            self.device.screenshot(force=True)
+            settlement = self._read_edocastle_settlement()
+            if settlement is not None:
+                self._edocastle_settlement = settlement
+                return True
+            if self.device.template_match(cfg["ui_title"]["template"]):
+                return True
+            time.sleep(0.9)
+        return False
 
     # ---------- 内部：地图内撤退 ----------
 

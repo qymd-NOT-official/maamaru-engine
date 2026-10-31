@@ -750,7 +750,8 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             # 其余先试着导航回本丸——回得去说明现场干净，后续积木继续跑
             # （这块照记翻车）；回不去才是真失控，收摊。
             recoverable = (node["type"] != "login" and not game_closed
-                           and agent is not None and not interrupted)
+                           and agent is not None and not interrupted
+                           and getattr(agent, '_preserve_game_scene', False) is not True)
             if recoverable:
                 yield "【工作流】这块翻车了，先试着回本丸看看现场……"
                 try:
@@ -766,6 +767,8 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             if interrupted:
                 yield (f"【工作流】远征接班，这块没跑完，剩余 {len(plan) - i - 1} "
                        "块不跑，交还给远征排班")
+            elif getattr(agent, '_preserve_game_scene', False) is True:
+                yield (f"【工作流】这块需保留游戏现场，剩余 {len(plan) - i - 1} 块不跑")
             elif node["type"] == "login" or game_closed or agent is None:
                 yield (f"【工作流】这块翻车了，没有现场可收拾，"
                        f"剩余 {len(plan) - i - 1} 块不跑")
@@ -789,7 +792,9 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
 
     # 收尾（整个 run 只此一次）：回本丸 + 合并已有资源数据。
     # 中间节点不套 run 级盘点/收尾，避免每块都磨叽一遍（日课同款约定）。
-    if game_closed:
+    if getattr(agent, '_preserve_game_scene', False) is True:
+        yield "【工作流】保留当前游戏现场，跳过收尾操作"
+    elif game_closed:
         yield "【工作流】已执行下班积木，游戏已关，跳过收尾回本丸"
     else:
         try:
