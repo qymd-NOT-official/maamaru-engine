@@ -462,7 +462,11 @@ def _adopt_sync(draft_stem: str, target: str) -> dict:
         raise HTTPException(404, "这张草稿不存在。")
     image_dir = RESOURCE_DIR / "image"
     image_dir.mkdir(parents=True, exist_ok=True)
-    dest = image_dir / f"{target}.png"
+    from touken.server_pack import resolve_template_path, ServerPackError
+    try:
+        dest = resolve_template_path(f"{target}.png", RESOURCE_DIR)
+    except ServerPackError as exc:
+        raise HTTPException(400, str(exc))
     dest.parent.mkdir(parents=True, exist_ok=True)
     backup = None
     if dest.exists():

@@ -11,6 +11,7 @@ adopt 复制与覆盖备份；capture 假 adapter 存盘与错误收集、init �
 每个用例 patch template_lab.DEBUG_DIR / RESOURCE_DIR 到临时目录。
 """
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -411,6 +412,24 @@ class AdoptTests(TemplateLabTestBase):
                                       template_lab._read_png(
                                           template_lab._drafts_dir() / "采纳目标.png",
                                           color=True))
+
+    def test_adopt_legacy_name_updates_archived_target_with_backup(self):
+        root = template_lab.RESOURCE_DIR
+        dest = root / 'image' / 'common' / 'confirm.png'
+        dest.parent.mkdir(parents=True)
+        dest.write_bytes(b'previous-template')
+        (root / 'server_packs').mkdir()
+        (root / 'server_packs' / 'cn.json').write_text(json.dumps({
+            'base_size': [1280, 720],
+            'templates': {'dialog/confirm': 'common/confirm.png'},
+            'template_aliases': {'通用_确定.png': '@dialog/confirm'},
+        }), encoding='utf-8')
+        body = self._adopt(target='通用_确定')
+        self.assertEqual(Path(body['path']), dest)
+        self.assertEqual(Path(body['backup']).read_bytes(), b'previous-template')
+        self.assertEqual(dest.read_bytes(),
+                         (template_lab._drafts_dir() / '采纳目标.png').read_bytes())
+        self.assertFalse((root / 'image' / '通用_确定.png').exists())
 
     def test_adopt_existing_target_creates_backup(self):
         first = self._adopt()

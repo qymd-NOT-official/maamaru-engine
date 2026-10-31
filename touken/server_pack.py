@@ -12,6 +12,8 @@
   校验翻车一样抛 ValueError 子类。
 - @name 从本服包解析；缺引用、坏路径、越界一律抛 ValueError 子类
   （ServerPackError 系），绝不静默返回 None。
+- template_aliases 将已归档的旧相对路径映射到本服逻辑名，兼容老配置；
+  未登记的原始路径保持原样，不猜目录或跨服回退。
 
 边界语义：ROI 是半开区间 [x1,x2)×[y1,y2)，须 x1<x2、y1<y2（零面积不认），
 允许 x2==基准宽、y2==基准高；点是有效像素，合法范围 0..基准宽-1 / 0..基准高-1。
@@ -20,6 +22,7 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
@@ -86,6 +89,7 @@ class ServerPack:
     rois: dict[str, list[int]] = field(default_factory=dict)
     points: dict[str, list[int]] = field(default_factory=dict)
     navigation: dict[str, Any] = field(default_factory=dict)
+    template_aliases: dict[str, str] = field(default_factory=dict)
 
     # ── 解析入口：原始值按旧语义返回，@name 从包解析 ──
 
@@ -94,7 +98,13 @@ class ServerPack:
         if not isinstance(value, str):
             raise PackValueError(f"模板引用必须是字符串，收到 {type(value).__name__}")
         if not value.startswith(LOGICAL_PREFIX):
-            return _check_relative_path(value, "模板路径")
+            rel = _check_relative_path(value, "模板路径")
+            if rel not in self.template_aliases:
+                return rel
+            target = self.template_aliases[rel]
+            if not isinstance(target, str) or not target.startswith(LOGICAL_PREFIX):
+                raise PackValueError(f"旧模板 {rel!r} 必须映射到 @逻辑名")
+            return self.resolve_template(target)
         name = value[len(LOGICAL_PREFIX):]
         rel = self._lookup(self.templates, name, "模板")
         rel = _check_relative_path(rel, f"模板 {name!r} 的路径")
@@ -217,7 +227,7 @@ def load_server_pack(server: str = "cn", resource_dir: Union[str, Path, None] = 
         raise PackValueError(f"素材包 {path} 的 base_size 必须是正的 [宽, 高]，收到 {base!r}")
 
     tables: dict[str, dict] = {}
-    for key in ("templates", "ocr", "rois", "points", "navigation"):
+    for key in ("templates", "ocr", "rois", "points", "navigation", "template_aliases"):
         table = data.get(key, {})
         if not isinstance(table, dict):
             raise PackValueError(f"素材包 {path} 的 {key} 必须是字典")
@@ -232,6 +242,7 @@ def load_server_pack(server: str = "cn", resource_dir: Union[str, Path, None] = 
         rois=tables["rois"],
         points=tables["points"],
         navigation=tables["navigation"],
+        template_aliases=tables["template_aliases"],
     )
     _validate_pack(pack, path)
     return pack
@@ -241,6 +252,11 @@ def _validate_pack(pack: ServerPack, path: Path) -> None:
     """加载期全量校验：包自带的每个条目都必须能经解析入口原样通过。"""
     for logical, _ in pack.templates.items():
         pack.resolve_template(LOGICAL_PREFIX + logical)
+    for legacy in pack.template_aliases:
+        # 别名只能是旧相对路径，目标只能是本服已登记的逻辑名；不串服、不猜文件名。
+        if legacy.startswith(LOGICAL_PREFIX) or _check_relative_path(legacy, "旧模板路径") != legacy:
+            raise PackValueError(f"旧模板路径必须使用 / 分隔: {legacy!r}")
+        pack.resolve_template(legacy)
     for logical, _ in pack.ocr.items():
         pack.resolve_ocr(LOGICAL_PREFIX + logical)
     for logical, _ in pack.rois.items():
@@ -249,3 +265,29 @@ def _validate_pack(pack: ServerPack, path: Path) -> None:
         pack.resolve_point(LOGICAL_PREFIX + logical)
     for logical, _ in pack.navigation.items():
         pack.resolve_navigation(LOGICAL_PREFIX + logical)
+
+
+@lru_cache(maxsize=16)
+def _cached_pack(server: str, root: str, stamp: int) -> ServerPack:
+    """匹配热路径只解析一次素材包；素材包更新后重新加载。"""
+    return load_server_pack(server, root)
+
+
+def resolve_template_path(value: str, resource_dir: Union[str, Path],
+                          server: str = "cn") -> Path:
+    """设备匹配与工具预览共用入口，兼容老配置中的已归档路径。
+
+    独立设备测试可只提供 image/，此时仍接受普通相对路径；逻辑引用必须有包。
+    有素材包却损坏时直接报错，不绕回旧路径或其他服务器。
+    """
+    root = Path(resource_dir).resolve()
+    name = _safe_server_name(server)
+    manifest = root / PACK_DIR_NAME / f"{name}.json"
+    if manifest.is_file():
+        pack = _cached_pack(name, str(root), manifest.stat().st_mtime_ns)
+        rel = pack.resolve_template(value)
+    elif isinstance(value, str) and not value.startswith(LOGICAL_PREFIX):
+        rel = _check_relative_path(value, "模板路径")
+    else:
+        raise UnknownServerError(f"服务器 {name!r} 的素材包不存在: {manifest}")
+    return root / "image" / rel

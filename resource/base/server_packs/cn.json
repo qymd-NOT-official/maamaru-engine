@@ -3,7 +3,13 @@
   "base_size": [1280, 720],
   "templates": {
     "expedition/injury-stamp": "battle/ui重伤.png",
-    "expedition/start": "远征开始.png"
+    "expedition/start": "远征开始.png",
+    "sortie/decide": "sortie/decide.png",
+    "home/screen": "home/screen.png",
+    "dialog/confirm": "common/confirm.png",
+    "dialog/no": "common/no.png",
+    "battle/result": "battle/ui战斗结果.png",
+    "battle/march": "battle/行军.png"
   },
   "ocr": {
     "signin/announce": "公告",
@@ -33,5 +39,11 @@
   },
   "navigation": {
     "expedition/nav": "远征"
+  },
+  "template_aliases": {
+    "决定.png": "@sortie/decide",
+    "ui本丸.png": "@home/screen",
+    "通用_确定.png": "@dialog/confirm",
+    "否.png": "@dialog/no"
   }
 }

@@ -474,8 +474,9 @@ class DeviceAdapter:
         image = self.screenshot()
         if image is None:
             return None
-        path = Path(self.resource_dir) / 'image' / template
         try:
+            from .server_pack import resolve_template_path
+            path = resolve_template_path(template, self.resource_dir)
             hit = vision_cv2.best(image, path, roi.to_tuple() if roi else None)
         except FileNotFoundError:
             print(f"[cv2模板] 模板不存在: {template}")
@@ -501,8 +502,9 @@ class DeviceAdapter:
         image = self.screenshot()
         if image is None:
             return 0.0
-        path = Path(self.resource_dir) / 'image' / template
         try:
+            from .server_pack import resolve_template_path
+            path = resolve_template_path(template, self.resource_dir)
             return vision_cv2.match_score(
                 image, path, roi.to_tuple() if roi else None, threshold)
         except Exception as exc:

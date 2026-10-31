@@ -158,7 +158,7 @@ class RawValueCompatTest(unittest.TestCase):
 
     def test_raw_template_passthrough(self):
         self.assertEqual(self.pack.resolve_template("menu/出阵.png"), "menu/出阵.png")
-        self.assertEqual(self.pack.resolve_template("通用_确定.png"), "通用_确定.png")
+        self.assertEqual(self.pack.resolve_template("通用_确定.png"), "common/confirm.png")
 
     def test_raw_ocr_passthrough(self):
         self.assertEqual(self.pack.resolve_ocr("公告"), "公告")

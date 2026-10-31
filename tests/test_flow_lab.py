@@ -202,6 +202,21 @@ class TemplateAndRoiTests(FlowLabTestBase):
     def test_rois_empty_without_store(self):
         self.assertEqual(self.client.get("/api/flow-lab/rois").json()["rois"], [])
 
+    def test_template_image_follows_legacy_alias(self):
+        root = flow_lab.RESOURCE_DIR
+        (root / 'image' / 'common').mkdir(parents=True)
+        (root / 'image' / 'common' / 'confirm.png').write_bytes(b'original-png')
+        (root / 'server_packs').mkdir()
+        (root / 'server_packs' / 'cn.json').write_text(json.dumps({
+            'base_size': [1280, 720],
+            'templates': {'dialog/confirm': 'common/confirm.png'},
+            'template_aliases': {'通用_确定.png': '@dialog/confirm'},
+        }), encoding='utf-8')
+        for name in ('通用_确定.png', 'common/confirm.png'):
+            response = self.client.get('/api/flow-lab/template-image', params={'path': name})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.content, b'original-png')
+
     def test_template_image_serves_png_with_whitelist(self):
         image_dir = flow_lab._image_dir()
         (image_dir / "event").mkdir(parents=True)

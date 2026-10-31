@@ -282,7 +282,11 @@ def create_flow_lab_router() -> APIRouter:
         except FlowError as exc:
             raise HTTPException(400, str(exc))
         image_dir = _image_dir().resolve()
-        full = (image_dir / rel).resolve()
+        from touken.server_pack import resolve_template_path, ServerPackError
+        try:
+            full = resolve_template_path(rel, image_dir.parent).resolve()
+        except ServerPackError as exc:
+            raise HTTPException(400, str(exc))
         if not full.is_relative_to(image_dir) or not full.is_file():
             raise HTTPException(404, "没有这个模板。")
         return FileResponse(str(full), media_type="image/png")
