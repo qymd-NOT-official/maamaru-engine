@@ -13,7 +13,7 @@
     出阵前伤势检查、刀装未满处理、重伤弹窗拦截一个不少；二次确认用通用
     _confirm_departure。虚拟伤害活动不碎刀，默认只拦重伤（repair_threshold
     =heavy），中伤照跑
-  - 步数/钥匙靠 HUD OCR；当前位置靠流程自己记账
+  - 游戏委托成功后只观察结算，脚本巡游时步数/钥匙靠 HUD OCR
   - 票尽不数令牌格：游戏自己会弹补票窗，安全链按 auto_refill 处理
     （确定补一张再出阵 / 取消收工，异去同款交互）
   - 败北/意外回入场屏按前后钥匙差记账并停
@@ -26,6 +26,15 @@ from pathlib import Path
 from ..edo_route import EDOCASTLE_TOUR, decide_next, load_archive
 from ..flow_control import FlowAborted
 from ..device_adapter import roi_4to4
+
+
+# 2026-10-31 DeviceAdapter 显存运行帧 auto-details.png，江户城专属四项。
+EDO_AUTO_MARCH_SWITCHES = {
+    'heavy': ('重伤时停止', (60, 120, 260, 175), (275, 120, 400, 175)),
+    'fatigue': ('重疲劳时停止', (470, 120, 675, 175), (685, 120, 815, 175)),
+    'equipment': ('刀装破坏时停止', (880, 120, 1085, 175), (1095, 120, 1225, 175)),
+    'presentation': ('演出时暂停', (60, 185, 260, 240), (275, 185, 400, 240)),
+}
 
 
 class EdocastleMixin:
@@ -42,12 +51,14 @@ class EdocastleMixin:
         repair_threshold: str = None,
         auto_equip: bool = None,
         debug_dir: str = None,
+        auto_march: bool = False,
         **kwargs,
     ):
         """
         流式刷江户城潜入调查（难度四·超难）
 
         Args:
+            auto_march: 委托游戏行军；关闭时使用原难度四脚本巡游
             team_no: 部队编号，默认读配置 edocastle.team_no
             use_koban_refill: 票尽时是否用小判补票（走游戏自己的补票弹窗：
                 出阵→确定补一张→再出阵），默认读配置 edocastle.use_koban_refill
@@ -82,21 +93,23 @@ class EdocastleMixin:
             yield f"[江户城] 配置里没有部队{team_no}的坐标"
             return
 
-        archive_path = cfg.get("map_archive")
-        if not archive_path:
-            yield "[江户城] 未配置地图档案路径"
-            return
-        archive_path = Path(archive_path)
-        if not archive_path.is_absolute():
-            # 地图档案是程序资源（跟模板图一样捆在 bundle 里），
-            # 不能拿用户数据目录当根（实测翻车：_root 是数据目录）
-            from ..runtime_paths import BUNDLE_ROOT
-            archive_path = BUNDLE_ROOT / archive_path
-        try:
-            archive = load_archive(archive_path)
-        except Exception as exc:
-            yield f"[江户城] 加载地图档案失败：{exc}"
-            return
+        archive = {}
+        if not auto_march:
+            archive_path = cfg.get("map_archive")
+            if not archive_path:
+                yield "[江户城] 未配置地图档案路径"
+                return
+            archive_path = Path(archive_path)
+            if not archive_path.is_absolute():
+                # 地图档案是程序资源（跟模板图一样捆在 bundle 里），
+                # 不能拿用户数据目录当根（实测翻车：_root 是数据目录）
+                from ..runtime_paths import BUNDLE_ROOT
+                archive_path = BUNDLE_ROOT / archive_path
+            try:
+                archive = load_archive(archive_path)
+            except Exception as exc:
+                yield f"[江户城] 加载地图档案失败：{exc}"
+                return
 
         tour = cfg.get("tour", EDOCASTLE_TOUR)
         boss = archive.get("boss", 2)
@@ -144,6 +157,8 @@ class EdocastleMixin:
         runs_done = 0
         total_keys = 0
         team_record_saved = False
+        yield ("[江户城] 本次使用游戏自动行军，脚本观察行军与结算"
+               if auto_march else "[江户城] 本次使用脚本巡游")
         while True:
             if max_runs > 0 and runs_done >= max_runs:
                 yield f"[江户城] 已达最大圈数 {max_runs}，收工"
@@ -170,17 +185,23 @@ class EdocastleMixin:
                 repair_threshold, auto_equip, team_record_saved,
                 auto_refill=use_koban_refill,
                 formation_mode=formation_mode,
-                formation=formation)
+                formation=formation, auto_march=auto_march)
             if not entered:
                 yield "[江户城] 没能进地图，安全收工"
                 break
 
             # ========== 4. 地图巡游 ==========
-            run_keys, ok = yield from self._map_run_stream(
-                cfg, archive, tour, boss, skip_point,
-                formation_mode, formation,
-                debug_dir,
-            )
+            if auto_march:
+                run_keys, ok = yield from self._watch_edocastle_auto_march(cfg)
+                if not ok:
+                    yield "[江户城] 自动行军未确认完成，停止任务，请手动查看游戏"
+                    return
+            else:
+                run_keys, ok = yield from self._map_run_stream(
+                    cfg, archive, tour, boss, skip_point,
+                    formation_mode, formation,
+                    debug_dir,
+                )
 
             # 无论正常结算还是败北/意外回城，都先尝试回到入场屏记账
             if not ok:
@@ -223,7 +244,10 @@ class EdocastleMixin:
             if delta is not None:
                 total_keys += delta
             else:
-                yield f"[江户城] 本圈钥匙增量未读清；地图观察约 {max(0, run_keys)} 把，仅供参考，不记入成绩"
+                if auto_march:
+                    yield "[江户城] 本圈钥匙增量未读清，不记入成绩"
+                else:
+                    yield f"[江户城] 本圈钥匙增量未读清；地图观察约 {max(0, run_keys)} 把，仅供参考，不记入成绩"
             gain_text = f"{delta:+d}" if delta is not None else "未知"
             if ok:
                 if hasattr(self, "record_event"):
@@ -270,7 +294,8 @@ class EdocastleMixin:
                           auto_equip: bool, team_record_saved: bool,
                           auto_refill: bool = False,
                           formation_mode: str = "manual",
-                          formation: str = "鱼鳞阵"):
+                          formation: str = "鱼鳞阵",
+                          auto_march: bool = False):
         """在入场屏点击难度卡片→部队选择→通用安全出阵链→二次确认，直到地图屏。
 
         选队、伤势检查、刀装处理、重伤拦截全部走 BattleMixin 的
@@ -305,12 +330,33 @@ class EdocastleMixin:
         # 当前江户城每次恢复一个手形固定消耗 300 小判。老配置还没有这个
         # 字段时也要记得上账；example 的补键迁移会为后续安装补齐显式配置。
         departure_cfg["ticket_price"] = int(cfg.get("ticket_price", 300))
+
+        def prepare_march():
+            if auto_march:
+                # 本活动不发生刀剑破坏；游戏提示关闭重伤/刀装停止。出发前
+                # 的重伤保护仍由安全链负责，委托中保留重疲劳停止。
+                policy = {'heavy': False, 'equipment': False, 'fatigue': True,
+                          'presentation': False, 'formation': formation}
+                if not self._configure_auto_march_settings(
+                        policy, switches=EDO_AUTO_MARCH_SWITCHES):
+                    yield "[江户城] 自动行军详细设定未能确认，停止出阵"
+                    return False
+                if not self._enable_auto_march():
+                    yield "[江户城] 自动行军委托未能确认，停止出阵"
+                    return False
+            elif not self._disable_auto_march():
+                yield "[江户城] 没能确认游戏自动行军已关闭，停止出阵"
+                return False
+            return True
+
         ok, team_record_saved = yield from self._safe_depart_stream(
             departure_cfg, team_no, "[江户城]",
             repair_threshold=repair_threshold,
             auto_equip=auto_equip,
             team_record_saved=team_record_saved,
-            auto_refill=auto_refill)
+            auto_refill=auto_refill,
+            prepare_team_stream=prepare_march,
+            after_equipment_stream=prepare_march)
         if not ok:
             return False, team_record_saved
 
@@ -318,6 +364,10 @@ class EdocastleMixin:
         if not self._confirm_departure(departure_cfg):
             yield "[江户城] 没看到出阵二次确认，停止点击"
             return False, team_record_saved
+
+        if auto_march:
+            # 委托后不再按旧流程跳过入场战斗或点击地图。
+            return True, team_record_saved
 
         # 江户城入场有时会先打一场，再落到地图。此处必须同时等地图和
         # 阵形选择共同标题；只等地图会把阵形页误当过场一直点安全区。
@@ -337,6 +387,29 @@ class EdocastleMixin:
             yield "[江户城] 没进地图屏，停"
             return False, team_record_saved
         return True, team_record_saved
+
+    def _watch_edocastle_auto_march(self, cfg: dict, timeout_s: float = 1200):
+        """只观察委托；没见本圈调查完成证据，不计完成、不改走脚本巡游。"""
+        marker = self.config.get('sortie', {}).get('march_stop_ocr', {
+            'expected': '自动行军停止', 'roi': [600, 150, 950, 260]})
+        deadline = time.monotonic() + max(1.0, float(timeout_s))
+        while time.monotonic() < deadline:
+            self.device.screenshot(force=True)
+            if self._deny_heavy_injury_warning(cfg):
+                yield '[江户城] 重伤行军警告已拦截，停止自动行军任务'
+                return 0, False
+            if self.device.template_match(cfg['round_end']['template']):
+                yield '[江户城] 已确认本圈调查完成，准备结算'
+                return 0, True
+            if self.device.ocr(marker['expected'], roi_4to4(*marker['roi'])):
+                yield '[江户城] 游戏自动行军已停止，本圈尚未确认完成'
+                return 0, False
+            if self.device.template_match(cfg['ui_title']['template']):
+                yield '[江户城] 已回入场屏，但没看到本圈完成证据，不记作完成'
+                return 0, False
+            time.sleep(0.9)
+        yield '[江户城] 等待自动行军结算超时，停止任务'
+        return 0, False
 
     # ---------- 内部：地图巡游核心 ----------
 

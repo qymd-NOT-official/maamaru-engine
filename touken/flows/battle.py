@@ -1148,7 +1148,7 @@ class BattleMixin:
         print(f"[AUTO_MARCH] 委托{'成功' if ok else '失败（标记没出现）'}")
         return ok
 
-    def _configure_auto_march_settings(self, policy) -> bool:
+    def _configure_auto_march_settings(self, policy, *, switches=None) -> bool:
         from ..auto_march_settings import apply_details
         cfg = self.config["team_select"]["auto_march"]
         self.device.screenshot(force=True)
@@ -1167,7 +1167,7 @@ class BattleMixin:
             return False
         self.device.click(detail)
         time.sleep(0.6)
-        if not apply_details(self.device, policy):
+        if not apply_details(self.device, policy, **({'switches': switches} if switches is not None else {})):
             return False
         # 标题已验证，此 X 只关闭详细设定。
         self._click_point([1250, 30])

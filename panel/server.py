@@ -269,11 +269,11 @@ def _march_and_injury_fields():
     ]
 
 
-def _formation_fields():
+def _formation_fields(*, with_march_toggle=False):
     """不使用自动行军、但每场仍需选择阵形的玩法共用。
     策略和兜底阵形常显：自动阵形在游戏识别失败（夜战等）时会回落到
     手动按策略选，兜底阵形照样起作用（choose_formation 的设计）。"""
-    return [
+    fields = [
         {"key": "formation_mode", "type": "select", "label": "阵形选择方式",
          "options": [["manual", "手动阵形"], ["auto", "自动阵形"]],
          "default": "manual"},
@@ -283,6 +283,10 @@ def _formation_fields():
                      ["鱼鳞阵", "横队阵", "雁行阵", "鹤翼阵", "方阵", "逆行阵"]],
          "default": "鱼鳞阵"},
     ]
+
+    if with_march_toggle:
+        fields[0]["visibleWhen"] = {"key": "auto_march", "is": "false"}
+    return fields
 
 
 def _sword_names(raw) -> list[str]:
@@ -624,6 +628,7 @@ def _build_edocastle(agent, config_path, params):
         params, 6, "max_runs", "refill_run_limit")
     yield from agent.edocastle_stream(
         team_no=team_no,
+        auto_march=_bool(params.get("auto_march", True)),
         use_koban_refill=refill,
         max_runs=runs,
         formation_mode=params.get("formation_mode") or "manual",
@@ -1118,14 +1123,17 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
                         _run_count_field(ticket=True, default=4),
                         {**_ticket_refill_field(),
                          "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"}])
-register_script("edocastle", "江户城潜入调查", "难度四巡游：踩点、钥匙、王点一套带走",
+register_script("edocastle", "江户城潜入调查", "难度四：游戏自动行军或脚本巡游，按设定次数出阵",
                 _wrap_inventory("江户城", _build_edocastle),
                 params=[_team_field("3"),
                         _run_count_field(default=6),
+                        {"key": "auto_march", "type": "toggle",
+                         "label": "是否使用自动行军", "default": True,
+                         "help": "开启后委托游戏选路和战斗；关闭后由脚本按难度四巡游路线行军。委托未确认成功时会停止出阵。"},
                         {"key": "use_koban_refill", "type": "toggle",
                          "label": "是否补充手形", "default": False,
                          "help": "关闭时，现有手形不够完成设定次数便提前收工；开启后才会使用小判补充。"},
-                        *_formation_fields()])
+                        *_formation_fields(with_march_toggle=True)])
 register_script("hanafuda", "秘宝之里", "花牌收集：按设定次数出阵，令牌不足时安全收工",
                 _wrap_inventory("花札", _build_hanafuda),
                 params=[{"key": "difficulty", "type": "select", "label": "打哪个难度",

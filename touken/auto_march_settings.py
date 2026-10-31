@@ -26,8 +26,8 @@ def march_policy(repair_threshold, injury_action, auto_equip, stop_on_fatigue, f
             'fatigue': bool(stop_on_fatigue), 'formation': formation}
 
 
-def read_switch(device, key):
-    label, label_roi, switch_roi = SWITCHES[key]
+def read_switch(device, key, switches=None):
+    label, label_roi, switch_roi = (SWITCHES if switches is None else switches)[key]
     if not device.ocr(label, roi_4to4(*label_roi), match_mode='exact'):
         return None
     states = {text.strip() for text, _ in device.ocr_all(roi_4to4(*switch_roi))}
@@ -45,22 +45,30 @@ def selected_formation(device, name):
                                   threshold=0.85))
 
 
-def apply_details(device, policy):
+def apply_details(device, policy, *, switches=None):
     """仅在明确的详细设定页修改，逐项回读；无法确认就停止。"""
     device.screenshot(force=True)
-    if not device.ocr('详细设定', roi_4to4(510, 20, 760, 90), match_mode='exact'):
+    title_roi = roi_4to4(510, 20, 760, 90)
+    if not (device.ocr('详细设定', title_roi, match_mode='exact')
+            or device.ocr('详细设置', title_roi, match_mode='exact')):
         return False
-    for key in SWITCHES:
-        state = read_switch(device, key)
+    active_switches = SWITCHES if switches is None else switches
+
+    def read(key):
+        return (read_switch(device, key) if switches is None
+                else read_switch(device, key, switches))
+
+    for key in active_switches:
+        state = read(key)
         if state is None:
             return False
         if state != policy[key]:
-            _, _, (left, top, right, bottom) = SWITCHES[key]
+            _, _, (left, top, right, bottom) = active_switches[key]
             from .device_adapter import Point
             device.click(Point((left + right) // 2, (top + bottom) // 2))
             time.sleep(0.5)
             device.screenshot(force=True)
-            if read_switch(device, key) != policy[key]:
+            if read(key) != policy[key]:
                 return False
     name = policy['formation']
     if not selected_formation(device, name):
@@ -73,4 +81,4 @@ def apply_details(device, policy):
         if not selected_formation(device, name):
             return False
     # 修改其余项目后，再一起回读，避免后续点击意外改变前项。
-    return all(read_switch(device, key) == policy[key] for key in SWITCHES)
+    return all(read(key) == policy[key] for key in active_switches)
