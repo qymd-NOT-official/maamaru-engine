@@ -228,7 +228,7 @@ class RepairResourceChangeTests(unittest.TestCase):
     def _run_repair_one(self, cost_tokens, need_speed=False):
         host = _Host({"repair": _REPAIR_CFG})
         host.device = _RepairFakeMaa(cost_tokens)
-        messages = list(host._repair_one(_REPAIR_CFG, name_y=200,
+        messages = list(host._repair_one(name_y=200,
                                          need_speed=need_speed))
         return host, messages
 
@@ -278,7 +278,7 @@ class RepairResourceChangeTests(unittest.TestCase):
         cfg = {k: v for k, v in _REPAIR_CFG.items() if k != "cost_rois"}
         host = _Host({"repair": cfg})
         host.device = _RepairFakeMaa({})
-        messages = list(host._repair_one(cfg, name_y=200, need_speed=True))
+        messages = list(host._repair_one(name_y=200, need_speed=True))
         self.assertIn("[手入] 已开工", messages)
         changes = [p for t, p in host.events if t == "resource.change"]
         self.assertEqual(len(changes), 5)
@@ -294,7 +294,7 @@ class RepairResourceChangeTests(unittest.TestCase):
         host = _Host({"repair": _REPAIR_CFG})
         host.device = _RepairFakeMaa({})
         host.device.template_match = lambda *a, **k: None
-        messages = list(host._repair_one(_REPAIR_CFG, name_y=200,
+        messages = list(host._repair_one(name_y=200,
                                          need_speed=False))
         self.assertNotIn("[手入] 已开工", messages)
         self.assertEqual(host.events, [])
@@ -393,7 +393,7 @@ class LedgerAggregationTests(unittest.TestCase):
                                        ("264", "429", "429", "198"))}
         host.config = {"repair": _REPAIR_CFG}
         host.device = _RepairFakeMaa(tokens)
-        list(host._repair_one(_REPAIR_CFG, name_y=200, need_speed=True))
+        list(host._repair_one(name_y=200, need_speed=True))
 
         claimed_id = self.store.record_event("task_rewards.claimed",
                                              {"tab": "日常"})
@@ -571,14 +571,14 @@ class _FlowHost(RepairMixin):
         self.current_location = dest
         yield f"nav {dest}"
 
-    def _open_select_screen(self, cfg):
+    def _repair_open_select_screen(self):
         return True
 
     def record_event(self, event_type, **payload):
         self.events.append((event_type, payload))
         return len(self.events)
 
-    def _repair_one(self, cfg, name_y, need_speed):
+    def _repair_one(self, name_y, need_speed):
         self.speed_calls.append(need_speed)
         yield "[手入] 已开工"
         return True
@@ -627,7 +627,7 @@ class SpeedupDecisionTests(unittest.TestCase):
     def test_stamp_no_longer_junk(self):
         host = _FlowHost([("五虎退", 200), ("中伤", 195), ("乱码@#", 250)],
                          [("三之一", 200)])
-        rows, junk = host._scan_page(_FLOW_REPAIR_CFG)
+        rows, junk = host._repair_scan_page()
         self.assertNotIn("中伤", junk)
         self.assertIn("乱码@#", junk)
         self.assertEqual(rows[0]["injury"], "中伤")

@@ -181,12 +181,12 @@ def test_repair_queue_requires_new_target_entry():
 @pytest.mark.parametrize("outcome", [None, False])
 def test_repair_does_not_claim_start_or_record_cost_on_unknown_result(monkeypatch, outcome):
     from test_flow_resource_changes import _Host, _RepairFakeMaa, _REPAIR_CFG
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     monkeypatch.setattr(game_state, "begin_operation", Mock(return_value=boundary()))
     monkeypatch.setattr(game_state, "confirm_operation", Mock(return_value=outcome))
     host = _Host({"repair": _REPAIR_CFG})
     host.device = _RepairFakeMaa({})
-    messages = list(host._repair_one(_REPAIR_CFG, 200, False))
+    messages = list(host._repair_one(200, False))
     assert not any("已开工" in message for message in messages)
     assert host.events == []
 

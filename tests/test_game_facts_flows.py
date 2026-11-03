@@ -33,7 +33,7 @@ def test_repair_json_decision_ignores_missing_stamp(monkeypatch):
     """JSON 确认有伤就按 JSON 决策：画面没读到章不影响中伤/真轻伤烧符；
     hp≥90% 的擦伤（数据分档最细也是轻伤）不烧符，满血整行跳过"""
     from test_flow_resource_changes import _FlowHost
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     for hp, speed, injury in [(20, True, "中伤"), (40, True, "轻伤"),
                               (44, False, None), (45, None, None)]:
         host = _FlowHost([("五虎退", 200)], [("三之一", 200)])
@@ -55,7 +55,7 @@ def test_repair_json_decision_ignores_missing_stamp(monkeypatch):
 def test_repair_json_overrides_conflicting_stamp(monkeypatch):
     """章与 JSON 冲突时按 JSON 决策（章只是旁证，记日志不翻案）"""
     from test_flow_resource_changes import _FlowHost
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     # 画面读到中伤章，但 JSON 血量只是轻伤：按轻伤决策记档
     host = _FlowHost([("五虎退", 200), ("中伤", 195)], [("三之一", 200)])
     host._repair_game_facts = Mock(return_value=repair_state(40))
@@ -69,7 +69,7 @@ def test_repair_json_overrides_conflicting_stamp(monkeypatch):
 def test_repair_matching_stamp_stays_quiet(monkeypatch):
     """章与 JSON 一致时不唠叨旁证日志"""
     from test_flow_resource_changes import _FlowHost
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     host = _FlowHost([("五虎退", 200), ("轻伤", 198)], [("三之一", 200)])
     host._repair_game_facts = Mock(return_value=repair_state(40))
     messages = list(host.repair_stream())
@@ -79,7 +79,7 @@ def test_repair_matching_stamp_stays_quiet(monkeypatch):
 
 def test_json_does_not_bypass_repair_blacklist(monkeypatch):
     from test_flow_resource_changes import _FlowHost
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     host = _FlowHost([("五虎退", 200)], [("三之一", 200)])
     host._repair_game_facts = Mock(return_value=repair_state())
     list(host.repair_stream(blacklist=["五虎退"]))
@@ -88,7 +88,7 @@ def test_json_does_not_bypass_repair_blacklist(monkeypatch):
 
 def test_ambiguous_repair_row_is_reported_without_claiming_complete(monkeypatch):
     from test_flow_resource_changes import _FlowHost
-    monkeypatch.setattr("touken.flows.repair.time.sleep", lambda _: None)
+    monkeypatch.setattr("touken.flows.repair_cn.time.sleep", lambda _: None)
     host = _FlowHost([("五虎退", 200)], [])
     host._repair_game_facts = Mock(return_value=repair_state(twin=True))
     messages = list(host.repair_stream())
