@@ -100,7 +100,7 @@ def test_compose_return_page_alone_never_overrides_game_result(monkeypatch, outc
 @pytest.mark.parametrize("outcome", [True, False])
 def test_reward_game_result_overrides_visual_and_supplies_amount(monkeypatch, outcome):
     from test_flow_resource_changes import _RewardsHost, _ClaimFakeMaa
-    from touken.flows import rewards as module
+    from touken.flows import task_rewards_cn as module
     device = _ClaimFakeMaa()
     device.stale_dismissed = True
     host = _RewardsHost(device)

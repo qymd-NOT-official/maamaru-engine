@@ -4,7 +4,8 @@ import time
 import pytest
 
 from touken import game_state as gs
-from touken.flows import rewards as module
+from touken.flows import task_rewards_cn as module
+from touken.flows.rewards import RewardsMixin
 from touken.device_adapter import Point
 
 NOW = 1_000_000.0
@@ -85,7 +86,7 @@ class _FakeMaa:
         return True
 
 
-class _Host(module.RewardsMixin):
+class _Host(RewardsMixin):
     """claim_task_rewards_stream 最小宿主（仿 test_flow_resource_changes）"""
 
     def __init__(self, device, tabs=("日常",)):
