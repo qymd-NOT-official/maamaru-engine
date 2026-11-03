@@ -140,7 +140,7 @@ def test_known_list_results_and_order_do_not_read_stamps():
 
 
 def test_offer_reads_only_the_new_matching_response(monkeypatch):
-    from touken.flows import practice as module
+    from touken.flows import practice_cn as module
     host = PracticeMixin()
     host.device = Mock()
     host.device.ocr.return_value = Point(640,20)
@@ -234,7 +234,7 @@ def test_furnace_states_follow_deadlines_and_changes_invalidate_old_slots():
 
 
 def test_current_battle_receipt_precedes_screen_result(monkeypatch):
-    from touken.flows import practice as module
+    from touken.flows import practice_cn as module
     host=PracticeMixin()
     host.device=Mock()
     host.device.ocr.return_value=Point(640,20)
