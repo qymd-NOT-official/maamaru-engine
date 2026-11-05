@@ -1355,20 +1355,6 @@ const caption = computed(() => {
 
       <template v-if="!dailySettings">
       <p v-if="shortfallText" class="tl-shortfall">{{ shortfallText }}</p>
-      <section v-if="data.workflow_active" class="tl-booking" aria-label="正在执行的任务流">
-        <strong>正在执行 · {{ data.workflow_active.name }}</strong>
-        <ol class="tl-flow-steps">
-          <li v-for="(step, index) in data.workflow_active.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
-        </ol>
-      </section>
-      <section v-for="waiting in data.workflow_waits || []" :key="waiting.id" class="tl-booking" :aria-label="`${waiting.name}的后续安排`">
-        <strong>{{ waiting.name }}</strong>
-        <p class="tl-booking-message">{{ waiting.status === 'waiting' ? `等待至 ${clockAt(waiting.wake_at)}；到点排队继续，其他任务可以开工。` : waiting.reason || '正在继续后面的步骤' }}</p>
-        <ol v-if="waiting.steps.length" class="tl-flow-steps">
-          <li v-for="(step, index) in waiting.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
-        </ol>
-        <button v-if="waiting.status === 'waiting' || waiting.status === 'interrupted'" type="button" class="tl-booking-link" @click="cancelWorkflowWait(waiting.id)">取消后续步骤</button>
-      </section>
       <section class="tl-booking" aria-label="今日安排">
         <div class="tl-booking-head">
           <div>
@@ -1456,6 +1442,20 @@ const caption = computed(() => {
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
       </template>
+      <section v-if="data.workflow_active" class="tl-booking" aria-label="正在执行的任务流">
+        <strong>正在执行 · {{ data.workflow_active.name }}</strong>
+        <ol class="tl-flow-steps">
+          <li v-for="(step, index) in data.workflow_active.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+      </section>
+      <section v-for="waiting in data.workflow_waits || []" :key="waiting.id" class="tl-booking" :aria-label="`${waiting.name}的后续安排`">
+        <strong>{{ waiting.name }}</strong>
+        <p class="tl-booking-message">{{ waiting.status === 'waiting' ? `等待至 ${clockAt(waiting.wake_at)}；到点排队继续，其他任务可以开工。` : waiting.reason || '正在继续后面的步骤' }}</p>
+        <ol v-if="waiting.steps.length" class="tl-flow-steps">
+          <li v-for="(step, index) in waiting.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+        <button v-if="waiting.status === 'waiting' || waiting.status === 'interrupted'" type="button" class="tl-booking-link" @click="cancelWorkflowWait(waiting.id)">取消后续步骤</button>
+      </section>
       <section v-if="data.workflow_breakpoint" class="tl-booking" :aria-label="`${data.workflow_breakpoint.name}的翻车断点`">
         <strong>{{ data.workflow_breakpoint.name }} · 断点续跑</strong>
         <p class="tl-booking-message">上次在「{{ data.workflow_breakpoint.failed_label }}」翻车停住，后面的块没跑。修好现场（比如重启模拟器）后可以从这里接着来。</p>
