@@ -526,6 +526,26 @@ async function cancelWorkflowWait(id: string) {
   }
 }
 
+async function resumeWorkflowBreakpoint() {
+  try {
+    await api.resumeWorkflowBreakpoint()
+    planMessage.value = '已从翻车处续跑，去当前任务看进度。'
+    await load()
+  } catch (e) {
+    planMessage.value = (e as Error).message
+  }
+}
+
+async function dismissWorkflowBreakpoint() {
+  try {
+    await api.dismissWorkflowBreakpoint()
+    planMessage.value = '已驳回断点，这份任务流下次从头跑。'
+    await load()
+  } catch (e) {
+    planMessage.value = (e as Error).message
+  }
+}
+
 /** 按推荐安排 = 把建议块填进草稿等确认，不直接保存 */
 function fillRecommended() {
   editedBlockIndex.value = null
@@ -1436,6 +1456,17 @@ const caption = computed(() => {
         <p v-if="conductorMessage" class="tl-booking-message" role="status">{{ conductorMessage }}</p>
       </section>
       </template>
+      <section v-if="data.workflow_breakpoint" class="tl-booking" :aria-label="`${data.workflow_breakpoint.name}的翻车断点`">
+        <strong>{{ data.workflow_breakpoint.name }} · 断点续跑</strong>
+        <p class="tl-booking-message">上次在「{{ data.workflow_breakpoint.failed_label }}」翻车停住，后面的块没跑。修好现场（比如重启模拟器）后可以从这里接着来。</p>
+        <ol v-if="data.workflow_breakpoint.steps.length" class="tl-flow-steps">
+          <li v-for="(step, index) in data.workflow_breakpoint.steps" :key="index"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : step.at != null ? clockAt(step.at) : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+        <div class="tl-booking-actions">
+          <button type="button" class="tl-booking-link" @click="resumeWorkflowBreakpoint">从翻车处续跑</button>
+          <button type="button" class="tl-booking-link" @click="dismissWorkflowBreakpoint">不用了</button>
+        </div>
+      </section>
       <template v-if="dailySettings">
         <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" :data-raid-recovery="block.run_id" tabindex="-1" class="tl-expedition-help-note tl-raid-recovery">
           <strong>联队战中断了 · 已完成 {{ block.recovery!.completed }}/{{ block.runs }} 圈</strong>

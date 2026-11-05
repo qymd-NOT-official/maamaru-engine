@@ -43,6 +43,7 @@ SUSPEND_GAP_SEC = 60
 # 工人进程约定退出码：玩法安全中止 / 识别引擎连续超时后自我了断
 EXIT_FLOW_ABORTED = 42
 EXIT_ENGINE_DEAD = 43
+EXIT_WORKFLOW_BREAKPOINT = 45
 
 
 def register_script(name: str, label: str, desc: str,
@@ -181,6 +182,11 @@ class ScriptRunner:
                 self._emit(run_id, script_name, msg)
                 return None
 
+            if script_name == "workflow" and not (params or {}).get("workflow_resume"):
+                # 用户主动从头跑同一条任务流 = 旧翻车断点作废
+                from .workflow_breakpoint import clear as clear_breakpoint
+                clear_breakpoint((params or {}).get("workflow_id"))
+
             threading.Thread(target=self._pump,
                              args=(self._proc, run_id, script_name, (self._current_workflow or {}).get("name")),
                              daemon=True, name=f"worker-pump-{run_id}").start()
@@ -249,6 +255,19 @@ class ScriptRunner:
                          payload["resume"], workflow_name or "时间表任务", script=script_name)
                     pause_cancelled = not pause_saved
                     continue
+                if script_name == "workflow" and msg.startswith("@@MAAMARU_WORKFLOW_BREAKPOINT@@"):
+                    from .workflow_breakpoint import save as save_breakpoint
+                    payload = json.loads(msg[len("@@MAAMARU_WORKFLOW_BREAKPOINT@@"):])
+                    bp_params = payload.get("params") or {}
+                    if save_breakpoint(run_id, bp_params.get("workflow_id"),
+                                       payload.get("config_path"), bp_params,
+                                       payload.get("resume"), payload.get("failed_label")):
+                        note = (f"[面板] 任务流在「{payload.get('failed_label')}」翻车停住，"
+                                "断点已记录；修好现场（比如重启模拟器）后可在今日日程从断点续跑")
+                        store.append(run_id, script_name, note)
+                        self._emit(run_id, script_name, note)
+                        print(note, flush=True)
+                    continue
                 self._last_output = time.time()
                 store.append(run_id, script_name, msg)
                 self._emit(run_id, script_name, msg)
@@ -278,6 +297,8 @@ class ScriptRunner:
         elif rc == EXIT_ENGINE_DEAD:
             final = (f"[脚本] 识别引擎连续超时，工人进程自我了断 — run {run_id}。"
                      "建议重启模拟器后再跑")
+        elif rc == EXIT_WORKFLOW_BREAKPOINT:
+            final = f"[脚本] 任务流翻车停住，断点已记录，修好现场后可在今日日程续跑 — run {run_id}"
         else:
             final = f"[脚本] 工人进程异常退出（代码 {rc}）— run {run_id}"
         status = ("stopped" if stop_reason == "user" else

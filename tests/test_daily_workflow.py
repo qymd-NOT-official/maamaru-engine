@@ -245,7 +245,9 @@ class DailyWorkflowTests(unittest.TestCase):
                 yield "[fake] 回不去本丸"
 
         agent = LostAgent({"signin_stream": ["[fake] ✗ 失败"]})
-        self.run_plan([_node("signin")], after="sleep", agent=agent)
+        # 现场失控收摊会抛 WorkflowFailed（断点交给面板续跑），且不许下班
+        with self.assertRaises(workflow.WorkflowFailed):
+            self.run_plan([_node("signin")], after="sleep", agent=agent)
         self.assertFalse(any(c[0] == "logout_stream" for c in agent.calls))
 
     def test_daily_uses_own_practice_settings_expedition_and_snapshot(self):
@@ -349,11 +351,14 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_daily_login_failure_and_update_gate_stop_even_with_continue(self):
         agent = _FakeAgent()
         agent._popup_sweep = lambda *a, **kw: False
-        self.run_plan([_node("login", "continue"), _node("signin")], "sleep", agent, True)
+        # 翻车收摊会抛 WorkflowFailed（断点交给面板续跑），不许漏到调用方
+        with self.assertRaises(workflow.WorkflowFailed):
+            self.run_plan([_node("login", "continue"), _node("signin")], "sleep", agent, True)
         self.assertFalse(any(c[0] in ("signin_stream", "logout_stream") for c in agent.calls))
         agent = _FakeAgent()
         agent._daily_update_gate = lambda: iter(())
-        self.run_plan([_node("signin", "continue")], "sleep", agent, True)
+        with self.assertRaises(workflow.WorkflowFailed):
+            self.run_plan([_node("signin", "continue")], "sleep", agent, True)
         self.assertFalse(any(c[0] in ("signin_stream", "logout_stream") for c in agent.calls))
 
     def test_legacy_daily_after_overrides_conflicting_old_logout_config(self):

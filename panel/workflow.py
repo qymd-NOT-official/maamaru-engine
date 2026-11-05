@@ -581,6 +581,14 @@ class WorkflowPaused(Exception):
         super().__init__("任务流正在等待，到点再继续")
 
 
+class WorkflowFailed(Exception):
+    """任务流翻车收摊：断点落盘，玩家修好现场后可从翻车处续跑。"""
+    def __init__(self, resume, failed_label):
+        self.resume = resume
+        self.failed_label = failed_label
+        super().__init__(f"任务流在「{failed_label}」翻车停住")
+
+
 _COUNT_KEYS = {'raid': ('runs', 'rounds'), 'yosari': ('runs', 'loops'),
                'sortie': ('runs', 'loops'), 'edocastle': ('runs', 'max_runs'),
                'hanafuda': ('runs', 'max_runs'), 'osaka': ('runs', 'floors'),
@@ -634,6 +642,9 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
     if type(start) is not int or not 0 <= start <= len(plan):
         raise WorkflowError("续跑位置无效，请重新安排")
     expedition_resume = bool(resume and resume.get("reason") == "expedition")
+    failure_resume = bool(resume and resume.get("reason") == "failure")
+    if failure_resume and start >= len(plan):
+        raise WorkflowError("续跑位置无效，请重新安排")
     remaining = (resume or {}).get("remaining_runs")
     node_at_start = plan[start] if start < len(plan) else {'type':'', 'params':{}}
     kind = node_at_start['type']
@@ -650,12 +661,12 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
     counted = bool(count_keys) and type(remaining) is int and minimum <= remaining <= target
     valid_expedition = defer_expedition and expedition_resume and (before_node or after_steps or counted)
     if resume and (resume.get("nodes") != plan or len(report) != start
-                   or (not valid_expedition and (expedition_resume or start == 0
+                   or (not valid_expedition and not failure_resume and (expedition_resume or start == 0
                        or plan[start - 1]["type"] != "wait_until"))):
         raise WorkflowError("等待记录与任务流不一致，不能猜着续跑，请重新安排")
-    if resume and report and not expedition_resume:
+    if resume and report and not expedition_resume and not failure_resume:
         report[-1] = (report[-1][0], "✓ 等待结束，已继续")
-    if expedition_resume:
+    if expedition_resume or failure_resume:
         ok, _ = yield from _run_node(NODE_REGISTRY["boot_emulator"], None, {}, config_path)
         if not ok:
             raise WorkflowError("续跑前模拟器未就绪，停止")
@@ -676,12 +687,13 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
 
     yield "【工作流】正在连接游戏（创建 Agent）..."
     agent = make_agent(config_path)
-    if expedition_resume:
+    if expedition_resume or failure_resume:
         ok, _ = yield from _run_node(NODE_REGISTRY["login"], agent, {}, config_path)
         if not ok:
             raise WorkflowError("续跑前登录未确认，停止")
     agent._workflow_forge_ran = bool((resume or {}).get("forge_ran", False))
     completed = True
+    failed_breakpoint = None
 
     for i in range(start, len(plan)):
         node = plan[i]
@@ -704,6 +716,7 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
                 report.append((defn["label"], "✗ 游戏更新未完成"))
                 report.extend(_skipped_entries(plan[i + 1:]))
                 completed = False
+                failed_breakpoint = {"index": i, "label": defn["label"]}
                 break
             if defn.get("daily_run"):
                 defn = {**defn, "run": defn["daily_run"]}
@@ -775,6 +788,10 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
             else:
                 yield (f"【工作流】这块翻车了且回本丸失败，现场失控，"
                        f"剩余 {len(plan) - i - 1} 块不跑")
+            # 远征接班有自己的续跑机制、保留现场要给玩家看：这两类不落断点；
+            # 其余翻车（含登录失败、游戏已关）记断点，修好现场后可从这块续跑。
+            if not interrupted and getattr(agent, '_preserve_game_scene', False) is not True:
+                failed_breakpoint = {"index": i, "label": defn["label"]}
             report.extend(_skipped_entries(plan[i + 1:]))
             _flush_report(report, finished=False)
             break
@@ -826,4 +843,13 @@ def run_workflow(config_path, nodes, make_agent, after="none", daily_mode=False,
         ok, detail = yield from _run_node({"run": sleep_only}, agent, {}, config_path)
         report.append(("电脑休眠", detail or ("✓" if ok else "✗")))
         _flush_report(report, finished=True)
+    if failed_breakpoint is not None:
+        # 翻车块和 ⏭ 块不进续跑报告：续跑时从翻车块重跑，report 长度必须等于
+        # next_index（与等待续跑同款不变式）。
+        idx = failed_breakpoint["index"]
+        raise WorkflowFailed(
+            {"nodes": plan, "next_index": idx, "report": report[:idx],
+             "game_closed": game_closed, "reason": "failure",
+             "forge_ran": bool(getattr(agent, "_workflow_forge_ran", False))},
+            failed_breakpoint["label"])
     return completed

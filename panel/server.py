@@ -1937,6 +1937,34 @@ async def api_cancel_workflow_wait(root: str):
     return {"ok": cancelled}
 
 
+@app.post("/api/workflows/breakpoint/resume")
+async def api_resume_workflow_breakpoint():
+    if _ledger_mode():
+        return JSONResponse(
+            {"ok": False, "reason": "纯净账房模式不连接游戏"},
+            status_code=403,
+        )
+    from .workflow_breakpoint import load as load_breakpoint, clear as clear_breakpoint
+    bp = load_breakpoint()
+    if bp is None:
+        return JSONResponse({"ok": False, "reason": "没有可续跑的断点"}, status_code=404)
+    runner = get_runner()
+    if runner.is_running:
+        return JSONResponse({"ok": False, "reason": "有任务正在运行，等它跑完再续"}, status_code=409)
+    params = {**bp["params"], "workflow_resume": bp["resume"]}
+    run_id = runner.start("workflow", bp["config_path"], params)
+    if run_id is None:
+        return JSONResponse({"ok": False, "reason": "续跑启动失败"}, status_code=400)
+    clear_breakpoint()
+    return {"ok": True, "run_id": run_id, "workflow": runner.current_workflow}
+
+
+@app.delete("/api/workflows/breakpoint")
+async def api_dismiss_workflow_breakpoint():
+    from .workflow_breakpoint import clear as clear_breakpoint
+    return {"ok": clear_breakpoint()}
+
+
 # ── API：预设编队（玩法出阵前一键覆盖某部队）──
 
 def _formation_from_body(fid: str, body: dict) -> dict:
@@ -2377,6 +2405,24 @@ def _day_timeline_payload():
     from .workflow_waits import load as load_waits, projection as workflow_projection, public_records
     waits = load_waits()
     timeline["workflow_waits"] = public_records()
+    from .workflow_breakpoint import load as load_breakpoint
+    breakpoint_record = load_breakpoint()
+    timeline["workflow_breakpoint"] = None
+    if breakpoint_record:
+        bp_resume = breakpoint_record.get("resume") or {}
+        try:
+            bp_nodes = _workflow.normalize_nodes(
+                bp_resume.get("nodes", []))[bp_resume.get("next_index", 0):]
+            bp_steps = workflow_projection({"nodes": bp_nodes}, planning_now)
+        except (ValueError, TypeError, KeyError):
+            bp_steps = []
+        timeline["workflow_breakpoint"] = {
+            "workflow_id": breakpoint_record.get("workflow_id"),
+            "name": (_workflow.find_preset(breakpoint_record.get("workflow_id") or "")
+                     or {}).get("name", "任务流"),
+            "failed_label": breakpoint_record.get("failed_label"),
+            "saved_at": breakpoint_record.get("saved_at"),
+            "steps": bp_steps}
     snapshot = getattr(runner, "workflow_snapshot", None)
     timeline["workflow_active"] = None
     if runner.is_running and runner.current_workflow and isinstance(snapshot, dict) and snapshot.get("nodes"):

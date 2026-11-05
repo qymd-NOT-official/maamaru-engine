@@ -241,6 +241,21 @@ class WorkflowApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         self.assertEqual([p["id"] for p in self.client.get("/api/workflows").json()["presets"]], [workflow.DAILY_PRESET_ID])
 
+    def test_breakpoint_endpoints(self):
+        """断点 API：没断点 404；有断点可驳回。续跑启动会开子进程，不测 200 路径。"""
+        from panel import workflow_breakpoint as wb
+        bp_path = Path(self._tmp.name) / "workflow_breakpoint.json"
+        with patch.object(wb, "PATH", bp_path):
+            r = self.client.post("/api/workflows/breakpoint/resume")
+            self.assertEqual(r.status_code, 404)
+            self.assertFalse(self.client.delete("/api/workflows/breakpoint").json()["ok"])
+            wb.save("r", "wf-1", "c", {}, {
+                "nodes": [{"type": "signin", "params": {}}, {"type": "naihanka", "params": {}}],
+                "next_index": 1, "report": [["签到", "✓"]], "reason": "failure"}, "内番")
+            r = self.client.delete("/api/workflows/breakpoint")
+            self.assertTrue(r.json()["ok"])
+            self.assertIsNone(wb.load())
+
 
 class WorkflowRunnerTests(unittest.TestCase):
     def setUp(self):
@@ -311,7 +326,7 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertFalse(self._latest_report()['all_green'])
 
     def test_failure_stops_and_marks_rest_skipped(self):
-        """翻车 + 回本丸失败 = 现场失控：收摊，后续 ⏭ 跳过。"""
+        """翻车 + 回本丸失败 = 现场失控：收摊，后续 ⏭ 跳过，并抛出翻车断点。"""
 
         class LostAgent(_FakeAgent):
             """导航回不去本丸的假 Agent（游戏真的失控了）。"""
@@ -329,8 +344,12 @@ class WorkflowRunnerTests(unittest.TestCase):
             "claim_free_gift_stream": ["[万屋] 未找到暖心礼包，停"],
             "naihanka_stream": ["[内番] 不该跑到这"],
         })
-        messages, agent, made = self._run(
-            [_node("signin"), _node("free_gift"), _node("naihanka")], agent)
+        nodes = [_node("signin"), _node("free_gift"), _node("naihanka")]
+        messages = []
+        with self.assertRaises(workflow.WorkflowFailed) as ctx:
+            for message in workflow.run_workflow("fake-config.json", nodes,
+                                                 lambda _: agent):
+                messages.append(message)
         ran = [c[0] for c in agent.calls if c[0].endswith("_stream")]
         self.assertIn("claim_free_gift_stream", ran)
         self.assertNotIn("naihanka_stream", ran)
@@ -344,6 +363,13 @@ class WorkflowRunnerTests(unittest.TestCase):
         self.assertFalse(report["all_green"])
         # ⏭ 不算翻车项
         self.assertFalse(any("内番" in m and "翻车项" in m for m in messages))
+        # 断点：从翻车块续跑；报告只含已跑完的块（len == next_index 不变式）
+        exc = ctx.exception
+        self.assertEqual(exc.failed_label, "万屋领免费礼包")
+        self.assertEqual(exc.resume["reason"], "failure")
+        self.assertEqual(exc.resume["next_index"], 1)
+        self.assertEqual([r[0] for r in exc.resume["report"]], ["签到"])
+        self.assertEqual(exc.resume["nodes"], workflow.normalize_nodes(nodes))
 
     def test_failure_recovers_to_honmaru_and_continues(self):
         """翻车但回得去本丸 = 现场没失控：这块照记 ✗，后续积木继续跑。
@@ -386,6 +412,68 @@ class WorkflowRunnerTests(unittest.TestCase):
             {"name": "内番", "status": "✓"},
         ])
         self.assertFalse(report["all_green"])
+
+    def test_failure_resume_reruns_from_failed_block(self):
+        """翻车断点续跑：先 boot+login 前导，再从翻车块重跑，报告接续不造假。"""
+        import touken.emulator as emulator
+
+        nodes = [_node("signin"), _node("free_gift"), _node("naihanka")]
+        resume = {"nodes": workflow.normalize_nodes(nodes), "next_index": 1,
+                  "report": [["签到", "✓"]], "game_closed": False,
+                  "reason": "failure", "forge_ran": False}
+        config_path = str(Path(self._tmp.name) / "touken.json")
+        Path(config_path).write_text(
+            json.dumps({"adb_path": "adb.exe", "adb_address": "127.0.0.1:1"}),
+            encoding="utf-8")
+        agent = _FakeAgent({
+            "claim_free_gift_stream": ["[万屋] ✓ 礼包到手"],
+            "naihanka_stream": ["[内番] ✓ 已安排上工"],
+        })
+        boots = []
+        with patch.object(emulator, "ensure_emulator",
+                          lambda *a, **k: (boots.append(1) or True)):
+            messages = list(workflow.run_workflow(config_path, nodes,
+                                                  lambda _: agent, resume=resume))
+        self.assertEqual(boots, [1])  # 续跑前先确认模拟器就绪
+        self.assertTrue(any(c[0] == "login" for c in agent.calls))  # 前导登录
+        ran = [c[0] for c in agent.calls if c[0].endswith("_stream")]
+        self.assertNotIn("signin_stream", ran)        # 已完成的块不重跑
+        self.assertIn("claim_free_gift_stream", ran)  # 翻车块重跑
+        self.assertIn("naihanka_stream", ran)         # 后续块照跑
+        report = self._latest_report()
+        self.assertEqual([s["name"] for s in report["steps"]],
+                         ["签到", "万屋领免费礼包", "内番"])
+        # 失败续跑不改写上一块的状态（「等待结束」只属于定时等待续跑）
+        self.assertEqual(report["steps"][0]["status"], "✓")
+        self.assertTrue(report["all_green"])
+
+    def test_failure_resume_with_tampered_report_is_rejected(self):
+        nodes = [_node("signin"), _node("naihanka")]
+        bad = {"nodes": workflow.normalize_nodes(nodes), "next_index": 1,
+               "report": [], "reason": "failure"}  # report 长度不符
+        with self.assertRaises(workflow.WorkflowError):
+            list(workflow.run_workflow("fake.json", nodes,
+                                       lambda _: _FakeAgent(), resume=bad))
+
+    def test_failure_resume_past_end_is_rejected(self):
+        nodes = [_node("signin")]
+        bad = {"nodes": workflow.normalize_nodes(nodes), "next_index": 1,
+               "report": [["签到", "✓"]], "reason": "failure"}  # 没有可重跑的块
+        with self.assertRaises(workflow.WorkflowError):
+            list(workflow.run_workflow("fake.json", nodes,
+                                       lambda _: _FakeAgent(), resume=bad))
+
+    def test_interrupted_takeover_does_not_raise_breakpoint(self):
+        """远征接班有自己的续跑机制，翻车收摊时不再落断点。"""
+        agent = _FakeAgent({
+            "signin_stream": ["[签到] ✓ 签到了"],
+            "claim_free_gift_stream": ["🚩远征排班请求接管"],
+        })
+        # 接班标记会让该块计翻车收摊，但不许抛 WorkflowFailed
+        messages, agent, _ = self._run(
+            [_node("signin"), _node("free_gift"), _node("naihanka")], agent)
+        self.assertTrue(any("远征接班" in m for m in messages))
+        self.assertFalse(any(c[0] == "naihanka_stream" for c in agent.calls))
 
     def test_exception_in_node_counts_as_failure(self):
         agent = _FakeAgent({
@@ -445,10 +533,18 @@ class WorkflowRunnerTests(unittest.TestCase):
                 self.calls.append(("navigate_to_stream", (target,), {}))
                 yield "[fake] 游戏没起来，导航无果"
 
-        messages, agent, made = self._run(
-            [_node("login"), _node("signin")], NoStartAgent())
+        agent = NoStartAgent()
+        made = []
+        messages = []
+        with self.assertRaises(workflow.WorkflowFailed) as ctx:
+            for message in workflow.run_workflow(
+                    "fake-config.json", [_node("login"), _node("signin")],
+                    lambda path: (made.append(path) or agent)):
+                messages.append(message)
         # agent 会建（进节点后才确认游戏没启动），但登录块内部拦下、签到没跑
         self.assertEqual(made, ["fake-config.json"])
+        self.assertEqual(ctx.exception.failed_label, "登录游戏")
+        self.assertEqual(ctx.exception.resume["next_index"], 0)
         report = self._latest_report()
         self.assertTrue(report["steps"][0]["status"].startswith("✗"))
         self.assertEqual(report["steps"][1]["status"], "⏭ 跳过（翻车即停）")
@@ -554,7 +650,10 @@ class WorkflowRunnerTests(unittest.TestCase):
                      patch.object(emulator, "ensure_emulator", boot), \
                      patch.dict(workflow.NODE_REGISTRY, {"raid": raid_node}):
                     if failed:
-                        with self.assertRaises(FlowAborted):
+                        # boot 翻车走「模拟器没就绪」早退（return False → FlowAborted）；
+                        # 游戏/登录/扫地/更新翻车是登录块失控，抛翻车断点（可续跑）
+                        expected = FlowAborted if failed == "boot" else workflow.WorkflowFailed
+                        with self.assertRaises(expected):
                             list(server._build_workflow(str(config_path), params))
                         self.assertNotIn("raid", calls)
                         self.assertFalse(self._latest_report()["all_green"])

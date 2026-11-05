@@ -1598,6 +1598,7 @@ export interface ScheduledGameplayOption {
 export interface DayTimeline {
   workflow_active?: { name: string; steps: WorkflowProjectionStep[] } | null
   workflow_waits?: Array<{ id: string; name: string; wake_at: number; status: string; reason?: string; steps: WorkflowProjectionStep[] }>
+  workflow_breakpoint?: { workflow_id: string; name: string; failed_label: string; saved_at: number; steps: WorkflowProjectionStep[] } | null
   gameplay_options?: ScheduledGameplayOption[]
   now: number
   day_start: number

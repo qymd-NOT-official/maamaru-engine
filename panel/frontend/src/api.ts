@@ -116,6 +116,8 @@ export const api = {
   stopExpeditions: () => request<{ ok: boolean; message: string }>('/api/expedition-stop', { method: 'POST' }),
   workflows: () => request<{ presets: WorkflowPreset[] }>('/api/workflows'),
   cancelWorkflowWait: (id: string) => request<{ ok: boolean }>(`/api/workflows/waits/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  resumeWorkflowBreakpoint: () => request<{ ok: boolean; run_id?: string; reason?: string }>('/api/workflows/breakpoint/resume', { method: 'POST' }),
+  dismissWorkflowBreakpoint: () => request<{ ok: boolean }>('/api/workflows/breakpoint', { method: 'DELETE' }),
   homeLayout: () => request<HomeLayout>('/api/home-layout'),
   saveHomeLayout: (order: string[], hidden: string[]) => request<{ ok: boolean; entries: HomeLayoutEntry[] }>('/api/home-layout', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order, hidden }),

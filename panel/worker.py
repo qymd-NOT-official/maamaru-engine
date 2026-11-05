@@ -69,7 +69,7 @@ def main():
     from . import server as _server  # noqa: F401
     from .script_runner import _SCRIPTS
     from touken.flow_control import FlowAborted
-    from .workflow import WorkflowPaused
+    from .workflow import WorkflowPaused, WorkflowFailed
     info = _SCRIPTS.get(script_name)
     if not info:
         print(f"[工人] 不认识的脚本: {script_name}", flush=True)
@@ -83,6 +83,12 @@ def main():
         print("@@MAAMARU_WORKFLOW_WAIT@@" + json.dumps({"params": params,
             "config_path": config_path, "wake_at": exc.wake_at, "resume": exc.resume}, ensure_ascii=False), flush=True)
         sys.exit(44)
+    except WorkflowFailed as exc:
+        # 翻车断点交给面板落盘；退出码 45 = 翻车收摊（不算跑完，也不是崩溃）
+        print("@@MAAMARU_WORKFLOW_BREAKPOINT@@" + json.dumps({"params": params,
+            "config_path": config_path, "resume": exc.resume,
+            "failed_label": exc.failed_label}, ensure_ascii=False), flush=True)
+        sys.exit(45)
     except FlowAborted as exc:
         print(f"[工人] 安全停止：{exc}", flush=True)
         sys.exit(42)
