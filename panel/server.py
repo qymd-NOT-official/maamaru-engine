@@ -1388,6 +1388,31 @@ register_script("jp-expedition", "日服远征",
                 hidden=True, server="jp")
 
 
+# 日服南瓜大作战：与国服南瓜共用公共循环（flows/pumpkin_loop.py），
+# 画面判定全走数据同步（板子状态/新刀差分），固定满编攻略队。
+# 画面素材标定前会明确报缺并停，绝不盲点。
+def _build_jp_pumpkin(config_path, params):
+    from touken import jp_pumpkin
+    return jp_pumpkin.run_script(config_path, params)
+
+
+register_script("jp-pumpkin", "日服南瓜",
+                "日服南瓜大作战：固定满编攻略队刷九宫格，板子翻没翻、掉了什么刀"
+                "全看数据同步，不认画面。需要数据同步在跑；"
+                "画面素材没标定前会报缺并停",
+                _build_jp_pumpkin,
+                params=[{"key": "team_no", "type": "select", "label": "部队",
+                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "difficulty", "type": "select", "label": "难度",
+                         "options": [["1", "初级"], ["2", "中级"], ["3", "上级"]],
+                         "default": "1"},
+                        {"key": "max_skips", "type": "number", "label": "更新手形预算",
+                         "default": 4,
+                         "help": "最多烧几枚更新手形开新板子，烧完收工"}],
+                hidden=True, server="jp")
+
+
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
 # 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
@@ -4401,7 +4426,7 @@ async def api_save_settings(request: Request, server: str = ""):
         extra = set(body) - allowed
         if extra == {"params"}:
             params = body.get("params")
-            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition"}:
+            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin"}:
                 raise HTTPException(400, "日服只能保存日服脚本的参数")
         elif extra:
             raise HTTPException(400, "日服暂不支持自动执行设置")

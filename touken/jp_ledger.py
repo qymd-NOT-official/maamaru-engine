@@ -80,11 +80,15 @@ class JpLedgerSession:
         self.stats = {"inventory.captured": 0, "training.captured": 0,
                       "forge.started": 0, "forge.collected": 0,
                       "resource.change": 0,
+                      "pumpkin.sheet_observed": 0, "training.newcomers": 0,
                       "skipped_encrypted": 0, "skipped_no_now": 0,
                       "dedup_snapshots": 0}
         self._last_resource: tuple | None = None
         self._last_roster_fp: tuple | None = None
         self._last_items = None
+        self._last_sheet = None
+        # 新刀差分的已知 serial 集合；None = 还没建立基线
+        self._known_serials: set | None = None
 
     def feed_all(self, transactions: list[Transaction]) -> dict:
         for tx in sorted(transactions, key=lambda t: t.ts):
@@ -170,6 +174,9 @@ class JpLedgerSession:
                 "acquired_at": _display_time(ts)}, self.script)
             stats["forge.collected"] += 1
 
+        self._feed_strike_sheet(payload, ts)
+        self._feed_newcomers(roster, ts)
+
         if path == "/forge" and tx.request_body:
             form = urllib.parse.parse_qs(
                 tx.request_body.decode("utf-8", errors="replace"))
@@ -194,6 +201,115 @@ class JpLedgerSession:
                     "note": f"锻刀 {cn_name} -{amount}",
                     "attribution": "confirmed"}, self.script)
                 stats["resource.change"] += 1
+
+
+    def _feed_strike_sheet(self, payload: dict, ts: float) -> None:
+        """九宫格活动（かぼちゃ大作戦）的板子状态观测。
+
+        /sally 等响应的 event.strike.sheet 是明文：每张 sheet 9 格
+        is_clear、小槌存量、奖励刀 id 全在里面——翻板判定以它为准，
+        不碰加密的 battle/battle。连续重复的板子状态去重。"""
+        event = payload.get("event")
+        if not isinstance(event, dict):
+            return
+        strike = event.get("strike")
+        if not isinstance(strike, dict):
+            return
+        sheets = strike.get("sheet")
+        if not isinstance(sheets, dict) or not sheets:
+            return
+        summary = {}
+        for key, sheet in sheets.items():
+            if not isinstance(sheet, dict):
+                continue
+            panels = sheet.get("panel")
+            if not isinstance(panels, list):
+                continue
+            cleared = sum(1 for p in panels
+                          if isinstance(p, dict) and p.get("is_clear"))
+            summary[str(key)] = {
+                "cleared": cleared,
+                "total": len(panels),
+                "is_full": bool(panels) and cleared == len(panels),
+                "count": sheet.get("count"),
+                "rest_item": sheet.get("rest_item"),
+                "max_rest_item": sheet.get("max_rest_item"),
+                "reward_id": sheet.get("reward_id"),
+                "silhouette": sheet.get("silhouette"),
+                "sheet_id": sheet.get("sheet_id"),
+            }
+        if not summary:
+            return
+        fingerprint = json.dumps(summary, sort_keys=True)
+        if fingerprint == self._last_sheet:
+            self.stats["dedup_snapshots"] += 1
+            return
+        self._last_sheet = fingerprint
+        _record(self.store, ts, "pumpkin.sheet_observed", {
+            "observed_at": _display_time(ts),
+            "source": self.script,
+            "sheets": summary,
+            "clear_panel": strike.get("clear_panel"),
+            "sheet_reward": strike.get("sheet_reward"),
+            "point": event.get("point"),
+        }, self.script)
+        self.stats["pumpkin.sheet_observed"] += 1
+
+    def _seed_known_serials(self) -> set | None:
+        """新刀差分的跨会话基线：账房里最近一份全量刀帐快照的 serial 集合。
+
+        没有基线（全新账房）返回 None——调用方把第一眼看到的刀帐当基线，
+        不补录历史。"""
+        try:
+            rows = self.store._conn().execute(
+                "SELECT payload FROM events WHERE event_type='training.captured' "
+                "ORDER BY ts DESC LIMIT 20").fetchall()
+        except Exception:
+            return None
+        for (raw,) in rows:
+            try:
+                data = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if data.get("roster_scope") != "full":
+                continue
+            serials = {int(s["serial_id"]) for s in data.get("swords") or []
+                       if s.get("serial_id")}
+            if serials:
+                return serials
+        return None
+
+    def _feed_newcomers(self, roster: list[dict], ts: float) -> None:
+        """刀帐差分录新刀：任何响应携带的刀帐里出现没见过的 serial = 新入手。
+
+        掉落照单全收（一把不许漏）：战斗结算是密文读不了掉落 id，
+        但新刀一定出现在随后的刀帐快照里（/sally、/party/list 等都带）。
+        基线 = 账房最近全量快照 ∪ 本会话见过的所有 serial；
+        基线陈旧（快照后玩家手动收过刀）可能把老刀报成新刀——只影响
+        日志归属，不漏记，宁滥勿缺。"""
+        serials = {r["serial_id"] for r in roster if r.get("serial_id")}
+        if not serials:
+            return
+        if self._known_serials is None:
+            self._known_serials = self._seed_known_serials()
+            if self._known_serials is None:
+                self._known_serials = set(serials)
+                return
+        new = sorted(serials - self._known_serials)
+        self._known_serials |= serials
+        if not new:
+            return
+        by_serial = {r["serial_id"]: r for r in roster}
+        swords = [{"serial_id": s,
+                   "sword_id": by_serial[s].get("sword_id"),
+                   "name": by_serial[s].get("name")}
+                  for s in new]
+        _record(self.store, ts, "training.newcomers", {
+            "swords": swords,
+            "count": len(swords),
+            "observed_at": _display_time(ts),
+            "source": self.script}, self.script)
+        self.stats["training.newcomers"] += 1
 
 
 def import_transactions(store, transactions: list[Transaction],
