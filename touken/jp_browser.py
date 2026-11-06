@@ -19,6 +19,21 @@ class BrowserError(RuntimeError):
     """游戏页连接/画面异常；文案面向玩家，不含连接细节。"""
 
 
+_KICK_EXPRESSION = """\
+(function () {
+    try {
+        if (typeof main !== 'undefined' && main && typeof main.init === 'function') {
+            main.init();
+            return 'kicked';
+        }
+        return 'no-main';
+    } catch (e) {
+        return 'error';
+    }
+})()
+"""
+
+
 class JpBrowser:
     """一个日服游戏页的操作通道；恰好一个游戏页才允许连接。"""
 
@@ -159,6 +174,43 @@ class JpBrowser:
             last = view
             time.sleep(0.5)
         raise BrowserError('刷新后游戏画面尺寸一直不稳定，已停止；请人工查看浏览器')
+
+    def kick_startup(self) -> bool:
+        """游戏没起来时在 gadget 框架里补踹一脚启动链（main.init）。
+
+        刷新后 DMM 侧偶尔只加载了外壳、游戏初始化没被调用，画面永远停在
+        白页。本方法不动鼠标键盘，纯协议层调用：
+        返回 True = 游戏已在跑，或已成功补踹（随后会自己走音量注意→标题页）；
+        返回 False = gadget 框架缺失或加载失败（死壳），踹无可踹，
+        只能刷新页面重骰。"""
+        tree = self._call('Page.getFrameTree', timeout=8)['frameTree']
+        gadget_id = None
+        game_up = False
+        stack = [tree]
+        while stack:
+            node = stack.pop()
+            url = node['frame'].get('url', '')
+            # 游戏本体跑在 gadget 里的 webgl 子框架；它已经在了就是活着。
+            # 加载失败的框架 url 是 chrome-error://，不会匹配这两个特征，
+            # 自然落到「找不到 → False」；其余无关框架（统计挂件等）忽略。
+            if 'touken-ranbu.jp/webgl/' in url:
+                game_up = True
+            elif 'osapi.dmm.com/gadgets/' in url:
+                gadget_id = node['frame']['id']
+            stack.extend(node.get('childFrames') or [])
+        if game_up:
+            return True
+        if gadget_id is None:
+            return False
+        world = self._call('Page.createIsolatedWorld',
+                           {'frameId': gadget_id}, timeout=8)
+        result = self._call('Runtime.evaluate', {
+            'expression': _KICK_EXPRESSION,
+            'contextId': world['executionContextId'],
+            'returnByValue': True,
+        }, timeout=10)
+        value = (result.get('result') or {}).get('value')
+        return value == 'kicked'
 
     # ---- 画面与输入 ----
 

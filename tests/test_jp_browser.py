@@ -35,6 +35,13 @@ class FakeSocket:
             return {'cssLayoutViewport': dict(self.state['view'])}
         if method == 'Page.captureScreenshot':
             return {'data': _png_b64()}
+        if method == 'Page.getFrameTree':
+            return {'frameTree': self.state.get(
+                'frame_tree', {'frame': {'id': 'root', 'url': GAME['url']}})}
+        if method == 'Page.createIsolatedWorld':
+            return {'executionContextId': 7}
+        if method == 'Runtime.evaluate':
+            return {'result': {'value': self.state.get('kick_value', 'kicked')}}
         return {}
 
     def send(self, method, params=None):
@@ -246,3 +253,63 @@ def test_swipe_press_failure_surfaces_original_error(fake, monkeypatch):
     fake['sockets'][0].fail_on = 'mousePressed'
     with pytest.raises(jp_browser.BrowserError, match='连接已断开'):
         browser.swipe(0.2, 0.8, 0.8, 0.2)
+
+
+# ---- 白页自救：启动链踹醒（kick_startup） ----
+
+GADGET_TREE = {'frame': {'id': 'root', 'url': GAME['url']}, 'childFrames': [
+    {'frame': {'id': 'gadget1',
+               'url': 'https://osapi.dmm.com/gadgets/ifr?aid=825012'}},
+]}
+DEAD_TREE = {'frame': {'id': 'root', 'url': GAME['url']}, 'childFrames': [
+    {'frame': {'id': 'dead1', 'url': 'chrome-error://chromewebdata/'}},
+]}
+
+
+def test_kick_startup_evaluates_in_gadget_frame(fake):
+    fake['frame_tree'] = GADGET_TREE
+    browser = jp_browser.JpBrowser().connect()
+    assert browser.kick_startup() is True
+    socket = fake['sockets'][0]
+    worlds = [params for method, params in socket.calls
+              if method == 'Page.createIsolatedWorld']
+    evaluates = [params for method, params in socket.calls
+                 if method == 'Runtime.evaluate']
+    assert worlds == [{'frameId': 'gadget1'}]
+    assert len(evaluates) == 1 and evaluates[0]['contextId'] == 7
+    assert 'main.init' in evaluates[0]['expression']
+
+
+def test_kick_startup_false_when_gadget_missing(fake):
+    browser = jp_browser.JpBrowser().connect()   # 默认 frame_tree 只有根
+    assert browser.kick_startup() is False
+    socket = fake['sockets'][0]
+    assert not any(method == 'Runtime.evaluate' for method, _ in socket.calls)
+
+
+def test_kick_startup_false_when_gadget_is_error_shell(fake):
+    fake['frame_tree'] = DEAD_TREE
+    browser = jp_browser.JpBrowser().connect()
+    assert browser.kick_startup() is False
+
+
+def test_kick_startup_false_when_main_missing(fake):
+    fake['frame_tree'] = GADGET_TREE
+    fake['kick_value'] = 'no-main'
+    browser = jp_browser.JpBrowser().connect()
+    assert browser.kick_startup() is False
+
+
+def test_kick_startup_true_when_game_frame_already_up(fake):
+    """webgl 子框架已在 = 游戏活着：直接 True，不发 evaluate 不打扰它。"""
+    fake['frame_tree'] = {'frame': {'id': 'root', 'url': GAME['url']}, 'childFrames': [
+        {'frame': {'id': 'gadget1', 'url': 'https://osapi.dmm.com/gadgets/ifr?aid=825012'},
+         'childFrames': [
+             {'frame': {'id': 'webgl1',
+                        'url': 'https://www.touken-ranbu.jp/webgl/iframe?device=1'}},
+         ]},
+    ]}
+    browser = jp_browser.JpBrowser().connect()
+    assert browser.kick_startup() is True
+    socket = fake['sockets'][0]
+    assert not any(method == 'Runtime.evaluate' for method, _ in socket.calls)

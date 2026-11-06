@@ -89,11 +89,14 @@ def near_black(image, ceiling: int = 8) -> bool:
 
 
 def mostly_dark(image, ceiling: int = 16,
-                region: tuple[float, float, float, float] = (0.15, 0.15, 0.7, 0.6)) -> bool:
+                region: tuple[float, float, float, float] = (0.25, 0.15, 0.6, 0.4)) -> bool:
     """画面中心区域全暗视为黑屏转场/加载。
 
     整帧判黑（near_black）会被 DMM 页头页尾的白底骗过——游戏区全黑加载时
-    网页框架还是白的。实际画面（本丸/地图/战斗）中心必有内容，不会全暗。"""
+    网页框架还是白的。实际画面（本丸/地图/战斗）中心必有内容，不会全暗。
+    区域要避开两处常驻亮物（2026-11 实测旧区域全踩中，黑屏永远判不出）：
+    画布底部广告条（本丸録等亮色横幅，y≈0.65 以下）和加载樱花图标
+    （画布左下，x<0.18、y>0.58）。"""
     w, h = image.size
     rx, ry, rw, rh = region
     crop = image.crop((int(rx * w), int(ry * h),

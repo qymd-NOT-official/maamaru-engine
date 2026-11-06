@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """日服南瓜宿主（jp_pumpkin）：配置、板子判定、素材体检。
 
-画面导航/点击不走真设备，素材体检直接吃「仓库里没有 pumpkin/* 模板」
-的现状——标定前宿主必须把缺什么列清楚然后停，绝不盲点。
+画面导航/点击不走真设备，素材体检用 monkeypatch 模拟模板缺失
+（模板已于 2026-11-06 标定入仓）——宿主必须把缺什么列清楚然后停，绝不盲点。
 """
 import json
 
@@ -89,9 +89,16 @@ def test_board_full_reads_sheet_state(tmp_path, monkeypatch):
     store.close()
 
 
-def test_goto_sally_reports_missing_templates_and_stops():
+@pytest.fixture
+def templates_missing(monkeypatch):
+    # 2026-11-06 起模板已标定入仓，缺素材的场景改为模拟
+    def _boom(name):
+        raise jp_vision.TemplateNotFound(f'{name}（模拟缺失）')
+    monkeypatch.setattr(jp_vision, 'load_template', _boom)
+
+
+def test_goto_sally_reports_missing_templates_and_stops(templates_missing):
     host, _ = make_host()
-    # 仓库里没有 pumpkin/* 模板（未标定），体检必须全列出来
     gen = host._pumpkin_goto_sally()
     messages = []
     try:
@@ -105,7 +112,7 @@ def test_goto_sally_reports_missing_templates_and_stops():
         assert name in text
 
 
-def test_preflight_lists_every_missing_template():
+def test_preflight_lists_every_missing_template(templates_missing):
     host, _ = make_host()
     missing = host._preflight()
     assert len(missing) == len(jp_pumpkin._REQUIRED_TEMPLATES)

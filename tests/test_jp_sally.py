@@ -54,10 +54,12 @@ def fake_screen(*names):
 class FakeDevice:
     """JpGameDevice 形状：screenshot(force) + click(Point) + reload/relaxed_view。"""
 
-    def __init__(self, frames):
+    def __init__(self, frames, kick_result=True):
         self.frames = list(frames)
         self.clicks = []          # 基准空间像素 (x, y)
         self.reloads = 0
+        self.kick_result = kick_result
+        self.kicks = 0
 
     def screenshot(self, force=False):
         if self.frames:
@@ -70,6 +72,10 @@ class FakeDevice:
 
     def reload(self):
         self.reloads += 1
+
+    def kick_startup(self):
+        self.kicks += 1
+        return self.kick_result
 
     def relaxed_view(self):
         import contextlib
@@ -461,6 +467,63 @@ def test_boot_ignores_stale_home_frame(monkeypatch):
     # 残留帧没骗过它：箭头与本丸按钮都被点过
     assert len(browser.clicks) == 2
     assert any('重新进入本丸' in line for line in logs)
+
+
+def test_boot_white_page_kicks_startup_chain(monkeypatch):
+    """白页静止（启动链没起来）：先踹链，踹活后照常走启动序列，不刷新。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    monkeypatch.setattr(jp_sally, 'CHAIN_KICK_AFTER', -1.0)
+    frames = [
+        greeting_frame(), greeting_frame(),    # 白页静止 → 踹链
+        fake_screen('boot/volume-arrow'),
+        fake_screen('boot/honmaru-button'),
+        fake_screen('home/badge'),
+    ]
+    browser = FakeDevice(frames, kick_result=True)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    assert browser.kicks == 1
+    assert browser.reloads == 0
+    assert any('启动链没起来' in line for line in logs)
+    assert any('重新进入本丸' in line for line in logs)
+
+
+def test_boot_white_page_dead_chain_reloads_once(monkeypatch):
+    """白页且启动链已死（唤不醒）：额外刷新一次重骰，之后仍起不来就不再刷。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    monkeypatch.setattr(jp_sally, 'CHAIN_KICK_AFTER', -1.0)
+    frames = [
+        greeting_frame(), greeting_frame(),    # 白页 → 踹链失败 → 刷新
+        greeting_frame(), greeting_frame(),    # 刷新后仍白页 → 再踹仍失败，不再刷
+        fake_screen('boot/volume-arrow'),      # （玩家手动救活）照常启动
+        fake_screen('boot/honmaru-button'),
+        fake_screen('home/badge'),
+    ]
+    browser = FakeDevice(frames, kick_result=False)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    assert browser.kicks == 2
+    assert browser.reloads == 1
+    assert any('再刷新一次' in line for line in logs)
+
+
+def test_boot_white_page_kick_no_effect_reloads_once(monkeypatch):
+    """踹链「成功」却迟迟没画面（踹了没反应）：额外刷新一次重骰，不无限踹。"""
+    monkeypatch.setattr(jp_sally, 'GREET_STABLE', -1.0)
+    monkeypatch.setattr(jp_sally, 'CHAIN_KICK_AFTER', -1.0)
+    frames = [
+        greeting_frame(), greeting_frame(),    # 白页 → 踹链「成功」
+        greeting_frame(),                      # 仍白页 → 认定没反应 → 刷新
+        greeting_frame(), greeting_frame(),    # 刷新后仍白页 → 再踹一次
+        fake_screen('boot/volume-arrow'),
+        fake_screen('boot/honmaru-button'),
+        fake_screen('home/badge'),
+    ]
+    browser = FakeDevice(frames, kick_result=True)
+    sally, logs = make_sally(browser)
+    sally._boot_to_home()
+    assert browser.kicks == 2
+    assert browser.reloads == 1
 
 
 def test_run_script_success_path(monkeypatch):

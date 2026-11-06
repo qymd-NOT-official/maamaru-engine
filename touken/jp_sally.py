@@ -25,8 +25,8 @@ from .device_adapter import Point
 # 高度变化后会漂（2026-10-12 事故：窗口 1088→944，指揮标签点歪到编成），
 # 锚点找得到，偏移就跟着对。偏移量都是基准空间（1508x1088）像素。
 TEAM_TAB_OFFSETS = {                  # 部队页签，相对 team/depart 按钮
-    1: (-1151, -593), 2: (-1018, -593), 3: (-884, -593),
-    4: (-750, -593), 5: (-616, -593),
+    1: (-854, -440), 2: (-748, -440), 3: (-646, -440),
+    4: (-539, -440), 5: (-435, -440),
 }
 AUTOMARCH_OFFSET = (1, -239)          # 部队选择页「自動行軍」，相对 team/depart
 AUTOMARCH_CONFIRM_OFFSET = (151, 582) # 弹窗「依頼する」，相对弹窗标题
@@ -40,6 +40,7 @@ RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷
 BOOT_TIMEOUT = 300.0                # 刷新后重进本丸的上限（数据加载可能很慢）
 GREET_STABLE = 4.0                  # 登录问候画面稳定这么久才点中央跳过
 UNKNOWN_STABLE = 8.0                # 起手未知画面稳定这么久就刷新页面重来
+CHAIN_KICK_AFTER = 20.0             # 启动途中白页静止这么久就先踹启动链
 PARTY_DATA_WAIT = 10.0              # 等队伍数据跟上的宽限（进出阵菜单后接口回填要一两拍）
 PARTY_DATA_MAX_AGE = 180.0          # 队伍数据超过这么久没更新就不算数
 
@@ -202,6 +203,8 @@ class JpNavigator:
         last_change = time.monotonic()
         entered = False                   # 已点过标题页本丸按钮
         greeted = False                   # 登录问候已点过
+        kicked = False                    # 已踹过启动链（白页自救）
+        rescue_reloaded = False           # 白页自救已额外刷新过（仅此一次）
         unknown_since: float | None = None  # 进入未知画面的时刻
         departed = False                  # 已看到旧画面消失（防刷新前的残留帧被误当「到本丸了」）
         with self.device.relaxed_view():
@@ -241,6 +244,32 @@ class JpNavigator:
                     base_w, base_h = jp_vision.base_size()
                     self.device.click(Point(base_w // 2, base_h // 2))
                     greeted = True
+                elif (not entered and screen == 'unknown'
+                        and unknown_since is not None
+                        and time.monotonic() - unknown_since > CHAIN_KICK_AFTER):
+                    # 白壳页：刷新后游戏启动链没起来（框架加载失败或初始化
+                    # 没被调用），画面永远是静止白页，干等只会撞卡死熔断。
+                    # 先纯协议层踹启动链（不动鼠标键盘）；链已死或踹了没
+                    # 反应，才额外刷新一次重骰（导航那次之外仅此一次，
+                    # 之后仍起不来就交给卡死熔断安全停车）。
+                    alive = False
+                    if not kicked:
+                        kicked = True
+                        self.log('游戏启动链没起来，尝试唤醒…')
+                        try:
+                            alive = self.device.kick_startup()
+                        except Exception:
+                            alive = False
+                        if alive:
+                            unknown_since = None
+                            last_change = time.monotonic()
+                    if not alive and not rescue_reloaded:
+                        rescue_reloaded = True
+                        kicked = False
+                        unknown_since = None
+                        last_change = time.monotonic()
+                        self.log('启动链唤不醒，再刷新一次页面…')
+                        self.device.reload()
                 unknown_since = (unknown_since if screen == 'unknown' else None)
                 if unknown_since is None and screen == 'unknown':
                     unknown_since = time.monotonic()

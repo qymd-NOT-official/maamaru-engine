@@ -44,6 +44,10 @@ class JpGameDevice:
     def reload(self, settle_timeout: float = 20.0) -> None:
         self._browser.reload(settle_timeout=settle_timeout)
 
+    def kick_startup(self) -> bool:
+        """白页自救：补踹游戏启动链；链已死（框架缺失）返回 False。"""
+        return self._browser.kick_startup()
+
     def relaxed_view(self):
         return self._browser.relaxed_view()
 
