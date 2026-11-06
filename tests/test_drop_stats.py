@@ -197,8 +197,9 @@ def test_raid_and_osaka_playstyle_groups(client, store):
 
 
 def test_window_filtering(client, store):
-    old = sh("2026-08-01 20:00:00")   # 70 天前
-    recent = sh("2026-10-05 20:00:00")
+    # 相对当前时间取点：API 的窗口按真实 now 算，写死日期会随时间腐烂
+    old = time.time() - 70 * 86400   # 70 天前
+    recent = time.time() - 2 * 86400
     _battle(store, old, 8, 2)
     _battle(store, old, 5, 4)
     _battle(store, recent, 8, 2)
