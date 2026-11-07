@@ -49,10 +49,13 @@ PARTY_DATA_MAX_AGE = 180.0          # 队伍数据超过这么久没更新就不
 # 本丸绿标依然可见，先认 home 会永远看不见菜单。
 SCREENS = (
     ('loading', ('loading/sakura',)),
+    # notice 必须排在 dialog/confirm 前面：公告栏的 ✕ 和绿条是双模板强信号，
+    # 而单按钮模板在公告美术图上会擦线误中（decline 0.851 / accept 0.899 实测），
+    # 真 はい/いいえ 确认窗没有 ✕ + 今後表示しない，不会被 notice 抢走。
+    ('notice', ('notice/close', 'notice/hide-forever')),  # 公告栏：✕ + 绿条都中才算
     ('automarch_dialog', ('dialog/automarch-request',)),
     ('dialog', ('dialog/yes', 'dialog/no')),      # 两个按钮都中才算弹窗
     ('confirm', ('dialog/decline', 'dialog/accept')),  # 内番续班等 はい/いいえ 确认窗
-    ('notice', ('notice/close', 'notice/hide-forever')),  # 公告栏：✕ + 绿条都中才算
     ('boot_arrow', ('boot/volume-arrow',)),       # 启动「音量注意」
     ('boot_honmaru', ('boot/honmaru-button',)),   # 标题页「本丸」按钮
     ('formation', ('formation/label',)),          # 编成页（停留现场，点 ↩ 回本丸）

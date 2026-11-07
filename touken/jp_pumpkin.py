@@ -40,27 +40,46 @@ SCRIPT_NAME = 'jp-pumpkin'
 # 画面分类扩展：活动页地标插在覆盖层（前 6 条）之后、出阵各屏之前。
 _PUMPKIN_SCREEN = ('pumpkin', ('pumpkin/screen',))
 
-# 导航路线：与出阵同款走目录大页进（不透明，景趣影响不到），
-# 到出撃页点活动横幅进活动页。走错到合战场各屏就回目录重来。
+# 导航路线（2026-11-07 真机标定后修订）：活动横幅在本丸左侧轮播里，
+# 打开指挥菜单（红色「指揮」竖钮）后稳定可见，从那里点横幅进活动页。
+# 走错到合战场各屏就点左上返回箭头回本丸重来。
 PUMPKIN_ROUTE = {
-    'home': ('hit', 'home/catalog', '目录按钮'),
-    'directory': ('hit', 'directory/sally', '目录出阵入口'),
+    'home': ('hit', 'menu/shiki', '指挥菜单按钮'),
+    'directory': ('hit', 'directory/close', '目录大页关闭按钮'),
     'formation': ('near', 'formation/label', jp_sally.BACK_ARROW_OFFSET,
                   '编成页返回箭头'),
     'shiki_menu': ('hit', 'pumpkin/banner', '活动入口横幅'),
-    'era': ('hit', 'home/catalog', '合战场时代屏目录按钮'),
-    'map': ('hit', 'home/catalog', '合战场选图屏目录按钮'),
-    'team': ('hit', 'home/catalog', '合战场部队屏目录按钮'),
+    'era': ('hit', 'common/back', '合战场时代屏返回箭头'),
+    'map': ('hit', 'common/back', '合战场选图屏返回箭头'),
+    'team': ('hit', 'common/back', '合战场部队屏返回箭头'),
 }
 
 # 安全点：相对 pumpkin/screen 锚点的偏移（基准空间像素），待真机标定
 PUMPKIN_SKIP_OFFSET = (0, 420)
+
+# 活动部队屏「部隊選択」标题锚点的相对偏移（2026-11-07 真机标定）。
+# 出陣按钮灰/红两态切换，拿按钮当锚点会在不可出击时连锚都丢了；
+# 标题常驻，页签和出陣按钮都改以它为基准。
+PUMPKIN_TEAM_TAB_OFFSETS = {
+    1: (-548, 68),
+    2: (-413, 68),
+    3: (-275, 68),
+    4: (-140, 68),
+    5: (-5, 68),
+}
+PUMPKIN_DEPART_OFFSET = (585, 662)
+
+# 「出陣できません」条件浮层的消除点（2026-11-07 真机标定）：
+# 条件不满足时点出陣会盖一层深色浮层吃掉所有点击，先点它一下消掉，
+# 返回箭头才点得动。点在浮层文字区，没有浮层时落在部队列表空行，无害。
+PUMPKIN_MODAL_DISMISS_OFFSET = (0, 355)
 
 # 体检要验的模板（复用 jp_sally 已标定的不在列）
 _REQUIRED_TEMPLATES = (
     'pumpkin/screen', 'pumpkin/banner', 'pumpkin/deploy',
     'pumpkin/update', 'pumpkin/update-confirm',
     'pumpkin/tab-1', 'pumpkin/tab-2', 'pumpkin/tab-3',
+    'pumpkin/team-screen',
 )
 
 SHEET_WAIT_S = 45.0        # 进活动页后等数据同步喂来板子状态的上限
@@ -90,7 +109,8 @@ class JpPumpkin(jp_sally.JpNavigator, PumpkinLoopMixin):
     """日服南瓜宿主：JpNavigator 的认屏/点击底座 + 南瓜公共循环。"""
 
     SCREENS = (jp_sally.SCREENS[:6] + (_PUMPKIN_SCREEN,)
-               + jp_sally.SCREENS[6:])
+               + tuple(('team', ('pumpkin/team-screen',)) if s[0] == 'team' else s
+                       for s in jp_sally.SCREENS[6:]))
 
     def __init__(self, device, params: dict, log=print,
                  poll: float = 2.0,
@@ -225,6 +245,8 @@ class JpPumpkin(jp_sally.JpNavigator, PumpkinLoopMixin):
 
     def _skip_tap(self) -> None:
         image = self.device.screenshot(force=True)
+        if not jp_vision.find(image, 'pumpkin/screen'):
+            return  # 不在活动页（部队屏等），没有安全区可点，交给上层计数停车
         self._click_near('pumpkin/screen', PUMPKIN_SKIP_OFFSET,
                          '安全区', image=image)
 
@@ -269,18 +291,24 @@ class JpPumpkin(jp_sally.JpNavigator, PumpkinLoopMixin):
             yield f"[南瓜] 没找到部队选择按钮（{error}）"
             return
         try:
+            # pumpkin 也可放行：点完部隊選択后的第一帧必然还是活动页，
+            # 画面切换有延迟，不含它会当场误报「没打开」。
             self._wait(frozenset({'team'}), jp_sally.NAV_TIMEOUT,
-                       frozenset({'loading'}), '打开部队选择')
+                       frozenset({'loading', 'pumpkin'}), '打开部队选择')
         except jp_sally.SallyStop:
             yield "[南瓜] 部队选择界面没打开"
             return
 
         numeral = NUMERAL[team_no - 1]
         logs, error = self._run_logged(lambda: (
-            self._click_near('team/depart', jp_sally.TEAM_TAB_OFFSETS[team_no],
+            self._click_near('pumpkin/team-screen',
+                             PUMPKIN_TEAM_TAB_OFFSETS[team_no],
                              f'部队{numeral}页签'),
             time.sleep(1.0),
-            self._click_hit('team/depart', '出撃按钮')))
+            # 出陣按钮灰/红两态，不做模板直接点位置：灰着点不动，
+            # 下面的离队验证会如实报「被游戏拒了」。
+            self._click_near('pumpkin/team-screen', PUMPKIN_DEPART_OFFSET,
+                             '出陣按钮')))
         for line in logs:
             yield f"[南瓜] {line}"
         if error is not None:
@@ -304,6 +332,17 @@ class JpPumpkin(jp_sally.JpNavigator, PumpkinLoopMixin):
                 return
         self._save_debug(self.device.screenshot(force=True))
         yield "[南瓜] 出撃被游戏拒了，还停在部队选择界面——编队可能不满足格子条件"
+        # 退回活动页，主循环每轮开头要确保在板子上，赖在部队屏会误判卡死。
+        # 被拒时盖着「出陣できません」浮层，不消掉返回箭头点不动。
+        logs, error = self._run_logged(lambda: (
+            self._click_near('pumpkin/team-screen',
+                             PUMPKIN_MODAL_DISMISS_OFFSET, '条件浮层'),
+            time.sleep(1.0),
+            self._click_hit('common/back', '部队屏返回箭头')))
+        for line in logs:
+            yield f"[南瓜] {line}"
+        if error is not None:
+            yield f"[南瓜] ✗ 回活动页失败：{error}"
 
     def _pumpkin_battle_loop(self, cfg: dict, battle_debug, fought: int):
         """盯完这场自动战斗：回到活动页 = 收圈。弹窗/卡死立即停。"""
