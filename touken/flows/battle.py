@@ -1169,11 +1169,24 @@ class BattleMixin:
         time.sleep(0.6)
         if not apply_details(self.device, policy, **({'switches': switches} if switches is not None else {})):
             return False
-        # 标题已验证，此 X 只关闭详细设定。
+        # 标题已验证，此 X 只关闭详细设定。关闭动画要一拍：2026-11-08
+        # 实测动画中回读把"详细设置"认成"许细设直"，单发 OCR 直接判死。
+        # 改成带重试的回读；板子标题还能读清就是 X 点丢了，补点一次。
         self._click_point([1250, 30])
         time.sleep(0.6)
-        self.device.screenshot(force=True)
-        if not self.device.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+        closed = False
+        for _ in range(6):
+            self.device.screenshot(force=True)
+            if self.device.ocr("自动行军", roi_4to4(500, 40, 800, 125), match_mode="exact"):
+                closed = True
+                break
+            if (self.device.ocr("详细设定", roi_4to4(510, 20, 760, 90), match_mode="exact")
+                    or self.device.ocr("详细设置", roi_4to4(510, 20, 760, 90), match_mode="exact")):
+                self._click_point([1250, 30])
+                time.sleep(0.6)
+            else:
+                time.sleep(0.5)
+        if not closed:
             return False
         self._click_point(cfg["close_window"])
         time.sleep(0.6)

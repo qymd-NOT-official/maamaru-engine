@@ -196,6 +196,7 @@ class NavigationMixin:
         # 加载等待按「次」数不按墙钟：固定 1.5s 一拍，次数上限 = 耐心/拍长。
         # （Windows 的 time.monotonic 粒度十几毫秒，测试里快转会永远不够耐心值）
         max_loading_waits = max(1, int(self.LOADING_PATIENCE_S / 1.5))
+        close_click = None  # (x, y, 画面指纹, 连点次数)：救援点关闭的卡死检测
         while attempt < max_attempts:
             attempt += 1
             print(f"[NAV] 尝试打开目录 (第{attempt}次)")
@@ -226,6 +227,7 @@ class NavigationMixin:
             # 1) 可能在演结算动画/对话（连目录按钮都看不见），点跳过点把动画往前推
             # 2) 也可能被收件箱这种全屏界面压住（15:00 实测卡死元凶）——先关 X
             if self.device.exists("目录.png", threshold=0.7):
+                close_click = None
                 self._click_template_config(common_config)
             else:
                 # 远征结算屏会盖住目录按钮：归来收益先照实记账再点过，
@@ -235,15 +237,40 @@ class NavigationMixin:
                     obs = self.observe_expedition_settlement(
                         via="open_menu", seen=settle_seen)
                 if obs is not None:
+                    close_click = None
                     if obs.get("new"):
                         print("[NAV] 远征结算屏挡路，照实记账后点过")
                     self.device.click(Point(993, 690))
                 else:
                     close_pt = self.device.template_match("通用_关闭.png", threshold=0.7)
                     if close_pt:
+                        # 同一个 X 连点没反应 = 有系统级模态框在吃点击
+                        # （2026-11-05 现场：MuMu 游戏中心崩溃的 ANR 对话框
+                        # 压住碎片弹窗，30 次连点全被吃掉，白耗三轮还失控）。
+                        # 画面指纹不变就计数，同点同画面第 3 次如实放弃；
+                        # 画面有变化说明上一击有效（多层弹窗逐层关），重新计。
+                        frame = self.device.screenshot()
+                        try:
+                            digest = (hash(frame.tobytes())
+                                      if hasattr(frame, "tobytes")
+                                      else hash(frame) if frame is not None else None)
+                        except Exception:
+                            digest = None
+                        same_spot = (close_click is not None
+                                     and abs(close_pt.x - close_click[0]) <= 6
+                                     and abs(close_pt.y - close_click[1]) <= 6
+                                     and digest is not None
+                                     and digest == close_click[2])
+                        streak = close_click[3] + 1 if same_spot else 1
+                        if streak >= 3:
+                            print("[NAV] 同一个关闭按钮连点 3 次画面没变化，"
+                                  "可能有系统对话框挡着，开不了目录")
+                            return False
+                        close_click = (close_pt.x, close_pt.y, digest, streak)
                         print("[NAV] 发现全屏界面/弹窗，点关闭")
                         self.device.click(close_pt)
                     else:
+                        close_click = None
                         self.device.click(Point(993, 690))
             time.sleep(0.8)
 

@@ -149,6 +149,35 @@ class ForgeCollectRecognitionTests(unittest.TestCase):
         self.assertIsNone(flow._watch_hit(("1:27:30", 5250), {5400}))  # 差 150s 超出容忍
         self.assertEqual(flow._watch_hit(("1:27:30", 5250), {5340}), "1:27:30")
 
+    def test_read_countdown_drops_garbage_tokens_with_digits(self):
+        """行内垃圾 token 带数字时整枚丢弃（2026-11-05 '9二' 前缀把数字串
+        撑成 7 位，点着的炉被判点火失败的现场）。"""
+        flow = SmithMixin()
+
+        class _TimerMaa:
+            def __init__(self, tokens):
+                self.tokens = tokens
+
+            def screenshot(self, force=False):
+                pass
+
+            def ocr_all(self, roi):
+                return self.tokens
+
+        flow.device = _TimerMaa([("9二", Point(0, 0)), ("剩余时间", Point(0, 0)),
+                                 ("01", Point(0, 0)), ("29", Point(0, 0)),
+                                 ("48", Point(0, 0))])
+        self.assertEqual(flow._read_countdown(345), ("1:29:48", 5388))
+        # 标签和小时位合并成一枚时不能丢小时：全文兜底仍读 1:29:48
+        flow.device = _TimerMaa([("剩余时间01", Point(0, 0)), ("29", Point(0, 0)),
+                                 ("48", Point(0, 0))])
+        self.assertEqual(flow._read_countdown(345), ("1:29:48", 5388))
+        # 纯数字垃圾 token 混进来还是撑爆位数，读不出（宁缺毋猜）
+        flow.device = _TimerMaa([("9", Point(0, 0)), ("剩余时间", Point(0, 0)),
+                                 ("01", Point(0, 0)), ("29", Point(0, 0)),
+                                 ("48", Point(0, 0))])
+        self.assertIsNone(flow._read_countdown(345))
+
 
 class _ForgeHost(SmithMixin):
     """锻刀主流水的测试宿主：三炉全完成待收、刀位满（每炉第一次收失败→刀解腾位→再收）。

@@ -139,5 +139,70 @@ class NavLoadingTests(unittest.TestCase):
         self.assertTrue(len(device.loading_seq) > 300)
 
 
+class _PopupMaa:
+    """弹窗救援假设备：目录按钮被盖住，通用_关闭按剧本命中，
+    画面指纹可控制不变（模拟系统模态框吃点击）或逐帧变化。"""
+
+    def __init__(self, frames, close_after=None, open_after_safe=False):
+        self.frames = frames          # True=每次返回新帧，False=永远同一帧
+        self.close_after = close_after  # 点 N 次后弹窗关掉（通用_关闭不再命中）
+        self.open_after_safe = open_after_safe  # 安全点一点后菜单展开
+        self.clicks = []
+        self.close_clicks = 0
+        self.menu_open = False
+        self._tick = 0
+
+    def screenshot(self, force=False):
+        self._tick += 1
+        return f"frame{self._tick}".encode() if self.frames else b"sameframe"
+
+    def exists(self, template, roi=None, threshold=0.7):
+        return self.menu_open if template == "menu/ui目录.png" else False
+
+    def template_match(self, template, roi=None, threshold=0.7):
+        if template == "通用_关闭.png" and (
+                self.close_after is None or self.close_clicks < self.close_after):
+            return SimpleNamespace(x=1254, y=25)
+        return None
+
+    def click(self, point):
+        self.clicks.append(point)
+        if getattr(point, "x", None) == 1254:
+            self.close_clicks += 1
+        elif self.open_after_safe and getattr(point, "x", None) == 993:
+            self.menu_open = True
+        return True
+
+    def looks_like_loading(self):
+        return False
+
+
+class PopupRescueStuckTests(unittest.TestCase):
+    """2026-11-05 现场：MuMu 游戏中心 ANR 对话框压住碎片弹窗，救援连点
+    同一个 X 三十次全被吃掉。同点同画面第 3 次必须如实放弃。"""
+
+    def test_same_close_button_same_frame_gives_up_fast(self):
+        device = _PopupMaa(frames=False)
+        flow = _NavFlow(device)
+        with patch("touken.navigator.time.sleep"):
+            self.assertFalse(flow._open_menu())
+        self.assertEqual(len(device.clicks), 2)  # 第 3 次识别出卡死，不再点
+
+    def test_changing_frames_means_clicks_work_keep_going(self):
+        """多层弹窗逐层关：每击画面都变，不算卡死，按原节奏用满尝试次数。"""
+        device = _PopupMaa(frames=True)
+        flow = _NavFlow(device)
+        with patch("touken.navigator.time.sleep"):
+            self.assertFalse(flow._open_menu())
+        self.assertEqual(len(device.clicks), 10)
+
+    def test_popup_actually_closes_then_menu_opens(self):
+        device = _PopupMaa(frames=True, close_after=2, open_after_safe=True)
+        flow = _NavFlow(device)
+        with patch("touken.navigator.time.sleep"):
+            self.assertTrue(flow._open_menu())
+        self.assertEqual(device.close_clicks, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

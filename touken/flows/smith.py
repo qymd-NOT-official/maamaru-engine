@@ -434,7 +434,9 @@ class SmithMixin:
         点火后倒计时已经开始走字，读到的会比名义时长短一两秒。
         OCR 经常把冒号吃掉（'02','59','53' 拆成三个 token，2026-10-19
         因此把点着的炉误判成点火失败），冒号正则落空时按纯数字串
-        从右往左切 秒/分/时。"""
+        从右往左切 秒/分/时。行内还会混进带数字的垃圾 token（2026-11-05
+        实测 '9二' 前缀把数字串撑成 7 位，点着的炉被判点火失败），所以
+        先只拼纯数字 token，拼不出再退回全文挖数字。"""
         try:
             self.device.screenshot(force=True)
             tokens = self.device.ocr_all(roi_4to4(150, cy - 55, 780, cy + 55))
@@ -443,14 +445,21 @@ class SmithMixin:
             if m:
                 secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
                 return (f"{int(m.group(1))}:{m.group(2)}:{m.group(3)}", secs)
-            digits = re.sub(r"\D", "", text)
-            if 4 <= len(digits) <= 6:
-                secs_part = int(digits[-2:])
-                mins_part = int(digits[-4:-2])
-                hours_part = int(digits[:-4])
-                if secs_part < 60 and mins_part < 60:
-                    return (f"{hours_part}:{digits[-4:-2]}:{digits[-2:]}",
-                            hours_part * 3600 + mins_part * 60 + secs_part)
+            # 纯数字 token 优先：垃圾 token（'9二'、'剩余时间'）整枚丢弃。
+            # 只接 5~6 位（带小时位），4 位走全文兜底避免把合并进标签的
+            # 小时位弄丢（'剩余时间01' + '29','48' 必须还能读出 1:29:48）。
+            pure = "".join(t.strip() for t, _ in tokens
+                           if t.strip().isdigit())
+            candidates = [pure] if 5 <= len(pure) <= 6 else []
+            candidates.append(re.sub(r"\D", "", text))
+            for digits in candidates:
+                if 4 <= len(digits) <= 6:
+                    secs_part = int(digits[-2:])
+                    mins_part = int(digits[-4:-2])
+                    hours_part = int(digits[:-4])
+                    if secs_part < 60 and mins_part < 60:
+                        return (f"{hours_part}:{digits[-4:-2]}:{digits[-2:]}",
+                                hours_part * 3600 + mins_part * 60 + secs_part)
             return None
         except Exception:
             return None

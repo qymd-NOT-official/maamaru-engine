@@ -1835,3 +1835,48 @@ class DisableAutoMarchTests(unittest.TestCase):
     def test_missing_cancel_or_still_on_is_failure(self, sleep):
         self.assertFalse(self.host(True, cancel=False)._disable_auto_march())
         self.assertFalse(self.host(True, final=True)._disable_auto_march())
+
+
+class ConfigureAutoMarchTests(unittest.TestCase):
+    """详细设定关板回读：2026-11-08 实测关闭动画帧把"详细设置"认成
+    "许细设直"，单发回读误判失败；改成重试，板子标题还能读清就补点 X。"""
+
+    def host(self, march_reads, detail_reads=(), setting_reads=()):
+        host = BattleMixin()
+        host.config = {'team_select': {'auto_march': {
+            'enable_button': {'template': 'button'}, 'close_window': [1038, 47]}}}
+        host.device = Mock()
+        host.device.template_match = Mock(return_value=True)
+        host._click_template_config = Mock(return_value=True)
+        host._click_point = Mock()
+        script = {
+            '自动行军': [Point(640, 81), *march_reads],  # 第一发是开弹窗确认
+            '详细设定': [Point(641, 456), *detail_reads],  # 第一发是弹窗里的按钮
+            '详细设置': list(setting_reads),
+        }
+        host.device.ocr.side_effect = lambda text, *a, **k: (
+            script[text].pop(0) if script.get(text) else None)
+        return host
+
+    def run_configure(self, host):
+        with patch('touken.flows.battle.time.sleep'), \
+                patch('touken.auto_march_settings.apply_details', return_value=True):
+            return host._configure_auto_march_settings(
+                {'heavy': False, 'equipment': False, 'fatigue': True,
+                 'presentation': False, 'formation': '鱼鳞阵'})
+
+    def test_garbled_animation_frame_retries_until_dialog_readable(self):
+        host = self.host([None, Point(640, 81)], [None], [None])
+        self.assertTrue(self.run_configure(host))
+        host._click_point.assert_any_call([1250, 30])
+        self.assertEqual(host._click_point.call_count, 2)  # X + 关弹窗，没补点
+
+    def test_missed_x_clicks_again_when_panel_title_still_readable(self):
+        host = self.host([None, Point(640, 81)], [None], [Point(639, 69)])
+        self.assertTrue(self.run_configure(host))
+        self.assertEqual(host._click_point.call_args_list.count(
+            unittest.mock.call([1250, 30])), 2)
+
+    def test_panel_never_closes_is_failure(self):
+        host = self.host([None] * 6, [None] * 6, [None] * 6)
+        self.assertFalse(self.run_configure(host))
