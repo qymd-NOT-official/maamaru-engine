@@ -37,8 +37,8 @@ NAV_TIMEOUT = 25.0                  # 每步导航认画面的上限
 MARCH_TIMEOUT = 1500.0              # 一轮行军总上限
 STUCK_SECONDS = 120.0               # 画面纹丝不动的熔断线
 RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷新一次页面自愈
-BOOT_TIMEOUT = 300.0                # 刷新后重进本丸的上限（数据加载可能很慢）
-GREET_STABLE = 4.0                  # 登录问候画面稳定这么久才点中央跳过
+BOOT_TIMEOUT = 900.0                # 刷新后重进本丸的上限（慢链路数据加载 + 公告连点都很耗时）
+GREET_STABLE = 8.0                  # 登录问候画面稳定这么久才点中央跳过（要长过公告翻页间隙，别点进公告里）
 UNKNOWN_STABLE = 8.0                # 起手未知画面稳定这么久就刷新页面重来
 CHAIN_KICK_AFTER = 20.0             # 启动途中白页静止这么久就先踹启动链
 PARTY_DATA_WAIT = 10.0              # 等队伍数据跟上的宽限（进出阵菜单后接口回填要一两拍）
@@ -264,8 +264,9 @@ class JpNavigator:
                         except Exception:
                             alive = False
                         if alive:
+                            # 只宽限下一次踹链判定，不动卡死计时：
+                            # 画面真冻住（加载卡死）时熔断要照常生效。
                             unknown_since = None
-                            last_change = time.monotonic()
                     if not alive and not rescue_reloaded:
                         rescue_reloaded = True
                         kicked = False
