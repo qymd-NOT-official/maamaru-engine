@@ -24,11 +24,11 @@ from .device_adapter import Point
 # 点击目标一律「锚点模板 + 基准分辨率像素偏移」：固定归一化坐标在窗口
 # 高度变化后会漂（2026-10-12 事故：窗口 1088→944，指揮标签点歪到编成），
 # 锚点找得到，偏移就跟着对。偏移量都是基准空间（1508x1088）像素。
-TEAM_TAB_OFFSETS = {                  # 部队页签，相对 team/depart 按钮
-    1: (-854, -440), 2: (-748, -440), 3: (-646, -440),
-    4: (-539, -440), 5: (-435, -440),
+TEAM_TAB_OFFSETS = {                  # 部队页签，相对 team/depart 按钮中心
+    1: (-1123, -581), 2: (-1001, -581), 3: (-878, -581),
+    4: (-758, -581), 5: (-638, -581),
 }
-AUTOMARCH_OFFSET = (1, -239)          # 部队选择页「自動行軍」，相对 team/depart
+AUTOMARCH_OFFSET = (0, -230)          # 部队选择页「自動行軍」，相对 team/depart 中心
 AUTOMARCH_CONFIRM_OFFSET = (151, 582) # 弹窗「依頼する」，相对弹窗标题
 DIALOG_CLOSE_OFFSET = (434, -40)      # 弹窗右上 ✕，相对弹窗标题
 BACK_ARROW_OFFSET = (118, -36)        # 编成页左上「↩」，相对 formation/label
