@@ -6,7 +6,8 @@ from panel import server
 def test_jp_scripts_list_only_jp_scripts():
     client = TestClient(server.app)
     data = client.get("/api/scripts?server=jp").json()
-    assert set(data["scripts"]) == {"jp-sally", "jp-expedition", "jp-pumpkin"}
+    assert set(data["scripts"]) == {"jp-sally", "jp-expedition", "jp-pumpkin",
+                                    "jp-edocastle"}
     sally = data["scripts"]["jp-sally"]
     assert sally["label"] == "日服出阵"
     assert {field["key"] for field in sally["params"]} == {"team_no", "rounds"}
@@ -23,6 +24,10 @@ def test_jp_scripts_list_only_jp_scripts():
     assert pumpkin["label"] == "日服南瓜"
     assert {field["key"] for field in pumpkin["params"]} == {
         "team_no", "difficulty", "max_skips"}
+    edocastle = data["scripts"]["jp-edocastle"]
+    assert edocastle["label"] == "日服江户城"
+    assert {field["key"] for field in edocastle["params"]} == {
+        "team_no", "difficulty", "rounds"}
 
 
 def test_default_scripts_list_never_includes_jp_scripts():
@@ -31,6 +36,7 @@ def test_default_scripts_list_never_includes_jp_scripts():
     assert "jp-sally" not in data["scripts"]
     assert "jp-expedition" not in data["scripts"]
     assert "jp-pumpkin" not in data["scripts"]
+    assert "jp-edocastle" not in data["scripts"]
     assert "daily" in data["scripts"]
 
 

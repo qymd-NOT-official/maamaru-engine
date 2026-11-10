@@ -1413,6 +1413,30 @@ register_script("jp-pumpkin", "日服南瓜",
                 hidden=True, server="jp")
 
 
+# 日服江户城潜入调查（委託行軍版）：委托游戏自动行军，脚本只管
+# 进活动/选难度/选队/委托/出阵/盯完一圈，不认格子。
+# 不碰小判：手形烧完的补充弹窗不认识，按弹窗停车收工。
+def _build_jp_edocastle(config_path, params):
+    from touken import jp_edocastle
+    return jp_edocastle.run_script(config_path, params)
+
+
+register_script("jp-edocastle", "日服江户城",
+                "日服江户城潜入调查：委托游戏自动行军刷圈，只点认得出的画面；"
+                "通行手形烧完自动收工，不碰小判",
+                _build_jp_edocastle,
+                params=[{"key": "team_no", "type": "select", "label": "部队",
+                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "difficulty", "type": "select", "label": "难度",
+                         "options": [["1", "易"], ["2", "普"], ["3", "难"], ["4", "超难"]],
+                         "default": "1"},
+                        {"key": "rounds", "type": "number", "label": "圈数",
+                         "default": 6,
+                         "help": "最多跑几圈；手形每天 5 点/17 点各补 3 张，烧完会提前收工"}],
+                hidden=True, server="jp")
+
+
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
 # 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
@@ -4426,7 +4450,7 @@ async def api_save_settings(request: Request, server: str = ""):
         extra = set(body) - allowed
         if extra == {"params"}:
             params = body.get("params")
-            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin"}:
+            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin", "jp-edocastle"}:
                 raise HTTPException(400, "日服只能保存日服脚本的参数")
         elif extra:
             raise HTTPException(400, "日服暂不支持自动执行设置")
