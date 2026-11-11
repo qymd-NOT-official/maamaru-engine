@@ -15,22 +15,27 @@
 - 疲劳停止走 jp_party 数据通道读气力值，阈值是参数；触线收工不硬刷。
 - 记录只写日服数据目录（JP_DATA_DIR 的独立账房库）。
 
-【待实机标定清单】（骨架未在真机跑过，以下全部要实机验证/标定后才准实跑）：
+【实机标定进度】（2026-11-11 云端骨架 → 本机标定）：
 
-1. ERA_OFFSETS：时代屏 8 张时代卡的点击偏移（相对 era/decide 锚点），
-   当前是占位值。时代卡多了可能要翻页/滚动，真机确认 8 卡是否同屏。
-2. MAP_OFFSETS：小图屏 4 张小图卡的点击偏移（相对 map/team-select
-   锚点），当前是占位值。
-3. 点已选中的时代卡/小图卡是否等于确认并跳级（国服机制如此，
+1. ERA_OFFSETS / MAP_OFFSETS：已真机标定。8 张时代卡同屏（编号竖排：
+   上行一三五七、下行二四六八），4 张小图卡同屏横排。
+2. 委托幂等：部队屏「依頼中」标记（team/automarch-active）已标定，
+   已挂着就跳过 _enable_automarch——再点会打开取消委托的弹窗。
+3. 起跑撞上启动途中（音量注意/标题页/读条）先走启动序列接续，
+   已加守卫（标定采集实测撞上过）。
+
+【真机首圈待验证】（第一圈跑完前不算完）：
+
+1. 点已选中的时代卡/小图卡是否等于确认并跳级（国服机制如此，
    sortie.py:189-243 有实锤；日服待验证）——_pick_map 按状态驱动写，
    三种落点（era/map/team）都接得住，但跳级行为要真机过一遍。
-4. 日服普通合战场点 team/depart 后有无二次确认窗（国服普通合战场没有；
+2. 日服普通合战场点 team/depart 后有无二次确认窗（国服普通合战场没有；
    江户城有消费手形确认窗）。_depart 见到任何弹窗一律停，若真机发现
    普通出阵有预期内确认窗，再为它加专用双模板屏（照 edo/confirm-go）。
-5. 打完一圈是否自动回本丸（国服普通合战场是）。_watch_march 按
+3. 打完一圈是否自动回本丸（国服普通合战场是）。_watch_march 按
    「见到 home = 收圈」写；若真机落在别的画面（如结算屏等戳），
    需要补收圈动作。
-6. 行军途中的实际画面构成（battle/field/mapview/result 是否都会出现）
+4. 行军途中的实际画面构成（battle/field/mapview/result 是否都会出现）
    按 Sally 的 MARCH_PASSABLE 放行，真机第一圈要盯着日志过一遍。
 """
 from __future__ import annotations
@@ -70,23 +75,24 @@ HOME_ROUTE = {
     'team': ('hit', 'home/catalog', '部队屏目录按钮'),
 }
 
-# 【待实机标定】时代卡中心，相对 era/decide 锚点中心（基准空间像素）。
-# 占位值！8 张时代卡的实际布局（同屏还是翻页）要真机确认后重填。
+# 时代卡中心，相对 era/decide 锚点中心（基准空间像素，2026-11-11
+# 真机标定）。8 卡同屏不用翻页；编号是竖排的：上行一三五七、下行二四六八。
 ERA_OFFSETS = {
-    1: (-450, -250), 2: (-150, -250), 3: (150, -250), 4: (450, -250),
-    5: (-450, -50), 6: (-150, -50), 7: (150, -50), 8: (450, -50),
+    1: (-1045, -291), 2: (-938, -136), 3: (-823, -291), 4: (-720, -136),
+    5: (-605, -291), 6: (-495, -136), 7: (-380, -291), 8: (-277, -136),
 }
-# 【待实机标定】小图卡中心，相对 map/team-select 锚点中心
-# （基准空间像素）。占位值！
+# 小图卡缩略图中心，相对 map/team-select 锚点中心（基准空间像素，
+# 2026-11-11 真机标定）。4 卡同屏横排。
 MAP_OFFSETS = {
-    1: (-450, -250), 2: (-150, -250), 3: (150, -250), 4: (450, -250),
+    1: (-1076, -447), 2: (-752, -447), 3: (-428, -447), 4: (-104, -447),
 }
 
 # 体检要验的模板（Sally 底座已验过的不在列；era/decide、map/team-select、
-# team/depart 是早期本机标定 + 2026-11-11 重裁，照列防回归）
+# team/depart 是早期本机标定 + 2026-11-11 重裁，照列防回归；
+# team/automarch-active 是委托「依頼中」标记，2026-11-11 真机标定）
 _REQUIRED_TEMPLATES = (
     'directory/sally', 'directory/home',
-    'era/decide', 'map/team-select', 'team/depart',
+    'era/decide', 'map/team-select', 'team/depart', 'team/automarch-active',
     'error/screen', 'error/reload', 'error/screen-full',
 )
 
@@ -196,6 +202,13 @@ class JpSortie(jp_sally.Sally):
         raise jp_sally.SallyStop('选图超时，已停止；请人工查看游戏')
 
     # ==================== 出发 / 盯屏 ====================
+
+    def _automarch_active(self, image) -> bool:
+        """部队屏上委托是否已挂（「依頼中」标记）。
+
+        已挂着时绝不再点自动行军按钮——那打开的是取消委托的弹窗，
+        点确认位等于把委托撤了（江户城同款幂等逻辑，照 edo/march-active）。"""
+        return jp_vision.find(image, 'team/automarch-active') is not None
 
     def _depart(self) -> None:
         """点 いざ出陣!! 并验证真离开了部队屏。
@@ -348,6 +361,11 @@ class JpSortie(jp_sally.Sally):
                 self.log(f'  ✗ {item}')
             raise jp_sally.SallyStop('模板没标定全，已停止')
         self.log('连接日服游戏页面…')
+        # 起跑撞上启动途中（音量注意/标题页/读条）先走启动序列接续——
+        # 导航路线不认这些画面，硬开会直接停车（2026-11-11 标定采集实测）
+        if self.classify(self.device.screenshot(force=True)) in (
+                'boot_arrow', 'boot_honmaru', 'loading'):
+            self._boot_to_home()
         done = 0
         for round_no in range(1, rounds + 1):
             try:
@@ -399,7 +417,10 @@ class JpSortie(jp_sally.Sally):
             if stop_on_fatigue:
                 self._check_fatigue(latest, team_no, fatigue_threshold)
         self._select_team(team_no)
-        self._enable_automarch()
+        if self._automarch_active(self.device.screenshot(force=True)):
+            self.log('自动行军委托已开着')
+        else:
+            self._enable_automarch()
         self.log(f'部队{NUMERAL[team_no - 1]}出发（时代{NUMERAL[chapter - 1]}'
                  f'小图{NUMERAL[map_no - 1]}）')
         self._depart()

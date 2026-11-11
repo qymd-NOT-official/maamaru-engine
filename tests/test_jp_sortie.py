@@ -209,6 +209,7 @@ def _stub_run_one(host, behavior):
     host._run_one = _fake
     host._preflight = lambda: []
     host.record_event = lambda *a, **k: None
+    host.classify = lambda image: 'home'   # 起跑画面在本丸，跳过启动接续守卫
     return rounds_run
 
 
@@ -254,6 +255,47 @@ def test_run_gives_up_when_comm_error_repeats():
     host._recover_error = lambda: False
     with pytest.raises(jp_sally.SallyStop, match='通信错误反复出现'):
         host.run(chapter=1, map_no=1, team_no=1, rounds=1)
+
+
+def test_run_boots_first_when_starting_on_boot_screen():
+    """起跑撞上启动途中（音量注意/标题页/读条）先走启动序列接续。"""
+    host, _ = make_host()
+    _stub_run_one(host, lambda round_no: None)
+    host.classify = lambda image: 'boot_arrow'
+    booted = []
+    host._boot_to_home = lambda: booted.append(True)
+    host.run(chapter=1, map_no=1, team_no=1, rounds=1)
+    assert booted == [True]
+
+
+# ==================== 委托幂等 ====================
+
+def _stub_departure(host, automarch_active):
+    calls = {'enable': 0}
+    host._goto_sortie = lambda: 'team'
+    host._pick_map = lambda chapter, map_no: None
+    host._select_team = lambda team_no: None
+    host._automarch_active = lambda image: automarch_active
+    host._enable_automarch = lambda: calls.__setitem__(
+        'enable', calls['enable'] + 1)
+    host._depart = lambda: None
+    host._watch_march = lambda: None
+    return calls
+
+
+def test_run_one_skips_enable_when_automarch_already_active():
+    host, logs = make_host()
+    calls = _stub_departure(host, automarch_active=True)
+    host._run_one(1, 1, 1, 1, 2, None, True, 30)
+    assert calls['enable'] == 0
+    assert '自动行军委托已开着' in '\n'.join(logs)
+
+
+def test_run_one_enables_automarch_when_not_active():
+    host, _ = make_host()
+    calls = _stub_departure(host, automarch_active=False)
+    host._run_one(1, 1, 1, 1, 2, None, True, 30)
+    assert calls['enable'] == 1
 
 
 # ==================== 通信错误自愈分派 ====================
