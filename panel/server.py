@@ -1437,6 +1437,33 @@ register_script("jp-edocastle", "日服江户城",
                 hidden=True, server="jp")
 
 
+# 日服普通出阵刷图：指定时代/小图/部队刷圈，委托游戏自动行军。
+# 选图坐标是占位值（待实机标定，见 touken/jp_sortie.py 模块头清单）；
+# 行军中任何弹窗一律停等人工，疲劳触线自动收工。
+def _build_jp_sortie(config_path, params):
+    from touken import jp_sortie
+    return jp_sortie.run_script(config_path, params)
+
+
+register_script("jp-sortie", "日服刷图",
+                "日服普通出阵刷图：指定时代和小图连刷，委托游戏自动行军。"
+                "出发前验伤（重伤绝不出阵），气力掉线自动收工；"
+                "行军中任何弹窗一律停等人工",
+                _build_jp_sortie,
+                params=[{"key": "chapter", "type": "select", "label": "时代",
+                         "options": [[str(i), f"时代{'一二三四五六七八'[i - 1]}"] for i in range(1, 9)],
+                         "default": "1"},
+                        {"key": "map_no", "type": "select", "label": "小图",
+                         "options": [[str(i), f"小图{'一二三四'[i - 1]}"] for i in range(1, 5)],
+                         "default": "1"},
+                        {"key": "team_no", "type": "select", "label": "部队",
+                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
+                         "default": "1"},
+                        {"key": "rounds", "type": "number", "label": "圈数",
+                         "default": 1, "min": 1, "max": 200}],
+                hidden=True, server="jp")
+
+
 # ── 自定义工作流（乐高排班）──
 # 出阵类积木的参数 schema 直接复用上面各 register_script 的注册内容，run 复用
 # 各 _build_* builder；参数由节点自己保存，旧参数只在迁移时快照。
@@ -4450,7 +4477,7 @@ async def api_save_settings(request: Request, server: str = ""):
         extra = set(body) - allowed
         if extra == {"params"}:
             params = body.get("params")
-            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin", "jp-edocastle"}:
+            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin", "jp-edocastle", "jp-sortie"}:
                 raise HTTPException(400, "日服只能保存日服脚本的参数")
         elif extra:
             raise HTTPException(400, "日服暂不支持自动执行设置")

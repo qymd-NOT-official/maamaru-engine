@@ -7,7 +7,7 @@ def test_jp_scripts_list_only_jp_scripts():
     client = TestClient(server.app)
     data = client.get("/api/scripts?server=jp").json()
     assert set(data["scripts"]) == {"jp-sally", "jp-expedition", "jp-pumpkin",
-                                    "jp-edocastle"}
+                                    "jp-edocastle", "jp-sortie"}
     sally = data["scripts"]["jp-sally"]
     assert sally["label"] == "日服出阵"
     assert {field["key"] for field in sally["params"]} == {"team_no", "rounds"}
@@ -28,6 +28,10 @@ def test_jp_scripts_list_only_jp_scripts():
     assert edocastle["label"] == "日服江户城"
     assert {field["key"] for field in edocastle["params"]} == {
         "team_no", "difficulty", "rounds"}
+    sortie = data["scripts"]["jp-sortie"]
+    assert sortie["label"] == "日服刷图"
+    assert {field["key"] for field in sortie["params"]} == {
+        "chapter", "map_no", "team_no", "rounds"}
 
 
 def test_default_scripts_list_never_includes_jp_scripts():
@@ -37,6 +41,7 @@ def test_default_scripts_list_never_includes_jp_scripts():
     assert "jp-expedition" not in data["scripts"]
     assert "jp-pumpkin" not in data["scripts"]
     assert "jp-edocastle" not in data["scripts"]
+    assert "jp-sortie" not in data["scripts"]
     assert "daily" in data["scripts"]
 
 
