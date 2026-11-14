@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { osakaRecommendation, type OsakaPaceRun } from './osakaRecommendation'
 import { api } from '../api'
 import ParamField from './ParamField.vue'
+import SwordListDrawer from './SwordListDrawer.vue'
 import { matchesRule } from '../visibility'
 import { raidDayRecommendation } from './report/planningLinkModel'
 import { compileDaily, dailyRows, listJumpDraft, makeNode, withRecommendedRuns, type DailyRow } from './dailySettingsModel'
@@ -56,11 +57,13 @@ function valueFor(node: WorkflowNode, key: string) { return node.params[key] ?? 
 function summary(row: DailyRow) {
   return row.nodes.map(node => {
     const fields = (definition(node.type)?.params || []).filter(f => f.type !== 'note' && matchesRule(f.visibleWhen, key => valueFor(node, key)))
-    return fields.slice(0, 2).map(f => {
+    const parts = fields.slice(0, 2).map(f => {
       const value = node.params[f.key] ?? f.default
       const option = f.options?.find(o => String(Array.isArray(o) ? o[0] : o) === String(value))
       return `${f.label}：${Array.isArray(option) ? option[1] : typeof value === 'boolean' ? value ? '开启' : '关闭' : value ?? ''}`
-    }).join(' · ')
+    })
+    if (node.type === 'pumpkin' && watchListOf(node).length) parts.push(`目标 ${watchListOf(node).length} 把`)
+    return parts.join(' · ')
   }).filter(Boolean).join('；') || '无需额外设置'
 }
 async function load() {
@@ -103,6 +106,13 @@ function setRecommendedRuns(enabled: boolean) {
     node.params = withRecommendedRuns(node, recommendation.value.runs).params
   } else if (manualActivityParams.value) node.params = clone(manualActivityParams.value)
   useRecommendedRuns.value = enabled
+}
+const pumpkinDrawerNode = ref<WorkflowNode | null>(null)
+function watchListOf(node: WorkflowNode): string[] {
+  const raw = node.params.watch
+  return Array.isArray(raw)
+    ? raw.map(String)
+    : String(raw || '').replace(/，/g, ',').split(',').map(name => name.trim()).filter(Boolean)
 }
 function openDismantleList() {
   if (preset.value) listJumpDraft.value = {...clone(preset.value), nodes: compileDaily(rows.value, tail.value), after: after.value,
@@ -232,6 +242,7 @@ async function stopExpeditions() {
         <fieldset v-for="(node, index) in activeRow.nodes" :key="`${activeRow.id}-${index}-${node.type}`" :disabled="busy || running">
           <legend v-if="activeRow.nodes.length > 1">{{ definition(node.type)?.label || node.type }}</legend>
           <button v-if="node.type === 'dismantle'" type="button" @click="openDismantleList">刀解名单 →</button>
+          <button v-if="node.type === 'pumpkin'" type="button" @click="pumpkinDrawerNode = node">南瓜目标名单{{ watchListOf(node).length ? `（已选 ${watchListOf(node).length} 把）` : '（未指定目标）' }} →</button>
           <div class="daily-fields">
             <template v-for="field in definition(node.type)?.params || []" :key="field.key">
               <ParamField v-if="matchesRule(field.visibleWhen, key => valueFor(node, key)) && !(activeRow.id === 'activity' && useRecommendedRuns && ['runs', 'auto_refill'].includes(field.key))" :field="field" :model-value="node.params[field.key] ?? field.default" @update:model-value="node.params[field.key] = $event" />
@@ -254,6 +265,14 @@ async function stopExpeditions() {
     <button v-if="!loading && preset" class="daily-stop" :disabled="busy" @click="stopToday">停止今日安排</button>
     <p v-if="timeline.booking?.blocks.length" class="daily-muted">开工时将以这份今日安排替换旧的任务时段；远征排班仍保留。</p>
     <button v-if="!loading && !preset" @click="load">重新加载</button>
+    <SwordListDrawer
+      :open="pumpkinDrawerNode !== null"
+      title="南瓜目标名单"
+      description="只用于这份日课安排里的南瓜出阵。认出名单外的刀会烧更新令牌换板子；留空则不筛选目标。"
+      :model-value="pumpkinDrawerNode ? watchListOf(pumpkinDrawerNode) : []"
+      @update:model-value="pumpkinDrawerNode && (pumpkinDrawerNode.params.watch = $event)"
+      @close="pumpkinDrawerNode = null"
+    />
   </section>
 </template>
 

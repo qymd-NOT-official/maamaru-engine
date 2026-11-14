@@ -142,8 +142,7 @@ class PumpkinPlanTests(unittest.TestCase):
         for name, prefix in expected.items():
             keys = [field.get("key") for field in scripts[name]["params"]]
             self.assertEqual(keys[:len(prefix)], prefix, name)
-        # 单跑/当期活动共用同一张表单，认人名单也在这里填（2026-11-14 老大亲定）
-        self.assertIn("watch", [field.get("key") for field in scripts["pumpkin"]["params"]])
+        self.assertNotIn("watch", [field.get("key") for field in scripts["pumpkin"]["params"]])
 
     def test_raid_selected_map_reaches_flow(self):
         agent = FakeAgent()
