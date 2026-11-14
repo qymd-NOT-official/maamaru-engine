@@ -1128,7 +1128,12 @@ register_script("pumpkin", "南瓜大作战", "刮刮乐刷剪影，能认出是
                         _team_field("3"),
                         _run_count_field(ticket=True, default=4),
                         {**_ticket_refill_field(),
-                         "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"}])
+                         "help": "占位功能，当前暂不执行自动补充。新版南瓜的更新令牌购买后不会正确刷新并关闭弹窗，为避免误消费小判，令牌不足时脚本仍会安全结束。"},
+                        {"key": "watch", "type": "text",
+                         "label": "目标刀剑（认出剪影才刷）",
+                         "swords": True, "default": "",
+                         "placeholder": "多个名字用逗号分隔，留空全刷",
+                         "help": "填了名单后，认出名单外的刀会烧更新令牌换板子；留空则不挑，见板就刷。"}])
 register_script("edocastle", "江户城潜入调查", "难度四：游戏自动行军或脚本巡游，按设定次数出阵",
                 _wrap_inventory("江户城", _build_edocastle),
                 params=[_team_field("3"),
