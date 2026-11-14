@@ -58,7 +58,7 @@ class DailyWorkflowTests(unittest.TestCase):
         types = [n["type"] for n in default["nodes"]]
         self.assertEqual(types, ["login", "signin", "free_gift", "practice", "expedition",
                                  "naihanka", "forge", "dismantle", "synthesize", "daily_sortie",
-                                 "task_rewards", "snapshot", "ledger_sync"])
+                                 "task_rewards", "inbox_scan", "snapshot", "ledger_sync"])
         copy = workflow.create_preset({**default, "name": "我的日课"})
         self.assertNotEqual(copy["id"], default["id"])
         self.assertTrue(copy["daily_mode"])

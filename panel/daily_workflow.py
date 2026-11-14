@@ -44,7 +44,8 @@ def make_template(settings, config, daily_steps):
     mapping = {"登录": "login", "签到": "signin", "万屋": "free_gift",
                "演练": "practice", "远征": "expedition", "内番": "naihanka",
                "锻刀": "forge", "刀解": "dismantle", "合成": "synthesize",
-               "出阵": "daily_sortie", "任务奖励": "task_rewards", "库存快照": "snapshot"}
+               "出阵": "daily_sortie", "任务奖励": "task_rewards",
+               "收件箱体检": "inbox_scan", "库存快照": "snapshot"}
     nodes = []
     for step in daily_steps:
         if step not in wanted:

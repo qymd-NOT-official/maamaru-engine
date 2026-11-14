@@ -144,6 +144,15 @@ def test_scoped_settings_save_preserves_other_gameplay_and_count(tmp_path):
     assert saved["params"]["raid"] == {"runs": 12, "auto_refill": True}
 
 
+def test_pumpkin_is_schedulable_during_its_event_window():
+    assert "pumpkin" in gp.SCRIPTS
+    now = datetime(2026, 10, 2, tzinfo=gp.events._TZ).timestamp()
+    cards = {"南瓜大作战": {"start_date": "2026-10-01", "end_date": "2026-10-03"}}
+    window = gp.event_window("pumpkin", cards, [], now)
+    assert window and window["end_at"] > now
+    assert gp.event_window("pumpkin", cards, [], now + 86400 * 3) is None
+
+
 def test_event_windows_advance_and_permanent_gameplay_stays_available():
     now = datetime(2026, 10, 2, tzinfo=gp.events._TZ).timestamp()
     cards = {"大阪城": {"start_date": "2026-10-01", "end_date": "2026-10-03"}}

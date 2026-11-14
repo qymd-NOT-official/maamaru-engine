@@ -137,7 +137,7 @@ export const scriptNames: Record<string, string> = {
   pumpkin: '南瓜大作战', daily: '一键日课',
   expedition: '远征', dispatch: '派遣远征', practice: '演练', smith: '锻刀', repair: '手入',
   sakura: '刷花', sugar: '炼糖', rotate_captain: '换队长', scheduler: '排班',
-  inbox_supplies: '收杂物箱', snapshot: '库存盘点', workflow: '自定义工作流',
+  inbox_supplies: '收杂物箱', inbox_scan: '收件箱体检', snapshot: '库存盘点', workflow: '自定义工作流',
   youzu_log: '游戏记录', game_inventory: '读取游戏家底',
 }
 

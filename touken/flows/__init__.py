@@ -19,6 +19,7 @@ from .daily import DailyMixin
 from .smith import SmithMixin
 from .synthesize import SynthesizeMixin
 from .sugar import SugarMixin
+from .inbox_scan import InboxScanMixin
 from .sakura import SakuraMixin
 from .logout import LogoutMixin
 from .snapshot import SnapshotMixin
@@ -29,4 +30,4 @@ from .sword_inventory import SwordInventoryMixin
 from .team_roster import TeamRosterMixin
 from .formation_editor import FormationEditorMixin
 
-__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin", "OsakaMixin", "EdocastleMixin", "HanafudaMixin", "SwordInventoryMixin", "TeamRosterMixin", "FormationEditorMixin"]
+__all__ = ["LoginMixin", "BattleMixin", "RewardsMixin", "RaidMixin", "PumpkinMixin", "NaihankaMixin", "SortieMixin", "ExpeditionMixin", "RepairMixin", "PracticeMixin", "SigninMixin", "DailyMixin", "SmithMixin", "SynthesizeMixin", "SugarMixin", "InboxScanMixin", "SakuraMixin", "LogoutMixin", "SnapshotMixin", "OsakaMixin", "EdocastleMixin", "HanafudaMixin", "SwordInventoryMixin", "TeamRosterMixin", "FormationEditorMixin"]

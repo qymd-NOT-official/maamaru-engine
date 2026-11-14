@@ -14,10 +14,10 @@ from pathlib import Path
 from .device_adapter import DeviceAdapter
 from .navigator import NavigationMixin
 from .runtime_paths import STATUS_DIR
-from .flows import LoginMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin, OsakaMixin, EdocastleMixin, HanafudaMixin, SwordInventoryMixin, TeamRosterMixin, FormationEditorMixin
+from .flows import LoginMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, InboxScanMixin, SakuraMixin, LogoutMixin, SnapshotMixin, OsakaMixin, EdocastleMixin, HanafudaMixin, SwordInventoryMixin, TeamRosterMixin, FormationEditorMixin
 
 
-class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, SakuraMixin, LogoutMixin, SnapshotMixin, OsakaMixin, EdocastleMixin, HanafudaMixin, SwordInventoryMixin, TeamRosterMixin, FormationEditorMixin):
+class ToukenAgent(LoginMixin, NavigationMixin, BattleMixin, RewardsMixin, RaidMixin, PumpkinMixin, NaihankaMixin, SortieMixin, ExpeditionMixin, RepairMixin, PracticeMixin, SigninMixin, DailyMixin, SmithMixin, SynthesizeMixin, SugarMixin, InboxScanMixin, SakuraMixin, LogoutMixin, SnapshotMixin, OsakaMixin, EdocastleMixin, HanafudaMixin, SwordInventoryMixin, TeamRosterMixin, FormationEditorMixin):
     """
     刀剑乱舞 Agent 主引擎
     所有操作基于配置文件，不硬编码任何游戏特定内容

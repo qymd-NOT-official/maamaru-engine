@@ -178,7 +178,8 @@ _TEAM_OPTIONS = [["1", "部队一"], ["2", "部队二"], ["3", "部队三"],
                  ["4", "部队四"], ["5", "部队五"]]
 _TEAM_CN = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 _DAILY_STEPS = ["登录", "签到", "万屋", "演练", "远征", "内番",
-                "锻刀", "刀解", "合成", "出阵", "任务奖励", "库存快照"]
+                "锻刀", "刀解", "合成", "出阵", "任务奖励", "收件箱体检",
+                "库存快照"]
 
 
 def _team_field(default="3"):
@@ -1316,6 +1317,25 @@ register_script("inbox_supplies", "收杂物箱",
                 "收件箱只收资源/货币/便利道具/其他物品，刀剑邮件原样躺着",
                 _wrap_inventory("收杂物", _build_simple("inbox_supplies_stream"),
                                 inventory=True))  # 收的都是资源，收完必拍家底
+
+
+def _build_inbox_scan(config_path, params):
+    """收件箱体检入口：自己开游戏进本丸再翻（每日自动检查和单跑共用）。"""
+    from touken.flow_control import FlowAborted
+    nodes = [{"type": "boot_emulator", "params": {}},
+             {"type": "login", "params": {}},
+             {"type": "inbox_scan", "params": {}}]
+    completed = yield from _workflow.run_workflow(
+        config_path, nodes, make_agent=_make_agent, after="none",
+        daily_mode=False)
+    if completed is False:
+        raise FlowAborted("收件箱体检未完成")
+
+
+register_script("inbox_scan", "收件箱体检",
+                "只读翻一遍待领邮件，快到期的 QQ/手机提醒，一封不领；"
+                "每天到点也会自动查一次",
+                _build_inbox_scan, params=[])
 register_script("snapshot", "库存快照",
                 "手动拍一次完整家底（含小判）刷新看板；日常已由锻刀收工顺手拍+顶栏顺路更新覆盖，想立刻刷新看板才用",
                 _wrap_inventory("库存", _build_simple("status_snapshot_stream"),
@@ -1768,6 +1788,10 @@ async def _startup():
     # 事件播报器：挂上 QQ 出口（没配 QQ 也能跑，只发 ntfy）
     from .broadcaster import init_broadcaster
     init_broadcaster(qq_sender=_qq_sender)
+
+    # 每日脉冲：收件箱自动体检 + 活动开/结束提醒（出口依赖播报器，放它后面）
+    from .inbox_pulse import start_pulse
+    start_pulse(str(_CONFIG_PATH), runner)
 
     # 暴露给 API 路由用：机器人控制
     import __main__ as _bm
@@ -3006,6 +3030,7 @@ _SCRIPT_FLAVOR = {
     "forge": "正在盯炉火🔥",
     "sugar": "正在炼糖🍬",
     "inbox_supplies": "正在收件箱翻杂物📮",
+    "inbox_scan": "正在体检收件箱📮",
     "snapshot": "正在盘点家底📦",
     "game_inventory": "正在读取游戏家底📦",
 }

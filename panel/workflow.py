@@ -272,6 +272,20 @@ _stream_node("sugar", "炼糖", "收件箱清狗粮 + 习合循环", "chore",
 _stream_node("inbox_supplies", "收杂物箱",
              "收件箱只收资源/货币/便利道具，刀剑邮件原样躺着", "chore",
              "inbox_supplies_stream")
+
+
+def _run_inbox_scan(agent, params, config_path):
+    """体检完顺手把临期提醒发掉（提醒规则在 inbox_watch，一封不领）。"""
+    mails = yield from agent.inbox_scan_stream()
+    if mails is None:
+        return
+    from .inbox_watch import process_scan
+    yield from process_scan(mails)
+
+
+_node("inbox_scan", "收件箱体检",
+      "只读翻一遍待领邮件，快到期的 QQ/手机提醒，一封不领",
+      "chore", _run_inbox_scan)
 _stream_node("task_rewards", "领任务奖励", "任务页一键领取日常/周常/月常奖励",
              "chore", "claim_task_rewards_stream")
 _stream_node("snapshot", "库存快照", "拍一次完整家底刷新看板", "chore",

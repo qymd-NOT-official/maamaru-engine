@@ -7,7 +7,7 @@ from datetime import datetime
 
 from touken import event_timeline as events
 
-SCRIPTS = ("raid", "hanafuda", "osaka", "edocastle", "sortie", "yosari")
+SCRIPTS = ("raid", "hanafuda", "osaka", "edocastle", "pumpkin", "sortie", "yosari")
 COUNT_KEYS = {"runs", "rounds", "loops", "floors", "max_runs", "refill_run_limit"}
 
 

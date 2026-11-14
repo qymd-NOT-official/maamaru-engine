@@ -9,6 +9,7 @@ export const dailyGroups = [
   ['forge', '锻刀刀解', 'forge', 'dismantle'], ['synthesize', '合成', 'synthesize'], ['expedition', '指定远征', 'expedition'],
   ['yosari', '异去', 'yosari'], ['activity', '当期活动'],
   ['rewards', '任务奖励', 'task_rewards'], ['inbox', '领杂物箱', 'inbox_supplies'],
+  ['scan', '收件箱体检', 'inbox_scan'],
   ['sugar', '炼糖', 'sugar'],
 ]
 export function makeNode(type: string, defs: WorkflowNodeDef[]): WorkflowNode {

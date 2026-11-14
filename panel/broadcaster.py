@@ -125,6 +125,15 @@ class Broadcaster:
         except Exception as exc:
             print(f"[播报] ntfy 发送失败: {exc}", flush=True)
 
+    def announce(self, qq_text: str, *, ntfy_text: str | None = None,
+                 title: str = "Maamaru Notice", tags: str = "fox",
+                 priority: str = "default"):
+        """主动提醒类公共出口（收件箱临期、活动开结束等）：
+        QQ 狐之助版照发；给了 ntfy 文案就顺手推手机，没给就只发 QQ。"""
+        self._send_qq(qq_text)
+        if ntfy_text:
+            self._send_ntfy(ntfy_text, title=title, tags=tags, priority=priority)
+
     # ── 事件分类 ──
 
     def feed(self, payload: dict):
