@@ -290,13 +290,24 @@ class JpEdocastle(jp_sally.Sally):
         """分歧点收圈：本丸へ帰城 → 确认はい → 回活动页。
 
         回城确认窗（帰城しますか はい/いいえ）是我们自己点帰城触发的，
-        上下文收敛，确认回城。"""
+        上下文收敛，确认回城。画布游戏的点击会被重绘吃掉：はい 点完
+        确认窗还在就补点，最多 3 次（2026-11-17 实测连吞两次）。"""
         self._click_hit('edo/return-home', '回本丸按钮')
         self._wait(frozenset({'dialog'}), jp_sally.NAV_TIMEOUT,
                    frozenset({'loading', 'edo_branch', 'unknown'}),
                    '打开回城确认')
-        self._click_hit('dialog/yes', '回城确认はい')
-        time.sleep(2.0)  # 让确认窗消失：_wait 见 dialog 会立即停
+        image = None
+        for attempt in range(1, 4):
+            self._click_hit('dialog/yes', '回城确认はい')
+            time.sleep(2.0)  # 让确认窗消失：_wait 见 dialog 会立即停
+            image = self.device.screenshot(force=True)
+            if self.classify(image) != 'dialog':
+                break
+            self.log(f'回城确认窗还在，补点はい（第 {attempt} 次没点上）…')
+        else:
+            self._save_debug(image)
+            raise jp_sally.SallyStop(
+                '回城确认点了好几次都没消，已停止；请人工查看游戏（截图已存到 debug）')
         self._wait(frozenset({'edo'}), jp_sally.NAV_TIMEOUT * 2,
                    frozenset({'loading', 'unknown'}), '回活动页')
 

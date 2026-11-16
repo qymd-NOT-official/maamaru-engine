@@ -130,3 +130,33 @@ def test_watch_run_never_ending_story_stops(fast_watch, monkeypatch):
     with pytest.raises(jp_sally.SallyStop, match='翻不完'):
         host._watch_run()
     assert len(host.device.clicks) == 3
+
+
+# ---- 分歧点收圈：はい 被画布重绘吞掉就补点（2026-11-17 实测连吞两次）----
+
+def _stub_settle(host):
+    from touken.device_adapter import Point
+    host._click_hit = lambda *a, **k: host.device.click(Point(0, 0))
+    host._wait = lambda *a, **k: None
+
+
+def test_settle_branch_retries_eaten_yes_click(fast_watch):
+    """はい 第一次没点上（确认窗还在）：补点一次，正常收圈。"""
+    host, logs = make_host()
+    _stub_settle(host)
+    screens = iter(['dialog', 'edo'])   # 第一次还在，第二次没了
+    host.classify = lambda image: next(screens, 'edo')
+    host._settle_branch()
+    # 回城按钮 1 次 + はい 2 次
+    assert len(host.device.clicks) == 3
+    assert any('补点はい' in line for line in logs)
+
+
+def test_settle_branch_gives_up_after_three_misses(fast_watch):
+    """はい 连点三次确认窗都不消：安全停车，不无限点下去。"""
+    host, _ = make_host()
+    _stub_settle(host)
+    host.classify = lambda image: 'dialog'
+    with pytest.raises(jp_sally.SallyStop, match='没消'):
+        host._settle_branch()
+    assert len(host.device.clicks) == 4  # 回城 1 次 + はい 3 次
