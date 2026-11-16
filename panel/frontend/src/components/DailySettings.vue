@@ -21,6 +21,7 @@ const loading = ref(true)
 const message = ref('')
 const after = ref<WorkflowPreset['after']>('none')
 const startTime = ref('')
+const autoSchedule = ref(false)
 const osakaRuns = ref<OsakaPaceRun[]>([])
 const osakaPaceError = ref(false)
 const clock = ref(new Date())
@@ -41,7 +42,7 @@ const useRecommendedRuns = ref(false)
 const manualActivityParams = ref<WorkflowNode['params'] | null>(null)
 const savedSignature = ref('')
 const activityNotice = ref('')
-const settingsSignature = computed(() => JSON.stringify({ rows: rows.value, after: after.value, startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value }))
+const settingsSignature = computed(() => JSON.stringify({ rows: rows.value, after: after.value, startTime: startTime.value, autoSchedule: autoSchedule.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value }))
 const unsaved = computed(() => !loading.value && settingsSignature.value !== savedSignature.value)
 const recommendation = computed(() => {
   const result = raidDayRecommendation(props.timeline, rows.value.find(r => r.id === 'activity')?.nodes[0]?.type === 'raid')
@@ -83,6 +84,7 @@ async function load() {
     manualActivityParams.value = preset.value.daily_ui?.manualActivityParams ? clone(preset.value.daily_ui.manualActivityParams) : null
     plannedExpeditions.value = preset.value.daily_ui?.plannedExpeditions !== false
     after.value = preset.value.after || 'none'; startTime.value = preset.value.daily_ui?.startTime || ''
+    autoSchedule.value = preset.value.daily_ui?.autoSchedule === true
     const currentActivity = rows.value.find(row => row.id === 'activity')?.nodes[0]?.type
     const changed = !!previousActivity && !!currentActivity && previousActivity !== currentActivity
     if (currentActivity !== 'raid') { useRecommendedRuns.value = false; manualActivityParams.value = null }
@@ -116,7 +118,7 @@ function watchListOf(node: WorkflowNode): string[] {
 }
 function openDismantleList() {
   if (preset.value) listJumpDraft.value = {...clone(preset.value), nodes: compileDaily(rows.value, tail.value), after: after.value,
-    daily_ui: { rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined }}
+    daily_ui: { rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, autoSchedule: autoSchedule.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined }}
   emit('openDismantleList')
 }
 async function saveExpeditionPrefs(rounds: number, teams: number[]) {
@@ -153,7 +155,7 @@ async function save(start = false) {
     const activity = rows.value.find(r => r.id === 'activity')
     if (activity?.enabled && (!activity.nodes.length || !activityOptions.value.some(d => d.script === activity.nodes[0]?.type))) throw new Error('当前选择的活动未开放，请更换活动或取消勾选')
     const body: WorkflowPreset = {...preset.value, nodes, after: after.value, daily_mode: true,
-      daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined}}
+      daily_ui: {rows: clone(rows.value), startTime: startTime.value, plannedExpeditions: plannedExpeditions.value, useRecommendedRuns: useRecommendedRuns.value, autoSchedule: autoSchedule.value, manualActivityParams: manualActivityParams.value ? clone(manualActivityParams.value) : undefined}}
     const result = await api.updateWorkflow(body)
     if (!result.ok) throw new Error('日课没有保存成功')
     if (!result.preset?.daily_ui) throw new Error('日课设置未完整保存，请重试')
@@ -259,6 +261,7 @@ async function stopExpeditions() {
 
     <footer v-if="preset" class="daily-settings-footer">
       <label>开始时间<input v-model="startTime" type="time" :disabled="busy || running" /><small>留空则现在开始</small></label>
+      <label class="daily-autoschedule"><input v-model="autoSchedule" type="checkbox" :disabled="busy || running" /><span>每天自动预排这段日课<small v-if="autoSchedule && !startTime">还没填开始时间，自动预排不会生效</small></span></label>
       <label>结束后<select v-model="after" :disabled="busy || running"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></select></label>
       <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button class="daily-save" :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间执行今日安排' : '一键执行今日安排' }}</button></div></div>
     </footer>
@@ -322,6 +325,8 @@ async function stopExpeditions() {
 .daily-parameters legend { margin-bottom: 12px; font-weight: bold; font-size: 13px; }
 .daily-settings-footer { display: flex; flex-wrap: wrap; align-items: end; gap: 18px; padding: 18px 0 0; margin-top: 24px; border-top: 1px solid var(--paper-line); }
 .daily-settings-footer label, .daily-activity { display: grid; gap: 7px; font-size: 13px; }
+.daily-settings-footer .daily-autoschedule { display: flex; align-items: center; gap: 8px; }
+.daily-autoschedule small { display: block; color: var(--ink-muted); }
 .daily-settings-footer small { font-size: 11px; }
 .daily-settings-footer input, .daily-settings select { padding: 8px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper-panel); color: inherit; max-width: 100%; }
 .daily-start { margin-left: auto; display: grid; gap: 8px; }

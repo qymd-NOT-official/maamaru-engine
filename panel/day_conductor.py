@@ -269,6 +269,7 @@ def arm(plan: dict, timeline: dict, workflow_id: str, raid_settings: dict,
                     "start_min": block["start_min"], "kind": "workflow",
                     "workflow_id": preset["id"], "label": preset["name"],
                     "status": "pending", "workflow_signature": signature,
+                    **({"after_raids": True} if block.get("after_raids") is True else {}),
                 })
             else:
                 blocks.append({"start_min": block["start_min"], "kind": "daily",
@@ -581,8 +582,10 @@ def tick(now: float, runner, timeline_fn, raid_settings_fn, config_path: str,
             if block.get("status") != "pending":
                 continue
             due = float(state["day_start"]) + block["start_min"] * 60
-            after_raids = block.get("kind") == "daily" and block.get("after_raids") is True
-            if after_raids and any(b.get("kind") == "raid" and b.get("status") != "ended"
+            after_raids = block.get("kind") in ("daily", "workflow") and block.get("after_raids") is True
+            # 只等「还可能跑」的联队战：blocked/missed/cancelled 已经开不了工，
+            # 抱着它们死等只会让日课陪绑到换日被判 missed。
+            if after_raids and any(b.get("kind") == "raid" and b.get("status") in ("pending", "running")
                                    for b in state["blocks"]):
                 continue
             if now < due and not after_raids:

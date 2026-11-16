@@ -114,7 +114,7 @@ export interface WorkflowProjectionStep {
 }
 
 export interface WorkflowPreset {
-  daily_ui?: { rows: Array<{ id: string; label: string; enabled: boolean; nodes: WorkflowNode[] }>; startTime: string; plannedExpeditions?: boolean; useRecommendedRuns?: boolean; manualActivityParams?: WorkflowNode['params'] }
+  daily_ui?: { rows: Array<{ id: string; label: string; enabled: boolean; nodes: WorkflowNode[] }>; startTime: string; plannedExpeditions?: boolean; useRecommendedRuns?: boolean; autoSchedule?: boolean; manualActivityParams?: WorkflowNode['params'] }
   steps?: WorkflowProjectionStep[]
   id: string
   name: string

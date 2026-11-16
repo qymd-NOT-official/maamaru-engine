@@ -443,7 +443,10 @@ def _daily_ui(body, nodes):
             compiled.extend(normalized)
     compiled = [node for node in compiled if node["type"] not in {"boot_emulator", "login"}]
     actual = [node for node in nodes if node["type"] not in {"snapshot", "ledger_sync", "boot_emulator", "login"}]
-    return copy.deepcopy(ui) if compiled == actual else None
+    result = copy.deepcopy(ui)
+    if "autoSchedule" in result:
+        result["autoSchedule"] = result["autoSchedule"] is True
+    return result if compiled == actual else None
 
 
 def create_preset(body: dict) -> dict:

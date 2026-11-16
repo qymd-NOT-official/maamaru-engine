@@ -44,7 +44,8 @@ def _normalize_block(block: dict) -> dict | None:
         if not isinstance(block.get("workflow_id"), str) or not block["workflow_id"]:
             return None
         return {"start_min": block["start_min"], "kind": "workflow",
-                "workflow_id": block["workflow_id"]}
+                "workflow_id": block["workflow_id"],
+                **({"after_raids": True} if block.get("after_raids") is True else {})}
     if kind == "daily":
         return {"start_min": block["start_min"], "kind": "daily",
                 **({"after_raids": True} if block.get("after_raids") is True else {})}

@@ -1795,6 +1795,13 @@ async def _startup():
     from .inbox_pulse import start_pulse
     start_pulse(str(_CONFIG_PATH), runner)
 
+    # 凌晨日课自动预排：04:00 换日后把「一键日课」按日课设置排进今日安排
+    from .daily_autoschedule import start_autoschedule
+    start_autoschedule(
+        _day_timeline_payload,
+        lambda: (_load_panel_settings().get("params", {}).get("raid", {}) or {}),
+        _sched_emit)
+
     # 暴露给 API 路由用：机器人控制
     import __main__ as _bm
     _bm._bot_instance = _bot_instance
@@ -2605,18 +2612,22 @@ async def api_day_conductor(request: Request):
         from .plan_control import stop_today
         stop_today(get_runner())
     else:
-        plan = load_plan()
-        if not plan:
-            raise HTTPException(409, "先记下今天的联队战时间和圈数")
-        workflow_id = body.get("workflow_id")
-        if not isinstance(workflow_id, str):
-            raise HTTPException(400, "请选择联队战任务流")
-        timeline = _day_timeline_payload()
-        try:
-            arm(plan, timeline, workflow_id,
-                (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        # load_plan 与 arm 之间不能留窗口：自动预排线程在同一把锁里跑
+        # 「读 plan→追加→save→arm」全程，两边都只见到完整序列。
+        from .day_conductor import _LOCK
+        with _LOCK:
+            plan = load_plan()
+            if not plan:
+                raise HTTPException(409, "先记下今天的联队战时间和圈数")
+            workflow_id = body.get("workflow_id")
+            if not isinstance(workflow_id, str):
+                raise HTTPException(400, "请选择联队战任务流")
+            timeline = _day_timeline_payload()
+            try:
+                arm(plan, timeline, workflow_id,
+                    (_load_panel_settings().get("params", {}).get("raid", {}) or {}))
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
     timeline = _day_timeline_payload()
     return {"conductor": timeline["conductor"]}
 
@@ -2837,7 +2848,7 @@ async def api_save_day_raid_plan(request: Request):
 @app.put("/api/day-timeline/schedule")
 async def api_save_day_schedule(request: Request):
     """保存今日时段表并当场开启大总管：保存即开工，一次到位。"""
-    from .day_conductor import BUILTIN_ID, arm
+    from .day_conductor import BUILTIN_ID, arm, _LOCK
     from .day_plan import review_plan, save_plan
 
     if _ledger_mode():
@@ -2848,25 +2859,29 @@ async def api_save_day_schedule(request: Request):
     activity = timeline.get("activity") or {}
     plan = {"day_start": timeline["day_start"],
             "event_end_at": activity.get("event_end_at"), "blocks": blocks}
-    if blocks == []:
-        from .plan_control import stop_today
-        stop_today(get_runner())
-        save_plan(plan["day_start"], plan["event_end_at"], [])
-        timeline = _day_timeline_payload()
-        return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
-    issues = review_plan(plan, timeline)
-    if issues:
-        raise HTTPException(409, "；".join(issues))
-    plan["blocks"] = _clean_schedule_blocks(blocks)
-    workflow_id = body.get("raid_workflow_id")
-    workflow_id = workflow_id if isinstance(workflow_id, str) and workflow_id else BUILTIN_ID
-    raid_settings = (_load_panel_settings().get("params", {}).get("raid", {}) or {})
-    try:
-        arm(plan, timeline, workflow_id, raid_settings, persist=False)
-        saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
-        arm(saved, timeline, workflow_id, raid_settings)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
+    # 校验 → 存计划 → 武装全程持锁：日课自动预排线程也在同一把锁里
+    # 跑完整序列，任何一边都不会在 save 与 arm 之间插队，state 签名
+    # 不会回落到旧 plan（全天停摆事故）。
+    with _LOCK:
+        if blocks == []:
+            from .plan_control import stop_today
+            stop_today(get_runner())
+            save_plan(plan["day_start"], plan["event_end_at"], [])
+            timeline = _day_timeline_payload()
+            return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
+        issues = review_plan(plan, timeline)
+        if issues:
+            raise HTTPException(409, "；".join(issues))
+        plan["blocks"] = _clean_schedule_blocks(blocks)
+        workflow_id = body.get("raid_workflow_id")
+        workflow_id = workflow_id if isinstance(workflow_id, str) and workflow_id else BUILTIN_ID
+        raid_settings = (_load_panel_settings().get("params", {}).get("raid", {}) or {})
+        try:
+            arm(plan, timeline, workflow_id, raid_settings, persist=False)
+            saved = save_plan(plan["day_start"], plan["event_end_at"], plan["blocks"])
+            arm(saved, timeline, workflow_id, raid_settings)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
     timeline = _day_timeline_payload()
     return {"conductor": timeline["conductor"], "booking": timeline["booking"]}
 
@@ -2885,7 +2900,8 @@ def _clean_schedule_blocks(blocks) -> list[dict]:
         elif kind == "workflow":
             clean.append({"start_min": int(block["start_min"]),
                           "kind": "workflow",
-                          "workflow_id": str(block["workflow_id"])})
+                          "workflow_id": str(block["workflow_id"]),
+                          **({"after_raids": True} if block.get("after_raids") is True else {})})
         else:
             clean.append({"start_min": int(block["start_min"]),
                           "kind": "daily",
