@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """日志存储测试：追加/最近拉取/after_id 增量/run_id 回看（跑况时间线的历史数据源）。"""
 
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from panel.log_store import LogStore
@@ -36,6 +38,22 @@ class LogStoreTests(unittest.TestCase):
         self.store.append("run-a", "daily", "three")
         rows = self.store.get_recent(limit=10, after_id=last)
         self.assertEqual([r["message"] for r in rows], ["three"])
+
+    def test_opening_existing_database_preserves_old_chat_history(self):
+        path = Path(self._tmp.name) / "old-logs.db"
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute("CREATE TABLE chat_history (id INTEGER PRIMARY KEY, ts REAL, role TEXT, content TEXT)")
+            conn.execute("INSERT INTO chat_history VALUES (1, 0, 'user', 'old message')")
+
+        store = LogStore(path)
+        try:
+            store.append("run-a", "daily", "new log")
+            self.assertEqual(store.get_recent()[0]["message"], "new log")
+        finally:
+            store.close()
+
+        with closing(sqlite3.connect(path)) as conn:
+            self.assertEqual(conn.execute("SELECT content FROM chat_history").fetchall(), [("old message",)])
 
     def test_run_id_filter_returns_that_run_in_order(self):
         self.store.append("run-a", "daily", "a1")

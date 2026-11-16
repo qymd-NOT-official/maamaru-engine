@@ -1077,70 +1077,6 @@ html, body {
 .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-danger:hover:not(:disabled) { opacity: 0.85; }
 
-/* ── 聊天面板 ── */
-#chat-container {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 10px;
-}
-#chat-messages { display: flex; flex-direction: column; gap: 10px; }
-
-.msg { display: flex; gap: 8px; align-items: flex-start; }
-.msg-user { flex-direction: row-reverse; }
-.msg-avatar {
-  width: 32px; height: 32px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  background: var(--accent3);
-  flex-shrink: 0;
-}
-.msg-user .msg-avatar { background: var(--bg-panel); }
-.msg-bubble {
-  max-width: 75%;
-  padding: 8px 14px;
-  border-radius: 12px;
-  background: var(--surface-input);
-  border: 1px solid var(--border);
-}
-.msg-user .msg-bubble {
-  background: var(--accent3);
-  border-color: var(--accent);
-}
-.msg-name { font-size: 11px; color: var(--fg-dim); margin-bottom: 2px; }
-.msg-text { font-size: 13px; line-height: 1.6; }
-.msg-system .msg-text { color: var(--fg); }
-.msg-typing .msg-text::after {
-  content: "⠋"; animation: typing-dot 0.8s infinite;
-}
-@keyframes typing-dot {
-  0%, 20% { content: "⠋"; }
-  40% { content: "⠙"; }
-  60% { content: "⠹"; }
-  80% { content: "⠸"; }
-}
-
-.chat-input-area {
-  display: flex; gap: 8px;
-}
-.chat-input-area input {
-  flex: 1; padding: 10px 14px;
-  border: 1px solid var(--border); border-radius: 8px;
-  font-size: 14px; outline: none; background: var(--surface-input);
-}
-.chat-input-area input:focus { border-color: var(--accent); }
-.chat-input-area button {
-  padding: 10px 20px;
-  border: none; border-radius: 8px;
-  background: var(--accent); color: #fff;
-  font-size: 14px; cursor: pointer; transition: opacity 0.2s;
-}
-.chat-input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
-.chat-input-area button:hover:not(:disabled) { opacity: 0.85; }
-
 /* ── 弹窗 ── */
 .modal-overlay {
   position: fixed; inset: 0;
@@ -1324,12 +1260,6 @@ html, body {
   .sched-row select { max-width: 100%; }
   .sr-on { justify-content: flex-end; }
   .sr-del { margin-left: 0; align-self: flex-end; }
-
-  /* ── 聊天 ── */
-  .msg-bubble { max-width: 90%; font-size: 12px; padding: 6px 10px; }
-  .msg-avatar { width: 26px; height: 26px; font-size: 14px; }
-  .chat-input-area input { font-size: 13px; padding: 8px 10px; }
-  .chat-input-area button { font-size: 12px; padding: 8px 14px; }
 
   /* ── 弹窗 ── */
   .modal { width: 95vw; }
@@ -1572,7 +1502,6 @@ html, body {
 .sys-card,
 .func-detail,
 .modal,
-#chat-container,
 #log-container {
   border-width: var(--card-border-width);
   box-shadow: var(--card-shadow);
@@ -1587,8 +1516,7 @@ textarea { font-family: var(--font); }
 .btn-primary,
 .btn-secondary,
 .s-gear,
-.fd-btn,
-#chat-send {
+.fd-btn {
   border-width: var(--control-border-width);
   border-radius: var(--control-radius);
   box-shadow: var(--control-shadow);
@@ -1598,14 +1526,12 @@ textarea { font-family: var(--font); }
 .btn-primary:active,
 .btn-secondary:active,
 .s-gear:active,
-.fd-btn:active,
-#chat-send:active { box-shadow: var(--pressed-shadow); }
+.fd-btn:active { box-shadow: var(--pressed-shadow); }
 
 .pf select,
 .pf input[type="number"],
 .pf-sword-list .sl-input,
 .sl-search,
-.chat-input-area input,
 .modal-body input,
 .modal-body textarea,
 .sched-row input[type="time"],
@@ -1715,7 +1641,6 @@ body.theme-pixel .run-banner,
 body.theme-pixel .sched-card,
 body.theme-pixel .script-card,
 body.theme-pixel .modal,
-body.theme-pixel #chat-container,
 body.theme-pixel #log-container {
   border: 2px solid var(--border);
   box-shadow: var(--card-shadow);
@@ -1729,8 +1654,7 @@ body.theme-pixel select {
 body.theme-pixel .small-btn,
 body.theme-pixel .btn-primary,
 body.theme-pixel .btn-secondary,
-body.theme-pixel .icon-btn,
-body.theme-pixel #chat-send {
+body.theme-pixel .icon-btn {
   border: 2px solid var(--border);
   box-shadow: var(--control-shadow);
 }
@@ -1905,7 +1829,6 @@ body.theme-pixel .lv-banner { color: var(--accent2); background: var(--accent3);
 /* 输入框 / 下拉框：浅色凹槽 */
 body.theme-pixel .pf select,
 body.theme-pixel .pf input[type="number"],
-body.theme-pixel .chat-input-area input,
 body.theme-pixel .modal-body input,
 body.theme-pixel .sched-row input[type="time"],
 body.theme-pixel .sched-row select,
@@ -1918,8 +1841,7 @@ body.theme-pixel .sys-form textarea {
   box-shadow: var(--pressed-shadow);
 }
 body.theme-pixel .pf select:focus,
-body.theme-pixel .pf input[type="number"]:focus,
-body.theme-pixel .chat-input-area input:focus {
+body.theme-pixel .pf input[type="number"]:focus {
   border-color: var(--accent);
 }
 /* 下拉弹层（原生渲染也保持同色） */
@@ -2018,15 +1940,6 @@ body.theme-pixel .sl-chip.on {
   box-shadow: var(--control-shadow);
 }
 
-/* 聊天气泡使用独立浅色表面 */
-body.theme-pixel .msg-bubble {
-  background: var(--surface-input);
-  color: var(--fg);
-  border: 2px solid var(--border);
-  border-radius: 0;
-}
-
-/* 设置弹窗的角色设定输入框 */
 .modal-body textarea {
   width: 100%; padding: 8px 10px;
   border: 1px solid var(--border); border-radius: 6px;

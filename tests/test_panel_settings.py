@@ -10,6 +10,27 @@ from panel import server
 
 
 class PanelSettingsTests(unittest.TestCase):
+    def test_panel_chat_is_removed_and_robot_model_settings_still_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "panel.json"
+            config.write_text(json.dumps({
+                "ai": {"model": "old-model", "api_key": "old-key", "system_prompt": "saved role"},
+                "bot": {"enabled": True},
+            }), encoding="utf-8")
+            with patch.object(server, "_PANEL_CONFIG", config), patch.object(server, "_agent_gateway", None):
+                client = TestClient(server.app)
+                self.assertEqual(client.get("/api/chat/history").status_code, 404)
+                self.assertEqual(client.post("/api/chat", json={"message": "hello"}).status_code, 404)
+                self.assertEqual(client.get("/api/chat-config").status_code, 404)
+                self.assertNotIn("system_prompt", client.get("/api/agent-config").json())
+                self.assertTrue(client.post("/api/agent-config", json={"model": "new-model"}).json()["ok"])
+                self.assertEqual(client.get("/api/agent-config").json()["model"], "new-model")
+                self.assertEqual(server._get_gateway().model, "new-model")
+                saved = json.loads(config.read_text("utf-8"))
+                self.assertEqual(saved["ai"]["api_key"], "old-key")
+                self.assertEqual(saved["ai"]["system_prompt"], "saved role")
+                self.assertTrue(saved["bot"]["enabled"])
+
     def test_scenery_persists_without_overwriting_other_settings(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(server, "_SETTINGS_FILE", Path(tmp) / "settings.json"):

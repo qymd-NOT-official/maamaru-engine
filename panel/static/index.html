@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>まあ丸 — 本丸近侍パネル</title>
-<link rel="stylesheet" href="/static/style.css?v=20260811-26">
+<link rel="stylesheet" href="/static/style.css?v=20261117-1">
 </head>
 <body>
 <div id="app">
@@ -29,7 +29,6 @@
   <nav id="tabs">
     <button class="tab active with-ui-icon ui-home" data-tab="home">概览</button>
     <button class="tab with-ui-icon ui-gear" data-tab="control">配置</button>
-    <button class="tab with-ui-icon ui-singleplayer" data-tab="chat">近侍</button>
     <button class="tab with-ui-icon ui-wrench" data-tab="system">系统</button>
     <div class="top-right nav-tools">
       <span id="status-dot" class="dot dot-green"></span>
@@ -210,33 +209,10 @@
       </div>
     </section>
 
-    <!-- ── 聊天 ── -->
-    <section id="panel-chat" class="tab-panel">
-      <div class="panel-header">
-        <h2 class="with-ui-icon ui-singleplayer">狐之助</h2>
-        <button id="btn-clear-chat" class="small-btn with-ui-icon ui-trash" title="清空对话">清空</button>
-      </div>
-      <div id="chat-container">
-        <div id="chat-messages">
-          <div class="msg msg-system">
-            <div class="msg-avatar">🦊</div>
-            <div class="msg-bubble">
-              <div class="msg-name">狐之助</div>
-              <div class="msg-text">主君，您来了！本丸一切正常，有什么需要我帮忙的吗？</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="chat-input-area">
-        <input type="text" id="chat-input" placeholder="跟狐之助说点什么…" autocomplete="off">
-        <button id="chat-send" disabled>发送</button>
-      </div>
-    </section>
-
     <!-- ── 系统：双栏，左分组导航 / 右表单 ── -->
     <section id="panel-system" class="tab-panel">
       <div class="panel-header">
-        <h2 class="with-ui-icon ui-wrench">系统设置 — 协议端、播报、角色设定都集中在这里</h2>
+        <h2 class="with-ui-icon ui-wrench">系统设置 — 协议端、播报、机器人模型都集中在这里</h2>
         <div class="panel-actions">
           <span id="sys-status" class="cfg-status-inline"></span>
         </div>
@@ -258,16 +234,15 @@
 <script src="/static/js/theme-manager.js?v=20260809-1"></script>
 <script src="/static/js/ui-feedback.js?v=20260731-1"></script>
 <script src="/static/js/system-qq.js?v=20260731-1"></script>
-<script src="/static/js/system-settings.js?v=20260811-4"></script>
+<script src="/static/js/system-settings.js?v=20261117-1"></script>
 <script src="/static/js/expedition-schedule.js?v=20260804-2"></script>
 <script src="/static/js/dashboard.js?v=20260811-1"></script>
 <script src="/static/js/log-viewer.js?v=20260804-1"></script>
-<script src="/static/js/chat.js?v=20260804-1"></script>
 <script src="/static/js/sword-picker.js?v=20260809-2"></script>
 <script src="/static/js/param-form.js?v=20260809-2"></script>
 <script src="/static/js/task-card.js?v=20260809-3"></script>
 <script src="/static/js/list-editor.js?v=20260731-2"></script>
 <script src="/static/js/task-runner.js?v=20260811-2"></script>
-<script src="/static/app.js?v=20260811-7"></script>
+<script src="/static/app.js?v=20261117-1"></script>
 </body>
 </html>

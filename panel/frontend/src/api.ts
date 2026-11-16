@@ -230,12 +230,6 @@ export const api = {
   }),
   logs: (limit = 200) => request<{ logs: any[] }>(`/api/logs?limit=${limit}`),
   logsForRun: (runId: string, limit = 3000) => request<{ logs: any[] }>(`/api/logs?run_id=${encodeURIComponent(runId)}&limit=${limit}`),
-  chatHistory: () => request<{ history: Array<{ role: string; content: string; ts: number }> }>('/api/chat/history'),
-  chat: (message: string) => request<{ reply: string }>('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
-  }),
   configLists: () => request<Record<string, string[]>>('/api/config-lists'),
   swords: () => request<{ swords: Array<{ id: string; name: string; name_zh: string; type: string }> }>('/api/swords'),
   saveConfigLists: (value: Record<string, string[]>) => request<{ ok: boolean }>('/api/config-lists', {
@@ -252,12 +246,8 @@ export const api = {
   pauseExpeditions: (minutes: number) => request<{ ok: boolean; paused_until: string }>('/api/expedition-pause', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ minutes }),
   }),
-  chatConfig: () => request<any>('/api/chat-config'),
   botConfig: () => request<any>('/api/bot-config'),
   qqStatus: () => request<any>('/api/qq-status'),
-  saveChatConfig: (value: any) => request<{ ok: boolean }>('/api/chat-config', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
-  }),
   saveBotConfig: (value: any) => request<any>('/api/bot-config', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),

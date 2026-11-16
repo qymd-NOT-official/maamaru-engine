@@ -1,5 +1,5 @@
 /**
- * System settings tab: AI, QQ, Telegram, and broadcast configuration.
+ * System settings tab: bot model, QQ, Telegram, and broadcast configuration.
  */
 (function() {
   'use strict';
@@ -10,7 +10,7 @@
   const $ = app.dom.one;
   const escape = app.dom.escape;
   const groups = [{ label: '系统配置', items: [
-    { key: 'ai', label: 'AI', icon: '✦', desc: '近侍狐之助的脑子：API、模型、角色设定都在这' },
+    { key: 'ai', label: '机器人模型', icon: '✦', desc: 'QQ 和 Telegram 消息机器人使用的 API 和模型' },
     { key: 'qq', label: 'QQ', icon: '🗨︎', desc: 'OneBot 协议端：连接状态、消息 API 与管理页面' },
     { key: 'telegram', label: 'Telegram', icon: '✈', desc: 'Telegram Bot：Token + 白名单' },
     { key: 'broadcast', label: '播报', icon: '◉', desc: '脚本状态变化时通知哪些渠道' },
@@ -26,7 +26,7 @@
 
   async function load() {
     const [ai, bot] = await Promise.all([
-      app.api.json('/api/chat-config'),
+      app.api.json('/api/agent-config'),
       app.api.json('/api/bot-config'),
     ]);
     cache = { ai, bot };
@@ -48,11 +48,10 @@
     let extra = '';
     try {
       if (selected === 'ai') {
-        ok = (await app.api.post('/api/chat-config', {
+        ok = (await app.api.post('/api/agent-config', {
           api_key: $('#sys-api-key').value.trim(),
           base_url: $('#sys-api-url').value.trim(),
           model: $('#sys-api-model').value.trim(),
-          system_prompt: $('#sys-api-prompt').value,
         })).ok;
       } else {
         const body = {};
@@ -191,11 +190,6 @@
       input(form, 'sys-api-key', 'API Key', '', placeholder, 'password', 'pf-prompt');
       input(form, 'sys-api-url', 'API 地址', ai.base_url || '', 'https://api.openai.com/v1');
       input(form, 'sys-api-model', '模型', ai.model || '', 'gpt-4o-mini');
-      const prompt = document.createElement('div');
-      prompt.className = 'pf pf-prompt';
-      prompt.innerHTML = `<label>角色设定（System Prompt）</label><textarea id="sys-api-prompt" placeholder="留空 = 默认狐之助">${escape(ai.system_prompt || ai.default_prompt || '')}</textarea>`;
-      form.appendChild(prompt);
-      addHint(form, '保存后立刻生效，不用重启。角色设定清空保存即恢复默认狐之助。');
     } else if (item.key === 'qq') {
       const status = document.createElement('div');
       status.id = 'qq-status-box';

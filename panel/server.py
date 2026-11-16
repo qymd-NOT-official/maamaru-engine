@@ -2376,13 +2376,13 @@ async def api_save_emulator_config(request: Request):
             "performance_mode": cfg.get("performance_mode", "eco")}
 
 
-# ── API：聊天（已并轨 Agent 网关，面板聊天也能调脚本）──
+# ── API：Agent 网关（跨渠道 LLM 入口）──
 
 _agent_gateway = None
 
 
 def _get_gateway():
-    """Agent 网关单例。chat-config 保存后置 None 重建，新配置即生效"""
+    """Agent 网关单例，保存模型配置后重建。"""
     global _agent_gateway
     if _agent_gateway is None:
         from .agent import AgentGateway
@@ -2390,35 +2390,9 @@ def _get_gateway():
     return _agent_gateway
 
 
-@app.get("/api/chat/history")
-async def api_chat_history():
-    store = get_store()
-    return {"history": store.get_chat_history()}
-
-
 # sync 的 LLM 调用走线程池，别卡事件循环（SSE 心跳全靠它）
 from starlette.concurrency import run_in_threadpool as _run_io
 
-
-@app.post("/api/chat")
-async def api_chat(request: Request):
-    """面板「近侍」tab：已并轨 Agent 网关——聊天归聊天，说干活就真去干活"""
-    body = await request.json()
-    message = body.get("message", "").strip()
-    if not message:
-        return JSONResponse({"reply": "（狐之助歪了歪头：主君，你说什么？）"})
-
-    store = get_store()
-    store.add_chat("user", message)
-    try:
-        reply = await _run_io(_get_gateway().process, message, "web")
-    except Exception as exc:
-        reply = f"（狐之助耳朵耷拉下来：主君…我脑子冒烟了 — {exc}）"
-    store.add_chat("assistant", reply)   # 历史展示照旧走 log_store
-    return {"reply": reply}
-
-
-# ── API：Agent 网关（跨渠道 LLM 入口）──
 
 @app.post("/api/agent")
 async def api_agent(request: Request):
@@ -3220,8 +3194,6 @@ async def api_dashboard():
 
     return data
 
-
-# ── API：聊天 AI 配置（设置弹窗真正落盘 + 热重载，不用重启）──
 
 def _mask(value: str) -> str:
     """敏感字符串脱敏：头 4 位 + … + 尾 4 位。空值/短值原样返回"""
@@ -4421,27 +4393,24 @@ async def api_ocr_stats():
                 "ok": False, "error": str(exc)}
 
 
-# ── API：聊天 AI 配置（设置弹窗真正落盘 + 热重载，不用重启）──
+# ── API：消息机器人模型配置 ──
 
-@app.get("/api/chat-config")
-async def api_get_chat_config():
+@app.get("/api/agent-config")
+async def api_get_agent_config():
     cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
     ai = cfg.get("ai", {})
     key = ai.get("api_key", "")
     masked = (key[:6] + "…" + key[-4:]) if len(key) > 12 else ""
-    from .chat_ai import KITSUNE_SYSTEM_PROMPT
     return {
         "has_key": bool(key) and key != "YOUR_OPENAI_API_KEY",
         "api_key_masked": masked,
         "base_url": ai.get("base_url", ""),
         "model": ai.get("model", ""),
-        "system_prompt": ai.get("system_prompt", ""),
-        "default_prompt": KITSUNE_SYSTEM_PROMPT,
     }
 
 
-@app.post("/api/chat-config")
-async def api_save_chat_config(request: Request):
+@app.post("/api/agent-config")
+async def api_save_agent_config(request: Request):
     body = await request.json()
     cfg = json.loads(_PANEL_CONFIG.read_text(encoding="utf-8"))
     ai = cfg.setdefault("ai", {})
@@ -4452,18 +4421,9 @@ async def api_save_chat_config(request: Request):
         ai["base_url"] = str(body["base_url"]).strip()
     if body.get("model"):
         ai["model"] = str(body["model"]).strip()
-    # 角色 prompt：空字符串 = 恢复默认狐之助（显式清空也合法，所以用 in 判断）
-    if "system_prompt" in body:
-        sp = str(body["system_prompt"]).strip()
-        if sp:
-            ai["system_prompt"] = sp
-        else:
-            ai.pop("system_prompt", None)
     _PANEL_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    from .chat_ai import reload_ai
-    reload_ai(str(_PANEL_CONFIG))  # 热重载，不用重启面板
     global _agent_gateway
-    _agent_gateway = None            # Agent 网关也重建，新 key/模型/人设即生效
+    _agent_gateway = None
     return {"ok": True}
 
 

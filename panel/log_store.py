@@ -49,14 +49,6 @@ class LogStore:
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_logs_run ON logs(run_id)
         """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chat_history (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts          REAL    NOT NULL,
-                role        TEXT    NOT NULL,
-                content     TEXT    NOT NULL
-            )
-        """)
         conn.commit()
 
     def append(self, run_id: str, script: str, message: str):
@@ -126,24 +118,6 @@ class LogStore:
                 conn.close()
             except Exception:
                 pass
-
-    def add_chat(self, role: str, content: str):
-        """存一条聊天记录"""
-        conn = self._get_conn()
-        conn.execute(
-            "INSERT INTO chat_history (ts, role, content) VALUES (?, ?, ?)",
-            (time.time(), role, content),
-        )
-        conn.commit()
-
-    def get_chat_history(self, limit: int = 50) -> list[dict]:
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT ts, role, content FROM chat_history ORDER BY id ASC"
-        ).fetchall()
-        return [
-            {"ts": row[0], "role": row[1], "content": row[2]} for row in rows
-        ]
 
 
 # 全局单例

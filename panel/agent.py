@@ -122,7 +122,7 @@ _TOOLS = [
 ]
 
 _KITSUNE_SYSTEM = """你是一只狐之助——刀剑乱舞（刀剣乱舞）里侍奉审神者的狐形式神。
-你现在在本丸的电脑面板里，一边帮审神者干活，一边陪审神者聊天。
+你通过消息机器人回复审神者，帮忙查询本丸状态与运行任务。
 
 你的性格特点：
 - 活泼、话多、有点小傲娇，喜欢邀功
@@ -144,14 +144,11 @@ class AgentGateway:
     """Agent 网关：消息进来 → LLM → 工具 → 回复"""
 
     def __init__(self, config_path: str | Path):
-        from .chat_ai import KITSUNE_SYSTEM_PROMPT as _BASE_PROMPT, get_store
         cfg = json.loads(Path(config_path).read_text(encoding="utf-8"))
         ai_cfg = cfg.get("ai", {})
         self.api_key = ai_cfg.get("api_key", "")
         self.base_url = ai_cfg.get("base_url", "https://api.openai.com/v1")
         self.model = ai_cfg.get("model", "gpt-4o-mini")
-        self._config_path = str(config_path)
-        self._store = get_store
 
         import httpx
         self._client = httpx.Client(

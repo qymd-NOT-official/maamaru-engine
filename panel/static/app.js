@@ -582,7 +582,6 @@
     await loadSavedSettings();
     await frontend.logViewer?.init();
     await loadScripts();
-    await frontend.chat?.init();
     frontend.expeditionSchedule?.load();
     frontend.dashboard?.init({ isRunning: () => isRunning });
     setInterval(taskRunner.poll, 3000);
