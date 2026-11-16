@@ -22,6 +22,8 @@ edo/diff-1..4（难度卡片标题行）、edo/checked（难度选中绿勾）�
 edo/deploy（部隊選択按钮）、edo/team-screen（部队屏标题锚点）、
 edo/march-auto（自動行軍按钮）、edo/march-active（依頼中标记）、
 edo/go（いざ出陣!!按钮）、error/screen + error/reload（通信错误页）。
+2026-11-17 增 story/toolbar（ADV 工具条）：首次掉新刀的全屏剧情会停住
+委托行军（浦島虎徹实测卡 8 分钟），两个行军盯梢认到 story 就帮点翻页。
 """
 from __future__ import annotations
 
@@ -227,6 +229,7 @@ class JpEdocastle(jp_sally.Sally):
         last_change = time.monotonic()
         last_beat = 0.0
         bubble_poked = 0
+        story_taps = 0
         passable = jp_sally.MARCH_PASSABLE | {'edo_branch'}
         while time.monotonic() < deadline:
             image = self.device.screenshot(force=True)
@@ -238,6 +241,19 @@ class JpEdocastle(jp_sally.Sally):
                 return  # 回城转场被放行帧跳过了也算收圈
             if screen in ('error', 'error_full'):
                 raise _EdoCommError()
+            if screen == 'story':
+                # 首次掉新刀的全屏剧情会停住委托行军（2026-11-17 浦島虎徹
+                # 卡了 8 分钟的事故）：线性剧情无分支，帮点翻页。
+                story_taps += 1
+                if story_taps > jp_sally.STORY_TAP_LIMIT:
+                    self._save_debug(image)
+                    raise jp_sally.SallyStop(
+                        '剧情画面点了很多下都翻不完，已停止；请人工查看游戏（截图已存到 debug）')
+                self._tap_story(story_taps)
+                last = (None, None)
+                last_change = time.monotonic()
+                time.sleep(self.poll)
+                continue
             if screen in ('dialog', 'confirm', 'automarch_dialog'):
                 self._save_debug(image)
                 raise jp_sally.SallyStop(
@@ -319,16 +335,26 @@ class JpEdocastle(jp_sally.Sally):
         """走远征画面逼游戏拉 /conquest 拿新鲜队伍数据（页面内导航，
         不刷新——梯子卡的时候刷新页面是白页死亡螺旋，2026-11-10 实测）。
 
-        调用时应在活动页；拿完回回本丸，由调用方重新导航进活动。"""
+        调用时在游戏共用的部队屏（_open_team 之后，不是活动页！）：
+        ↩ 一下回活动页，再 ↩ 一下才回本丸（2026-11-17 实测：只退一下
+        就等本丸，第一帧还是部队屏，立刻撞「不认识的画面」）。
+        拿完回到本丸，由调用方重新导航进活动。"""
         from . import jp_expedition
         self.log('去远征画面拿一次队伍数据…')
+        self._click_hit('common/back', '部队屏返回箭头')   # team → edo
+        self._wait(frozenset({'edo'}), jp_sally.NAV_TIMEOUT,
+                   frozenset({'team', 'loading', 'unknown'}), '离开部队屏')
         self._click_hit('common/back', '活动页返回箭头')   # edo → home
-        time.sleep(2.0)
+        # 等真的回本丸：画面切换有延迟，定死 sleep 在梯子卡的时候不够，
+        # 导航从活动页起手必撞「不认识的画面」（2026-11-17 实测翻车）。
+        self._wait(frozenset({'home'}), jp_sally.NAV_TIMEOUT,
+                   frozenset({'edo', 'loading', 'unknown'}), '离开活动页')
         self._navigate(jp_expedition.EXPEDITION_ROUTE,
                        frozenset({'expedition'}), '去拿队伍数据')
         latest = self._await_party_data(watch)     # 等 /conquest 落袋
         self._click_hit('common/back', '远征页返回箭头')   # expedition → home
-        time.sleep(2.0)
+        self._wait(frozenset({'home'}), jp_sally.NAV_TIMEOUT,
+                   frozenset({'expedition', 'loading', 'unknown'}), '离开远征页')
         return latest
 
     # ==================== 主流程 ====================

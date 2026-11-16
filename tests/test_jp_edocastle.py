@@ -25,7 +25,8 @@ class FakeDevice:
 
 def make_host(params=None):
     logs = []
-    host = jp_edocastle.JpEdocastle(FakeDevice(), params or {}, log=logs.append)
+    host = jp_edocastle.JpEdocastle(FakeDevice(), params or {}, log=logs.append,
+                                    save_debug=lambda img: None)
     return host, logs
 
 
@@ -94,3 +95,38 @@ def test_run_script_rejects_bad_params():
         list(jp_edocastle.run_script(params={'difficulty': 'x'}))
     with pytest.raises(ValueError):
         list(jp_edocastle.run_script(params={'rounds': 'many'}))
+
+
+# ---- 行军盯梢：新刀获得剧情帮点翻页（2026-11-17 卡 8 分钟事故的修复）----
+
+@pytest.fixture
+def fast_watch(monkeypatch):
+    monkeypatch.setattr(jp_vision, 'base_size', lambda: (1508, 1088))
+    monkeypatch.setattr(jp_sally.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(jp_edocastle.time, 'sleep', lambda s: None)
+
+
+def test_watch_run_taps_through_story(fast_watch):
+    """行军中插入新刀剧情：帮点翻页，剧情过后到分歧点/活动页正常收圈。"""
+    host, logs = make_host()
+    host.poll = 0.01
+    host._settle_branch = lambda: None     # 分歧点收圈另测，这里只盯翻页
+    screens = iter(['story', 'story', 'story', 'edo_branch'])
+    host.classify = lambda image: next(screens, 'edo_branch')
+    host._watch_run()
+    assert len(host.device.clicks) == 3
+    expected = (int(1508 * jp_sally.STORY_TAP_AT[0]),
+                int(1088 * jp_sally.STORY_TAP_AT[1]))
+    assert all((p.x, p.y) == expected for p in host.device.clicks)
+    assert any('帮点翻页' in line for line in logs)
+
+
+def test_watch_run_never_ending_story_stops(fast_watch, monkeypatch):
+    """剧情点了很多下都翻不完：安全停车，不无限点下去。"""
+    monkeypatch.setattr(jp_sally, 'STORY_TAP_LIMIT', 3)
+    host, _ = make_host()
+    host.poll = 0.01
+    host.classify = lambda image: 'story'
+    with pytest.raises(jp_sally.SallyStop, match='翻不完'):
+        host._watch_run()
+    assert len(host.device.clicks) == 3

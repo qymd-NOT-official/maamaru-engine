@@ -86,7 +86,7 @@ class JpExpeditionCollectViewMixin:
         return bool(self.device.template_match(_HOME_TEMPLATE))
 
     def _collect_tap(self):
-        width, height = self.device.base_size()
+        width, height = self.device.base_size
         self.device.click(Point(round(width * _TAP_POINT[0]),
                                 round(height * _TAP_POINT[1])))
 
@@ -148,7 +148,7 @@ class JpExpeditionCollectViewMixin:
 
     def _roi(self, rel) -> Region:
         """比例 ROI → 基准像素 Region。"""
-        width, height = self.device.base_size()
+        width, height = self.device.base_size
         return Region(round(width * rel[0]), round(height * rel[1]),
                       round(width * rel[2]), round(height * rel[3]))
 
@@ -172,9 +172,10 @@ class JpExpeditionCollect(JpExpeditionCollectViewMixin,
     日服画面钩子 + 公共循环。v1 只收不派（结算字段阅读未标定）。"""
 
 
-def run_script(config_path=None, params: dict | None = None):
-    """面板脚本入口（预备 jp-expedition-collect）：generator[str]
-    （日志走 print，worker 捕获，与 jp_sally/jp_expedition 同款）。
+def run_script(config_path=None, params: dict | None = None) -> None:
+    """面板脚本入口（jp-expedition-collect）：普通函数，日志走 print
+    （worker 捕获 stdout，与 jp_sally/jp_expedition 同款）。
+    注意不能写成 generator：面板 builder 只调用不迭代，函数体整段不执行。
 
     v1 只收不派：传了 redispatch 如实提示并忽略，不假装支持。"""
     from ..flow_control import FlowAborted
@@ -190,4 +191,3 @@ def run_script(config_path=None, params: dict | None = None):
                 print(message)
     except jp_sally.SallyStop as exc:
         raise FlowAborted(str(exc)) from exc
-    yield from ()

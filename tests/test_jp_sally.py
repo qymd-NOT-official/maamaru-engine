@@ -28,6 +28,7 @@ KNOWN = {
     'notice/hide-forever': (0.847, 0.658),   # 公告栏右侧「今後表示しない」绿条
     'dialog/decline': (0.385, 0.819),        # 确认窗 いいえ（采自 944 高窗口帧）
     'dialog/accept': (0.597, 0.831),         # 确认窗 はい
+    'story/toolbar': (0.862, 0.583),         # 剧情/新刀画面 ADV 工具条（⚙+▶）
 }
 
 pytestmark = pytest.mark.skipif(
@@ -222,6 +223,35 @@ def test_stuck_march_blows_fuse():
     sally, _ = make_sally(browser, stuck_seconds=0.05)
     with pytest.raises(jp_sally.SallyStop, match='没有变化'):
         sally._watch_march()
+
+
+def story_frame():
+    return fake_screen('story/toolbar')
+
+
+STORY_TAP_PX = (jp_sally.STORY_TAP_AT[0] * 1508, jp_sally.STORY_TAP_AT[1] * 1088)
+
+
+def test_story_during_march_tapped_through():
+    """行军中插入新刀获得剧情：帮点翻页，翻完回家正常收工。"""
+    frames = [story_frame(), story_frame(), story_frame(),
+              fake_screen('home/badge')]
+    browser = FakeDevice(frames)
+    sally, logs = make_sally(browser)
+    sally._watch_march()
+    assert len(browser.clicks) == 3
+    assert all(click_near([c], *STORY_TAP_PX) for c in browser.clicks)
+    assert any('帮点翻页' in line for line in logs)
+
+
+def test_story_never_ending_stops(monkeypatch):
+    """剧情点了很多下都翻不完：安全停车，不无限点下去。"""
+    monkeypatch.setattr(jp_sally, 'STORY_TAP_LIMIT', 3)
+    browser = FakeDevice([story_frame()])
+    sally, _ = make_sally(browser)
+    with pytest.raises(jp_sally.SallyStop, match='翻不完'):
+        sally._watch_march()
+    assert len(browser.clicks) == 3
 
 
 def test_near_black_counts_as_loading_then_timeout():

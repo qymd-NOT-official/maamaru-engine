@@ -36,6 +36,8 @@ BACK_ARROW_OFFSET = (118, -36)        # 编成页左上「↩」，相对 format
 NAV_TIMEOUT = 25.0                  # 每步导航认画面的上限
 MARCH_TIMEOUT = 1500.0              # 一轮行军总上限
 STUCK_SECONDS = 120.0               # 画面纹丝不动的熔断线
+STORY_TAP_AT = (0.85, 0.66)         # 剧情翻页点击点（基准宽高比，台词框内右下）
+STORY_TAP_LIMIT = 30                # 一段剧情最多帮点这么多下，点不完就停车
 RELOAD_AFTER = 60.0                 # 导航时黑屏加载超过这么久就刷新一次页面自愈
 BOOT_TIMEOUT = 900.0                # 刷新后重进本丸的上限（慢链路数据加载 + 公告连点都很耗时）
 GREET_STABLE = 8.0                  # 登录问候画面稳定这么久才点中央跳过（要长过公告翻页间隙，别点进公告里）
@@ -68,9 +70,16 @@ SCREENS = (
     ('field', ('march/advance',)),
     ('battle', ('battle/start',)),
     ('mapview', ('map/label',)),
+    # 剧情/新刀获得画面（ADV 工具条的 ⚙+▶ 实心图标钮，跨场景 0.92+，
+    # 120+ 实跑帧零误中；文字钮镂空透立绘，跨场景只有 0.85 擦线，不取）：
+    # 委托行军中首次掉新刀会全屏插入这段剧情并停住行军（2026-11-17 实测
+    # 浦島虎徹卡了 8 分钟）。线性剧情没有分支选项，盯梢认到就帮点翻页。
+    ('story', ('story/toolbar',)),
     ('home', ('home/badge',)),
 )
 # 行军途中允许路过的画面；弹窗和回家单独处理。team 是出发按钮点完后的残留帧。
+# story 不进放行集：两个盯梢循环都单独认它并帮点翻页，其它环节撞见仍按
+# 陌生画面安全停车。
 MARCH_PASSABLE = frozenset(
     {'loading', 'battle', 'result', 'field', 'mapview', 'team', 'unknown'})
 
@@ -136,6 +145,16 @@ class JpNavigator:
                 return name
         return 'unknown'
 
+    def _tap_story(self, count: int) -> None:
+        """剧情/新刀获得画面的翻页点击：落在台词框内右下翻页区。
+
+        这类画面是线性 ADV（没有分支选项），翻页区点击只会推进台词；
+        真撞上带选项的陌生剧情点不动，到 STORY_TAP_LIMIT 就安全停车。"""
+        base_w, base_h = jp_vision.base_size()
+        self.device.click(Point(int(base_w * STORY_TAP_AT[0]),
+                                int(base_h * STORY_TAP_AT[1])))
+        self.log(f'剧情/新刀获得画面，帮点翻页（第 {count} 下）…')
+
     def _wait(self, targets: frozenset[str], timeout: float,
               passable: frozenset[str], what: str) -> str:
         """轮询画面直到命中 targets；弹窗立即中止，卡死超时熔断。"""
@@ -148,7 +167,10 @@ class JpNavigator:
             if screen in targets:
                 return screen
             if screen == 'dialog':
-                raise SallyStop(f'{what}时出现了确认弹窗，已停止；请人工查看游戏')
+                # 弹窗也存证：回城途中的升级窗等一瞬即逝，没图永远查不清
+                # （2026-11-17 江户城回活动页时撞见未知弹窗，现场没留下来）。
+                self._save_debug(image)
+                raise SallyStop(f'{what}时出现了确认弹窗，已停止；请人工查看游戏（截图已存到 debug）')
             if screen not in passable:
                 self._save_debug(image)
                 raise SallyStop(f'{what}时遇到了不认识的画面，已停止（截图已存到 debug）')
@@ -307,7 +329,10 @@ class JpNavigator:
             if screen in targets:
                 return screen
             if screen == 'dialog':
-                raise SallyStop(f'{what}时出现了确认弹窗，已停止；请人工查看游戏')
+                # 弹窗也存证：回城途中的升级窗等一瞬即逝，没图永远查不清
+                # （2026-11-17 江户城回活动页时撞见未知弹窗，现场没留下来）。
+                self._save_debug(image)
+                raise SallyStop(f'{what}时出现了确认弹窗，已停止；请人工查看游戏（截图已存到 debug）')
             if screen == 'loading':
                 unknown_since = None
                 if loading_since is None:
@@ -417,12 +442,16 @@ class Sally(JpNavigator):
                    frozenset({'loading', 'automarch_dialog'}), '返回部队选择')
 
     def _watch_march(self) -> None:
-        """盯行军：回家即完成；弹窗/卡死/超时立即停。"""
+        """盯行军：回家即完成；弹窗/卡死/超时立即停。
+
+        首次掉新刀的全屏剧情会停住行军：认到 story 就帮点翻页
+        （线性剧情无分支），点 STORY_TAP_LIMIT 下还翻不完才停车。"""
         self.log('行军中（自动行军）…')
         deadline = time.monotonic() + MARCH_TIMEOUT
         last = (None, None)
         last_change = time.monotonic()
         last_beat = 0.0
+        story_taps = 0
         while time.monotonic() < deadline:
             image = self.device.screenshot(force=True)
             screen = self.classify(image)
@@ -430,6 +459,17 @@ class Sally(JpNavigator):
                 return
             if screen == 'dialog':
                 raise SallyStop('行军途中出现了确认弹窗（可能是重伤警告），已停止；请人工查看游戏')
+            if screen == 'story':
+                story_taps += 1
+                if story_taps > STORY_TAP_LIMIT:
+                    self._save_debug(image)
+                    raise SallyStop(
+                        '剧情画面点了很多下都翻不完，已停止；请人工查看游戏（截图已存到 debug）')
+                self._tap_story(story_taps)
+                last = (None, None)
+                last_change = time.monotonic()
+                time.sleep(self.poll)
+                continue
             if screen not in MARCH_PASSABLE:
                 self._save_debug(image)
                 raise SallyStop('行军途中遇到了不认识的画面，已停止（截图已存到 debug）')

@@ -36,6 +36,7 @@ class FakeDevice:
     def current(self):
         return self.screens[0] if self.screens else "home"
 
+    @property
     def base_size(self):
         return self._base
 
