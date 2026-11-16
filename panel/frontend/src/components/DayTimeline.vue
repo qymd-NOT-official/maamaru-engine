@@ -1518,6 +1518,7 @@ const caption = computed(() => {
       </div>
       <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
     </dialog>
+    <p v-if="planMessage && dailySettings && !editing" class="tl-booking-message" role="status">{{ planMessage }}</p>
     <DailySettings v-if="dailySettings && data" :timeline="data" @saved="load(true)" @open-dismantle-list="emit('openDismantleList')" />
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
