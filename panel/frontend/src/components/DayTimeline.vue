@@ -5,7 +5,7 @@ import { api } from '../api'
 import type { ConductorBlockStatus, DayConductorBlock, DayExpeditionSuggestion, DayScheduleBlock, DayTimeline, DayTimelineExpedition, ScheduleBlockKind, ScriptParams, WorkflowPreset } from '../types'
 import PaperCard from './PaperCard.vue'
 import DailySettings from './DailySettings.vue'
-import { draggedMinute } from './timelineDrag'
+import { draggedMinute, paintedMinute } from './timelineDrag'
 import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
 
 const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number; dailySettings?: boolean }>(), {
@@ -63,7 +63,7 @@ const refreshing = ref(false)
 const refreshMessage = ref('')
 
 async function refreshTimeline() {
-  if (refreshing.value || drag.value || dragBusy.value) return
+  if (refreshing.value || drag.value || paint.value || dragBusy.value) return
   refreshing.value = true
   refreshMessage.value = ''
   popover.value = null
@@ -74,7 +74,7 @@ async function refreshTimeline() {
 }
 
 async function load(force = false) {
-  if (!force && (drag.value || dragBusy.value)) return
+  if (!force && (drag.value || paint.value || dragBusy.value)) return
   try {
     const fresh = await api.dayTimeline()
     if (data.value && fresh.day_start !== data.value.day_start) suggestionDragTimes.value = {}
@@ -886,6 +886,40 @@ async function finishDrag(event: PointerEvent) {
   } catch (error) { planMessage.value = error instanceof Error ? error.message : '没有保存，请重试' }
   finally { dragBusy.value = false }
 }
+
+/** 任务泳道空白处画块：拖出一段新安排的开始时间，松手打开排程编辑器（kind 在编辑器里自选） */
+const paint = ref<{ minute: number; x: number; left: number; width: number; moved: boolean } | null>(null)
+function startPaint(event: PointerEvent) {
+  if (event.button !== 0 || editing.value || dragBusy.value || refreshing.value || drag.value || !data.value) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.tl-block') || target?.closest('.tl-popover')) return
+  const lane = event.currentTarget as HTMLElement
+  const rect = lane.getBoundingClientRect()
+  paint.value = {minute: paintedMinute(event.clientX - rect.left, rect.width, smoothNowMin.value),
+    x: event.clientX, left: rect.left, width: rect.width, moved: false}
+  lane.setPointerCapture(event.pointerId)
+}
+function movePaint(event: PointerEvent) {
+  const current = paint.value
+  if (!current) return
+  if (Math.abs(event.clientX - current.x) < 5 && !current.moved) return
+  current.moved = true
+  current.minute = paintedMinute(event.clientX - current.left, current.width, smoothNowMin.value)
+}
+async function finishPaint(event: PointerEvent) {
+  const current = paint.value
+  if (!current) return
+  paint.value = null
+  // 原地点击不打开编辑器：空白区单击太容易误触，拖动手势才算明确意图
+  if (!current.moved || event.type === 'pointercancel') return
+  popover.value = null
+  expeditionPopup.value = null
+  await loadWorkflowPresets()
+  editedBlockIndex.value = -1
+  draft.value = [{...defaultDraftRow(), time: fmtClock(current.minute), kind: 'workflow', workflow_id: workflowPresets.value[0]?.id || ''}]
+  planMessage.value = ''
+  editing.value = true
+}
 const dragEnd = computed(() => {
   const current = drag.value
   if (!current || !data.value) return null
@@ -1259,7 +1293,7 @@ const caption = computed(() => {
       <div class="tl-card-actions">
         <small v-if="refreshMessage" role="status">{{ refreshMessage }}</small>
         <time v-if="data">{{ fmtMin(nowMin) }}</time>
-        <button type="button" :disabled="refreshing || !!drag || dragBusy" @click="refreshTimeline">{{ refreshing ? '刷新中…' : '刷新' }}</button>
+        <button type="button" :disabled="refreshing || !!drag || !!paint || dragBusy" @click="refreshTimeline">{{ refreshing ? '刷新中…' : '刷新' }}</button>
         <button v-if="props.collapsible" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
           {{ expanded ? '收起' : dailySettings ? '查看时间表' : '展开' }}
         </button>
@@ -1267,7 +1301,8 @@ const caption = computed(() => {
     </div>
     <template v-if="data && showDetails">
       <div class="tl-chart tl-wide">
-        <output v-if="drag?.moved" class="tl-drag-time">{{ fmtMin(drag.minute) }}<template v-if="dragEnd != null">–{{ fmtMin(dragEnd) }}</template> · 松手调整</output>
+        <output v-if="paint?.moved" class="tl-drag-time">{{ fmtMin(paint.minute) }} · 松手安排这段</output>
+        <output v-else-if="drag?.moved" class="tl-drag-time">{{ fmtMin(drag.minute) }}<template v-if="dragEnd != null">–{{ fmtMin(dragEnd) }}</template> · 松手调整</output>
         <div class="tl-ticks">
           <span v-for="t in TICKS" :key="t" class="tl-tick" :class="{ 'tl-tick-end': t === DAY }" :style="{ left: pct(t) + '%' }">{{ tickLabel(t) }}</span>
         </div>
@@ -1292,11 +1327,12 @@ const caption = computed(() => {
             <span class="tl-lane-tag">远征</span>
             <span class="tl-lane-empty">今天没有远征安排</span>
           </div>
-          <div class="tl-lane">
+          <div class="tl-lane tl-lane-paint" @pointerdown="startPaint" @pointermove="movePaint" @pointerup="finishPaint" @pointercancel="finishPaint">
             <span class="tl-lane-tag">任务</span>
             <button v-for="b in taskBlocks" :key="b.key" type="button" class="tl-block" :class="b.cls" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title"  :data-task-index="b.index" @pointerdown="startDrag($event, b.key, 'task', b.block.start_min, b.index)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" @click="openLaneTask($event, b.index)">{{ b.text }}</button>
             <button v-for="b in suggestionShadows" :key="b.key" type="button" class="tl-block tlx-suggest" :style="{ left: dragLeft(b.key, b.left) + '%', width: b.width + '%' }" :title="b.title" :data-task-index="-1" @pointerdown="startDrag($event, b.key, 'suggestion', b.minute, b.suggestionIndex)" @pointermove="moveDrag" @pointerup="finishDrag" @pointercancel="finishDrag" :data-suggestion-key="b.key" @click="openLaneTask($event, -1, b)">{{ b.text }}</button>
-            <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活</span>
+            <span v-if="!taskBlocks.length && !suggestionShadows.length" class="tl-lane-empty">还没排要跑的活，按住空白处拖一段就能安排</span>
+            <div v-if="paint?.moved" class="tl-block tlx-paint" aria-hidden="true" :style="{ left: pct(paint.minute) + '%', width: Math.max(pct(GENERIC_BLOCK_MIN), 0.7) + '%' }">新安排</div>
             <div v-if="popover && popover.origin !== 'booking' && popover.lane === 'task' && popoverBlock" class="tl-popover" :style="{ left: popoverLeft(popover.left) }">
               <section v-for="entry in overlappingTasks.length ? overlappingTasks : [{index: popover.index, block: popoverBlock}]" :key="`${entry.index}:${entry.block.start_min}`" class="tl-popover-task">
                 <strong>{{ blockLabel(entry.block) }}</strong>
@@ -1395,38 +1431,6 @@ const caption = computed(() => {
           </details>
           </div>
         </div>
-        <dialog v-if="editing" ref="planEditorDialog" class="tl-plan-dialog tl-booking-editor" @cancel="editing = false">
-          <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
-            <label>开始时间 <input v-model="row.time" type="time" step="60" /></label>
-            <label v-if="row.kind === 'raid' || row.kind === 'activity'">玩法
-              <select v-model="row.script" @change="chooseGameplay(row)">
-                <option v-for="option in gameplayOptions" :key="option.script" :value="option.script" :disabled="!option.available">{{ option.label }}{{ option.available ? '' : '（未开放）' }}</option>
-              </select>
-            </label>
-            <span v-else-if="row.kind !== 'workflow'">一键日课（旧安排）</span>
-            <label v-if="row.kind === 'raid' || row.kind === 'activity'">次数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
-            <label v-if="row.kind === 'workflow'">任务流
-              <select v-model="row.workflow_id">
-                <option value="" disabled>选一份任务流</option>
-                <option v-for="preset in workflowPresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
-              </select>
-            </label>
-            <button v-if="row.kind === 'raid' || row.kind === 'activity'" type="button" class="tl-booking-link" @click="gameplayDialog?.open(row.script)">玩法设置</button>
-            <span v-if="row.kind === 'activity'">暂无圈速，暂留 30 分钟；前段收工后再开工</span>
-            <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
-            <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
-            <ol v-if="row.kind === 'workflow' && presetSteps(row.workflow_id).length" class="tl-flow-steps" aria-label="任务流预览">
-              <li v-for="(step, stepIndex) in presetSteps(row.workflow_id)" :key="stepIndex"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : stepIndex === 0 ? '开始后' : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
-            </ol>
-          </div>
-          <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队与换队长使用已保存的玩法设置；次数以本段安排为准。内置今日联队战会使用小判补充手形，单跑的补充开关不影响它；其他玩法与自定义任务流保留各自设置。</p>
-          <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
-          <div class="tl-booking-actions">
-            <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存' }}</button>
-            <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
-          </div>
-          <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
-        </dialog>
         <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
         <p v-if="data.conductor.issues.length && !editing" class="tl-booking-warning">{{ [...new Set(data.conductor.issues)].join('；') }}</p>
         <div v-for="block in data.conductor.blocks.filter(b => b.recovery)" :key="block.run_id" :data-raid-recovery="block.run_id" tabindex="-1" class="tl-expedition-help-note tl-raid-recovery">
@@ -1482,6 +1486,38 @@ const caption = computed(() => {
       </template>
     </template>
     <p v-else-if="!data" class="empty">时间表加载中…</p>
+    <dialog v-if="editing" ref="planEditorDialog" class="tl-plan-dialog tl-booking-editor" @cancel="editing = false">
+      <div v-for="(row, index) in draft" :key="index" class="tl-booking-row" :class="{ 'is-highlight': index === highlightIndex }">
+        <label>开始时间 <input v-model="row.time" type="time" step="60" /></label>
+        <label v-if="row.kind === 'raid' || row.kind === 'activity'">玩法
+          <select v-model="row.script" @change="chooseGameplay(row)">
+            <option v-for="option in gameplayOptions" :key="option.script" :value="option.script" :disabled="!option.available">{{ option.label }}{{ option.available ? '' : '（未开放）' }}</option>
+          </select>
+        </label>
+        <span v-else-if="row.kind !== 'workflow'">一键日课（旧安排）</span>
+        <label v-if="row.kind === 'raid' || row.kind === 'activity'">次数 <input v-model.number="row.runs" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
+        <label v-if="row.kind === 'workflow'">任务流
+          <select v-model="row.workflow_id">
+            <option value="" disabled>选一份任务流</option>
+            <option v-for="preset in workflowPresets" :key="preset.id" :value="preset.id">{{ preset.name }}</option>
+          </select>
+        </label>
+        <button v-if="row.kind === 'raid' || row.kind === 'activity'" type="button" class="tl-booking-link" @click="gameplayDialog?.open(row.script)">玩法设置</button>
+        <span v-if="row.kind === 'activity'">暂无圈速，暂留 30 分钟；前段收工后再开工</span>
+        <span v-if="row.kind === 'raid' && !raidKindAvailable" class="tl-booking-warning-inline">联队战还没开，这段请移除或换成别的活</span>
+        <span v-else-if="rowEndText(row)">预计 {{ rowEndText(row) }} 收工</span>
+        <ol v-if="row.kind === 'workflow' && presetSteps(row.workflow_id).length" class="tl-flow-steps" aria-label="任务流预览">
+          <li v-for="(step, stepIndex) in presetSteps(row.workflow_id)" :key="stepIndex"><span>{{ step.wait_time ? `等待至 ${step.wait_time} 再继续` : stepIndex === 0 ? '开始后' : '前一步结束后' }}</span><b v-if="!step.wait_time">{{ step.label }}</b></li>
+        </ol>
+      </div>
+      <p v-if="draft.some(row => row.kind === 'raid' || row.kind === 'activity')" class="tl-booking-message">部队与换队长使用已保存的玩法设置；次数以本段安排为准。内置今日联队战会使用小判补充手形，单跑的补充开关不影响它；其他玩法与自定义任务流保留各自设置。</p>
+      <p v-if="preview.issues.length" class="tl-booking-warning">{{ preview.issues.join('；') }}</p>
+      <div class="tl-booking-actions">
+        <button type="button" :disabled="saving || preview.issues.length > 0" @click="saveSchedule">{{ saving ? '保存中…' : '保存' }}</button>
+        <button type="button" :disabled="saving" @click="editing = false; highlightIndex = -1; planMessage = ''">取消</button>
+      </div>
+      <p v-if="planMessage" class="tl-booking-message" role="status">{{ planMessage }}</p>
+    </dialog>
     <DailySettings v-if="dailySettings && data" :timeline="data" @saved="load(true)" @open-dismantle-list="emit('openDismantleList')" />
   </PaperCard>
   <GameplaySettingsDialog ref="gameplayDialog" @saved="gameplaySaved" />
