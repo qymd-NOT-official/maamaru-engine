@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -60,7 +61,25 @@ _DEFAULT_ADB_PATH = r"D:\MUMU\MuMuPlayer\nx_device\12.0\shell\adb.exe"
 _DEFAULT_ADB_ADDR = "127.0.0.1:16384"
 
 # ── App ──
-app = FastAPI(title="まあ丸 近侍面板")
+@asynccontextmanager
+async def _lifespan(_app):
+    try:
+        await _startup()
+    except BaseException:
+        # Uvicorn turns lifespan exceptions into SystemExit(3).  Persist the
+        # original traceback first so the launcher can show a useful cause.
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            (LOG_DIR / "launcher.log").write_text(
+                traceback.format_exc(), encoding="utf-8"
+            )
+        except OSError:
+            pass
+        raise
+    yield
+
+
+app = FastAPI(title="まあ丸 近侍面板", lifespan=_lifespan)
 app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json", JP_DATA_DIR / "state" / "honmaru_home.json"))
 app.include_router(create_template_lab_router())
 app.include_router(create_flow_lab_router())
@@ -1681,23 +1700,6 @@ register_script("custom_flow", "自定义流程",
 
 
 # ── 服务端启动 ──
-
-@app.on_event("startup")
-async def startup():
-    try:
-        await _startup()
-    except BaseException:
-        # Uvicorn turns lifespan exceptions into SystemExit(3).  Persist the
-        # original traceback first so the launcher can show a useful cause.
-        try:
-            LOG_DIR.mkdir(parents=True, exist_ok=True)
-            (LOG_DIR / "launcher.log").write_text(
-                traceback.format_exc(), encoding="utf-8"
-            )
-        except OSError:
-            pass
-        raise
-
 
 def _migrate_task_parameters():
     """备份后一次性固化旧任务参数；已迁移值不再跟随单跑设置。"""
