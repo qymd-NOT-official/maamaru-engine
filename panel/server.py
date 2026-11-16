@@ -1499,7 +1499,29 @@ register_script("jp-sortie", "日服刷图",
                          "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
                          "default": "1"},
                         {"key": "rounds", "type": "number", "label": "圈数",
-                         "default": 1, "min": 1, "max": 200}],
+                         "default": 1, "min": 1, "max": 200},
+                        {"key": "stop_on_fatigue", "type": "toggle", "label": "气力不足时收工",
+                         "default": True,
+                         "help": "任一成员气力掉到阈值及以下就停止刷图，不硬刷"},
+                        {"key": "fatigue_threshold", "type": "number", "label": "气力阈值",
+                         "default": 30, "min": 1, "max": 99,
+                         "visibleWhen": {"key": "stop_on_fatigue", "is": True}}],
+                hidden=True, server="jp")
+
+
+# 日服远征收取 v1：公共循环（flows/expedition_collect.py）+ 日服画面适配
+# （flows/expedition_collect_jp.py）。只收不派，结算字段诚实记 unknown。
+def _build_jp_expedition_collect(config_path, params):
+    from touken.flows import expedition_collect_jp
+    expedition_collect_jp.run_script(config_path, params)
+    yield from ()
+
+
+register_script("jp-expedition-collect", "日服收远征",
+                "日服远征收取：勾出归来动画后逐屏确认结算，只收不派。"
+                "认不出的字段诚实记 unknown 进日服流水账，认不出画面就停在本丸",
+                _build_jp_expedition_collect,
+                params=[],
                 hidden=True, server="jp")
 
 
@@ -1997,8 +2019,12 @@ async def api_scripts(server: str = ""):
             "event_hidden": [],
         }
     runner = get_runner()
+    scripts = list_scripts(server)
+    # 预设编队是国服功能，日服脚本只收数字部队号，不拼预设选项
+    if server != "jp":
+        scripts = _scripts_with_preset_options(scripts)
     return {
-        "scripts": _scripts_with_preset_options(list_scripts(server)),
+        "scripts": scripts,
         "running": runner.is_running,
         "current": runner.current_script,
         "run_id": runner.current_run_id if runner.is_running else None,
@@ -4520,7 +4546,8 @@ async def api_save_settings(request: Request, server: str = ""):
         extra = set(body) - allowed
         if extra == {"params"}:
             params = body.get("params")
-            if not isinstance(params, dict) or set(params) - {"jp-sally", "jp-expedition", "jp-pumpkin", "jp-edocastle", "jp-sortie"}:
+            jp_script_keys = {k for k, v in _SCRIPTS.items() if v.get("server") == "jp"}
+            if not isinstance(params, dict) or set(params) - jp_script_keys:
                 raise HTTPException(400, "日服只能保存日服脚本的参数")
         elif extra:
             raise HTTPException(400, "日服暂不支持自动执行设置")

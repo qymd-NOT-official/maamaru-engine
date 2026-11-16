@@ -40,6 +40,9 @@ def test_jp_sally_params_roundtrip(tmp_path, monkeypatch):
     mixed = {"params": {"jp-sally": {"team_no": "1"}, "daily": {}}}
     assert client.post("/api/saved-settings?server=jp", json=mixed).status_code == 400
     assert not (tmp_path / "cn.json").exists()
+    # 新注册的日服脚本（白名单跟随注册表，不再硬编码）也能保存。
+    newer = {"params": {"jp-expedition-collect": {}, "jp-sortie": {"chapter": "2"}}}
+    assert client.post("/api/saved-settings?server=jp", json=newer).status_code == 200
 
 
 def test_failed_replace_preserves_settings_and_backup(tmp_path, monkeypatch):

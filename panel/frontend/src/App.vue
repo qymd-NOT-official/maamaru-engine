@@ -23,29 +23,15 @@ import StageActors from './components/StageActors.vue'
 import ImmediateExpeditionFields from './components/ImmediateExpeditionFields.vue'
 import HonmaruHome from './components/HonmaruHome.vue'
 import SwordArchivePanel from './components/SwordArchivePanel.vue'
-import JpSallyCard from './components/JpSallyCard.vue'
-import JpExpeditionCard from './components/JpExpeditionCard.vue'
 import { appServer } from './server'
 import type { HomeLayoutEntry, ScriptInfo, ScriptParams, WorkflowPreset, WorkflowIdentity } from './types'
 
 // 日服入口共用首页、仓库、刀剑和外观设置；不启用国服自动执行。
+// 日服「功能 · 执务台」与国服共用同一条管线：清单来自 /api/scripts?server=jp
+// （后端只放行日服脚本），状态轮询与参数保存都带 server=jp，渲染复用通用任务卡，
+// 每加一个日服脚本前端零改动。
 const jpMode = appServer === 'jp'
-
-// 日服「功能 · 执务台」：任务清单来自 /api/scripts?server=jp（后端只放行日服脚本），
-// 与国服 scripts/常用功能完全隔离，状态也由日服卡片自己上报。
-const jpScripts = ref<Record<string, ScriptInfo>>({})
-const jpSelected = ref('jp-sally')
-const jpSallyRunning = ref(false)
-const jpSallyStopping = ref(false)
-const jpExpeditionRunning = ref(false)
-const jpExpeditionStopping = ref(false)
-// 日志面板跟着选中卡走：只显示当前脚本的日志，状态栏也只报当前脚本，
-// 出阵/远征两块卡互不串台（同一时刻只有一支脚本能跑）。
-const jpCardRunning = computed(() => (jpSelected.value === 'jp-expedition' ? jpExpeditionRunning.value : jpSallyRunning.value))
-const jpCardStopping = computed(() => (jpSelected.value === 'jp-expedition' ? jpExpeditionStopping.value : jpSallyStopping.value))
-const jpCardScript = computed(() => (jpSelected.value === 'jp-expedition' ? 'jp-expedition' : 'jp-sally'))
-const jpCardLabel = computed(() => (jpSelected.value === 'jp-expedition' ? '日服远征' : '日服出阵'))
-const jpScriptKeys = computed(() => Object.keys(jpScripts.value))
+const jpScriptKeys = computed(() => (jpMode ? Object.keys(scripts.value) : []))
 
 const scripts = ref<Record<string, ScriptInfo>>({})
 const params = ref<Record<string, ScriptParams>>({})
@@ -137,6 +123,8 @@ const taskIcons: Record<string, string> = {
   daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', hanafuda: 'hanafuda.png?v=2', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
   sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'workflow.svg',
+  'jp-sally': 'sortie.png', 'jp-sortie': 'sortie.png', 'jp-expedition': 'expedition.png',
+  'jp-expedition-collect': 'expedition.png', 'jp-pumpkin': 'pumpkin.png', 'jp-edocastle': 'edocastle.png',
 }
 
 const selectedInfo = computed(() => scripts.value[selected.value])
@@ -377,18 +365,23 @@ function migrateParams(script: string, value: ScriptParams): ScriptParams {
 async function load() {
   loading.value = true
   try {
-    // 日服入口：不读国服脚本/模式，只取主题，落点在我的本丸。
+    // 日服入口：脚本清单/状态/参数全走 server=jp 的同一条管线，落点在我的本丸。
     if (jpMode) {
-      const saved = await api.settings('jp')
+      const [scriptData, saved] = await Promise.all([api.scripts('jp'), api.settings('jp')])
       theme.value = saved.theme === 'pixel' ? 'pixel' : 'washi'
       applyTheme()
       applyBackdrop(saved.backdrop)
       applyScenery(saved.scenery)
       applyCompanion(saved.companion)
       tab.value = 'home'
-      scripts.value = {}
-      params.value = {}
-      try { jpScripts.value = (await api.scripts('jp')).scripts || {} } catch { jpScripts.value = {} }
+      scripts.value = scriptData.scripts || {}
+      running.value = !!scriptData.running
+      current.value = scriptData.current || null
+      params.value = Object.fromEntries(Object.entries(scripts.value).map(([key, info]) => [
+        key,
+        { ...defaults(info), ...(saved.params?.[key] || {}) },
+      ]))
+      if (!scripts.value[selected.value]) selected.value = Object.keys(scripts.value)[0] || ''
       return
     }
     const mode = await api.appMode()
@@ -467,9 +460,13 @@ async function returnToLauncher() {
 async function pollStatus() {
   const revision = statusRevision
   try {
-    const [state, dashboard] = await Promise.all([api.scripts(), api.dashboard()])
+    // 日服轮询同一份状态接口（server=jp），不碰国服仪表盘。
+    const [state, dashboard] = await Promise.all([
+      api.scripts(jpMode ? 'jp' : ''),
+      jpMode ? Promise.resolve(null) : api.dashboard(),
+    ])
     if (revision !== statusRevision || startingWorkflow.value || workflowPanel.value?.locked) return
-    dashboardRun.value = dashboard.running || null
+    dashboardRun.value = dashboard?.running || null
     clock.value = Date.now()
     const wasRunning = running.value
     // 停止请求后后台进程可能还会短暂报告一次 running；在真正停稳前不让 UI 反跳回“运行中”。
@@ -524,7 +521,7 @@ function openIncidentEntry(entry: { tab?: string; script?: string }) {
 async function save() {
   try {
     await Promise.all([
-      api.saveSettings(params.value),
+      api.saveSettings(params.value, appServer),
       selected.value === 'expedition' ? immediateExpedition.value?.save() : Promise.resolve(),
     ])
     message.value = selected.value === 'expedition' ? '配置和远征安排已保存' : '配置已保存'
@@ -587,10 +584,11 @@ onMounted(async () => {
   detectLauncherBridge()
   window.addEventListener('pywebviewready', detectLauncherBridge)
   await load()
-  if (!jpMode && !ledgerMode.value) {
+  if (!ledgerMode.value) {
     await pollStatus()
     pollTimer = window.setInterval(pollStatus, 2000)
-    window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning)
+    // 远征排班接管提醒是国服自动执行的事，日服没有排班。
+    if (!jpMode) window.addEventListener('maamaru:scheduler-warning', onSchedulerWarning)
   }
 })
 onBeforeUnmount(() => { window.clearInterval(pollTimer); window.clearTimeout(toastTimer); window.removeEventListener('scroll', onWindowScroll); window.removeEventListener('maamaru:scheduler-warning', onSchedulerWarning); window.removeEventListener('pywebviewready', detectLauncherBridge) })
@@ -651,7 +649,7 @@ watch(tab, value => {
       </div>
     </header>
     <nav v-if="!ledgerMode && workshopActive" class="workshop-nav" aria-label="功能">
-      <div class="workshop-title"><strong>功能</strong><small>{{ jpMode ? '选好部队，看看出阵和远征的动静' : '看实况、搭流程，需要时再调玩法' }}</small></div>
+      <div class="workshop-title"><strong>功能</strong><small>{{ jpMode ? '日服任务清单，需要时再调玩法' : '看实况、搭流程，需要时再调玩法' }}</small></div>
       <div class="workshop-tabs">
         <button type="button" :class="{ active: tab === 'office' }" @click="openWorkshopTab('office')">执务台</button>
         <button v-if="!jpMode" type="button" :class="{ active: tab === 'workflow' }" @click="openWorkshopTab('workflow')">流程搭建</button>
@@ -818,17 +816,45 @@ watch(tab, value => {
       <aside :class="tab === 'office' ? 'home-functions' : 'sidebar'">
         <div class="home-functions-head"><h2>{{ tab === 'office' ? '常用功能' : '玩法设置' }}</h2></div>
         <nav>
-          <button v-for="key in jpScriptKeys" :key="key" type="button" :class="{ active: jpSelected === key }" @click="jpSelected = key">
-            <span><img class="task-menu-icon" :src="taskIcon(key === 'jp-expedition' ? 'expedition' : 'sortie')" alt="">{{ jpScripts[key]?.label || key }}</span><small v-if="(key === 'jp-sally' && jpSallyRunning) || (key === 'jp-expedition' && jpExpeditionRunning)">运行中</small>
-          </button>
+          <SideNavItem v-for="key in jpScriptKeys" :key="key" :active="selected === key" :running="running && current === key" @click="selected = key">
+            <span><img class="task-menu-icon" :src="taskIcon(key)" alt="">{{ scripts[key]?.label || key }}</span><small v-if="running && current === key">运行中</small>
+          </SideNavItem>
         </nav>
         <p v-if="!jpScriptKeys.length" class="home-functions-hidden-note">日服任务还没备好，稍后再来看看</p>
       </aside>
-      <section :class="tab === 'office' ? 'home-center' : 'content'">
-        <JpSallyCard v-if="jpSelected === 'jp-sally'" :settings="tab === 'tasks'" @configure="tab = 'tasks'" @office="tab = 'office'" v-model:running="jpSallyRunning" v-model:stopping="jpSallyStopping" />
-        <JpExpeditionCard v-else-if="jpSelected === 'jp-expedition'" :settings="tab === 'tasks'" @configure="tab = 'tasks'" @office="tab = 'office'" v-model:running="jpExpeditionRunning" v-model:stopping="jpExpeditionStopping" />
+      <section v-if="tab === 'office'" class="home-center">
+        <OverviewTaskCard
+          v-if="selectedInfo"
+          :info="selectedInfo"
+          :icon-src="taskIcon(selected)"
+          :params="params[selected] || {}"
+          :running="running && current === selected"
+          :busy="running"
+          @run="runScript(selected)"
+          @stop="stop"
+          @configure="tab = 'tasks'"
+        />
+        <!-- 日志面板跟着当前任务走：运行中只报正在跑的那支，空闲时报选中任务的动静。 -->
+        <LogPanel :running="logRunning" :stopping="stopping" :task-label="logTaskLabel" :only-script="current || selected" />
+        <p v-if="message" class="toast" role="status" @click="message = ''">{{ message }}</p>
+      </section>
+      <section v-else ref="contentEl" class="content">
+        <TaskForm
+          v-if="selectedInfo"
+          :script-key="selected"
+          :info="selectedInfo"
+          :model-value="params[selected] || {}"
+          :running="running && current === selected"
+          :busy="running"
+          :has-advanced="false"
+          advanced-label=""
+          @update:model-value="params[selected] = $event"
+          @save="save"
+          @run="runScript(selected)"
+          @stop="stop"
+        />
         <p v-else class="task-empty-state">日服任务还没备好，稍后再来看看</p>
-        <LogPanel v-if="tab === 'office'" :running="jpCardRunning" :stopping="jpCardStopping" :task-label="jpCardLabel" :only-script="jpCardScript" />
+        <p v-if="message" class="toast" @click="message = ''">{{ message }}</p>
       </section>
     </MaamaruFrame>
     <MaamaruFrame v-else-if="!loading && (tab === 'report' || tab === 'planning')" variant="single" page-class="single-layout report-page" @scroll="onStageScroll"><ReportPanel @open-dismantle-list="openDismantleList" :server="appServer" :recovery-run-id="raidRecoveryRunId" :ledger-mode="ledgerMode" :running="running" :initial-section="reportEntry" :page-section="ledgerMode ? undefined : tab === 'planning' ? 'planning' : 'report'" @gameplay-settings-saved="(script, value) => params[script] = { ...params[script], ...value }" @open-planning="tab = 'planning'" @open-wishlist="openWishlist" @open-expedition="openExpeditionPlanning" @open-activity="openActivityTask" /></MaamaruFrame>
