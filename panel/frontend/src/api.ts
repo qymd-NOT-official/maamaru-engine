@@ -67,6 +67,11 @@ export const api = {
   setExpeditionResourceFocus: (resourceFocus: string) => request('/api/expedition-help-prefs', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource_focus: resourceFocus }),
   }),
+  /** 自动送修行：扫地遇「修行启程」申请直接点确认送走（每次烧一套修行道具），默认关 */
+  trainingAutoSend: () => request<{ enabled: boolean }>('/api/training-auto-send'),
+  setTrainingAutoSend: (enabled: boolean) => request<{ ok: boolean; enabled: boolean }>('/api/training-auto-send', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+  }),
   saveDayRaidPlan: (blocks: DayScheduleBlock[]) => request<{ booking: DayBooking }>('/api/day-timeline/raid-plan', {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks }),
   }),

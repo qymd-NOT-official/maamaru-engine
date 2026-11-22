@@ -22,7 +22,7 @@ export function raidDayRecommendation(day: DayTimeline | null | undefined, isRai
   if (activity.target_runs <= 0) {
     return { available: false, runs: 0, targetRuns: 0, reason: '联队战今天的进度已够，等下一次记账再更新。' }
   }
-  const suggestions = (day?.suggestions || []).filter(item => Number.isInteger(item.runs) && Number(item.runs) > 0)
+  const suggestions = (day?.suggestions || []).filter(item => !item.script && Number.isInteger(item.runs) && Number(item.runs) > 0)
   const runs = suggestions.reduce((total, item) => total + Number(item.runs), 0)
   if (!runs) return {
     available: false,

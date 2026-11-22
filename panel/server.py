@@ -199,7 +199,7 @@ _TEAM_OPTIONS = [["1", "部队一"], ["2", "部队二"], ["3", "部队三"],
                  ["4", "部队四"], ["5", "部队五"]]
 _TEAM_CN = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五"}
 _DAILY_STEPS = ["登录", "签到", "万屋", "演练", "远征", "内番",
-                "锻刀", "刀解", "合成", "出阵", "手入", "任务奖励", "收件箱体检",
+                "锻刀", "刀解", "合成", "出阵", "手入", "炼糖", "任务奖励", "收件箱体检",
                 "库存快照"]
 
 
@@ -995,7 +995,9 @@ register_script("daily", "一键日课", "",
                  params=[{"key": "steps", "type": "checks", "label": "要干的活（不勾的不跑）",
                           "options": _DAILY_STEPS, "default": _DAILY_STEPS,
                            "help": "这里的出阵安排是日课专用配置，不会修改各玩法的单独配置。"
-                                   "手入默认不烧加速符，只用空闲手入位慢修，黑名单照配置守。"},
+                                   "手入默认不烧加速符，只用空闲手入位慢修，黑名单照配置守。"
+                                   "炼糖照炼糖玩法的安全规矩：黄锁的刀永不作素材，未锁乱舞"
+                                   "七级跳过；邮箱没刀/没可喂的会如实跳过。"},
                         {"key": "forge_times", "type": "number", "label": "锻刀次数",
                          "default": 3, "min": 1, "max": 200,
                          "help": "日课点火的目标炉数。只使用空闲炉、不消耗加速符；炉位不够时实际次数会少于设定值。上限与锻刀积木一致。"},
@@ -2404,6 +2406,25 @@ async def api_save_emulator_config(request: Request):
     _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "adb_address": address,
             "performance_mode": cfg.get("performance_mode", "eco")}
+
+
+# ── API：自动送修行（扫地遇「修行启程」申请直接点确认送走，默认关）──
+
+@app.get("/api/training-auto-send")
+async def api_get_training_auto_send():
+    """日课/任务流扫地通用的自动送修行开关；配置缺键一律视为关。"""
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    return {"enabled": bool(cfg.get("daily", {}).get("training_auto_send", False))}
+
+
+@app.put("/api/training-auto-send")
+async def api_save_training_auto_send(request: Request):
+    """开关写回 touken 配置 daily 区（只动这一个键）。"""
+    body = await request.json()
+    cfg = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    cfg.setdefault("daily", {})["training_auto_send"] = bool(body.get("enabled"))
+    _CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "enabled": cfg["daily"]["training_auto_send"]}
 
 
 # ── API：Agent 网关（跨渠道 LLM 入口）──

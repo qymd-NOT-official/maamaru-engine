@@ -30,7 +30,12 @@ def suggestion_records(timeline: dict) -> dict:
 
 
 def compose_plan(timeline: dict, old_plan: dict | None, raid_settings: dict, old_state: dict | None = None) -> dict:
-    """Keep saved arrangements; otherwise calculate raid windows with the adopted expeditions."""
+    """Keep saved arrangements; otherwise adopt gameplay windows with the adopted expeditions.
+
+    收编两类活动窗口：联队战走目标算盘（activity 块）；日历确认正在开的
+    非代币活动（大阪城/江户城/南瓜/异去）按建议块收编成 activity 块，
+    建议带 script 字段，手动已排同玩法的不再重复收。
+    """
     day_start = timeline["day_start"]
     activity = timeline.get("activity") or {}
     now_min = max(0, math.ceil((timeline["now"] - day_start) / 60))
@@ -63,6 +68,17 @@ def compose_plan(timeline: dict, old_plan: dict | None, raid_settings: dict, old
         blocks.extend({"start_min": b["start_min"], "kind": "raid", "runs": b["runs"]}
                       for b in windows)
         blocks.sort(key=lambda b: b["start_min"])
+    booked_scripts = {b.get("script") for b in blocks if b.get("kind") == "activity"}
+    for s in timeline.get("suggestions") or []:
+        if not s.get("script") or s["script"] in booked_scripts:
+            continue
+        booked_scripts.add(s["script"])
+        blocks.append({"start_min": s["start_min"], "kind": "activity",
+                       "script": s["script"],
+                       "event_key": s.get("event_key") or "permanent",
+                       "runs": int(s.get("runs") or 1)})
+    if booked_scripts:
+        blocks.sort(key=lambda b: b["start_min"])
     raid_blocks = [b for b in blocks if b["kind"] == "raid"]
     if raid_blocks and not daily_done:
         for block in blocks:
@@ -88,7 +104,13 @@ def compose_plan(timeline: dict, old_plan: dict | None, raid_settings: dict, old
 
 
 def compose_daily_plan(timeline: dict, preset: dict) -> dict:
-    """统一今日安排只执行规划页的日课，不再额外生成一份活动流程。"""
+    """统一今日安排：按设置时间预排日课块，并收编已确认活动的玩法建议。
+
+    raid/秘宝之里有目标算盘，由日课自己的活动步骤/推荐圈数处理，不在
+    此重复收编；日历确认正在开的非代币活动（大阪城/江户城/南瓜/异去）
+    按建议块收编成 activity 块，格式与手动安排的玩法块一致，收进计划
+    后照样能改能删。没建议、确认不了正在开的，就只有日课块本身。
+    """
     now_min = max(0, math.ceil((timeline['now'] - timeline['day_start']) / 60))
     start = now_min
     clock = (preset.get('daily_ui') or {}).get('startTime') or ''
@@ -104,9 +126,19 @@ def compose_daily_plan(timeline: dict, preset: dict) -> dict:
             start += 1440
     if start >= dt.DAY_MINUTES:
         raise ValueError('这个开始时间超过本次日课刷新，请选择更早的时间')
+    blocks = [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': start}]
+    booked = set()
+    for s in timeline.get('suggestions') or []:
+        if not s.get('script') or s['script'] in booked:
+            continue
+        booked.add(s['script'])
+        blocks.append({'start_min': s['start_min'], 'kind': 'activity',
+                       'script': s['script'],
+                       'event_key': s.get('event_key') or 'permanent',
+                       'runs': int(s.get('runs') or 1)})
+    blocks.sort(key=lambda b: b['start_min'])
     return {'version': 2, 'day_start': timeline['day_start'], 'event_end_at': None,
-            'blocks': [{'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': start}],
-            'daily_done': False, 'uses_saved_raid': False}
+            'blocks': blocks, 'daily_done': False, 'uses_saved_raid': False}
 
 
 def execute_today(runner, timeline_fn, raid_settings_fn, *,
@@ -191,9 +223,14 @@ def execute_today(runner, timeline_fn, raid_settings_fn, *,
         daily = any(b["kind"] == "daily" and b["status"] == "pending" for b in candidate["blocks"])
         pieces = []
         if daily_preset is not None:
+            adopted = [s for s in (timeline.get('suggestions') or []) if s.get('script')]
+            activity_note = ('' if not adopted else
+                             '，还收下' + '、'.join(
+                                 f"{s.get('label') or s['script']} {int(s.get('runs') or 1)} 次"
+                                 for s in adopted))
             return {'ok': True, 'message': ('今日安排已接班：远征与日课分别执行，最后按设置收工。'
                     if not (daily_preset.get('daily_ui') or {}).get('startTime') else
-                    '今日安排已接班，将按设置的开始时间执行。') +
+                    '今日安排已接班，将按设置的开始时间执行。') + activity_note +
                     ('远征仍在暂停，日课可以照常开工。' if paused > datetime.now().strftime("%Y-%m-%d %H:%M:%S") else '')}
         if records:
             pieces.append(f"远征 {len(records)} 班")

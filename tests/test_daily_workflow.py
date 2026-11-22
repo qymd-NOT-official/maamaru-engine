@@ -58,7 +58,7 @@ class DailyWorkflowTests(unittest.TestCase):
         types = [n["type"] for n in default["nodes"]]
         self.assertEqual(types, ["login", "signin", "free_gift", "practice", "expedition",
                                  "naihanka", "forge", "dismantle", "synthesize", "daily_sortie",
-                                 "daily_repair", "task_rewards", "inbox_scan", "snapshot",
+                                 "daily_repair", "sugar", "task_rewards", "inbox_scan", "snapshot",
                                  "ledger_sync"])
         copy = workflow.create_preset({**default, "name": "我的日课"})
         self.assertNotEqual(copy["id"], default["id"])
@@ -131,6 +131,30 @@ class DailyWorkflowTests(unittest.TestCase):
             "steps": ["登录", "签到", "出阵", "任务奖励"]}}}
         template = make_template(old_saved, {}, server._DAILY_STEPS)
         self.assertNotIn("daily_repair", [n["type"] for n in template["nodes"]])
+
+    def test_sugar_step_in_default_template_between_repair_and_rewards(self):
+        template = make_template({"params": {}}, {}, server._DAILY_STEPS)
+        types = [n["type"] for n in template["nodes"]]
+        self.assertEqual(types.index("sugar"),
+                         types.index("daily_repair") + 1)
+        self.assertLess(types.index("sugar"), types.index("task_rewards"))
+        sugar = next(n for n in template["nodes"] if n["type"] == "sugar")
+        # 日课炼糖不加新参数：习合上锁保护/七级跳过全在 sugar_stream 里
+        self.assertEqual(sugar["params"], {})
+
+    def test_sugar_step_not_forced_into_old_saved_steps(self):
+        old_saved = {"params": {"daily": {
+            "steps": ["登录", "签到", "出阵", "任务奖励"]}}}
+        template = make_template(old_saved, {}, server._DAILY_STEPS)
+        self.assertNotIn("sugar", [n["type"] for n in template["nodes"]])
+
+    def test_default_step_list_has_sugar_after_repair_before_rewards(self):
+        field = next(f for f in server._SCRIPTS["daily"]["params"]
+                     if f["key"] == "steps")
+        self.assertEqual(field["default"].index("炼糖"),
+                         field["default"].index("手入") + 1)
+        self.assertLess(field["default"].index("炼糖"),
+                        field["default"].index("任务奖励"))
 
     def test_saved_daily_steps_pass_through_and_default_list_has_repair(self):
         # 面板执行层同理：老用户保存的 steps 原样下发（不强行塞手入）；

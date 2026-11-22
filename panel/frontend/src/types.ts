@@ -1502,6 +1502,13 @@ export interface DayTimelineSuggestion {
   duration_min: number
   runs?: number
   note: string
+  /** 非代币活动建议（大阪城/江户城/南瓜/异去）：要收编的玩法脚本；缺省=联队战圈数或秘宝之里挂机 */
+  script?: string
+  label?: string
+  event_key?: string
+  end_at?: number | null
+  /** 次数来自玩家已保存设置还是注册默认 */
+  basis?: 'saved' | 'defaults'
 }
 
 /** 远征建议引擎的长期偏好：可丢的队伍各派几次 + 哪些队可以丢（换日不重置） */

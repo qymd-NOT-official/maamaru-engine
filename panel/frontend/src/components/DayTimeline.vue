@@ -7,6 +7,7 @@ import PaperCard from './PaperCard.vue'
 import DailySettings from './DailySettings.vue'
 import { draggedMinute, paintedMinute } from './timelineDrag'
 import { canAdoptRaidRecommendation, scheduleMinute } from './report/planningLinkModel'
+import { suggestionBooked, suggestionDraftTaken, suggestionTitle, suggestionToBlock } from './timelineSuggestionModel'
 
 const props = withDefaults(defineProps<{ recoveryRunId?: string; collapsible?: boolean; refreshRequest?: number; adoptRecommendationRequest?: number; dailySettings?: boolean }>(), {
   collapsible: false,
@@ -471,7 +472,7 @@ function toDraftRow(block: DayScheduleBlock): DraftRow {
 function recommendedBlocks(): DayScheduleBlock[] {
   return (data.value?.suggestions || [])
     .filter(block => block.runs != null)
-    .map(block => ({ start_min: block.start_min, kind: 'raid' as const, runs: block.runs! }))
+    .map(suggestionToBlock)
 }
 
 function defaultDraftRow(): DraftRow {
@@ -569,8 +570,8 @@ async function openRaidRecommendation() {
   expanded.value = true
   if (!canAdopt) {
     planMessage.value = editing.value
-      ? '你正在修改时间表草稿，先保存或取消这份草稿，再带入联队战建议。'
-      : '时间表里已经有安排，先在这里处理现有安排，再带入联队战建议。'
+      ? '你正在修改时间表草稿，先保存或取消这份草稿，再带入活动建议。'
+      : '时间表里已经有安排，先在这里处理现有安排，再带入活动建议。'
     await nextTick()
     const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
     document.querySelector('.tl-booking')?.scrollIntoView({ behavior, block: 'start' })
@@ -634,9 +635,12 @@ watch(() => props.adoptRecommendationRequest, (request, previous) => {
 })
 
 /** 点建议淡影先打开操作菜单，保存配置后才采纳。 */
-function adoptSuggestion(shadow: { minute: number; runs?: number; left: number }) {
+function adoptSuggestion(shadow: { minute: number; runs?: number; left: number; script?: string; event_key?: string }) {
   expeditionPopup.value = null
-  suggestedGameplay.value = {start_min: shadow.minute, kind: 'raid', runs: shadow.runs ?? 1}
+  suggestedGameplay.value = shadow.script
+    ? {start_min: shadow.minute, kind: 'activity', script: shadow.script,
+       event_key: shadow.event_key || 'permanent', runs: shadow.runs ?? 1}
+    : {start_min: shadow.minute, kind: 'raid', runs: shadow.runs ?? 1}
   popover.value = {index: -1, lane: 'task', left: shadow.left}
 }
 
@@ -951,7 +955,12 @@ function openLaneTask(event: MouseEvent, index: number, shadow?: typeof suggesti
         return block ? [{index: i, block}] : []
       }
       const suggestion = suggestionShadows.value.find(s => s.key === button.dataset.suggestionKey)
-      return suggestion ? [{index: -1, block: {start_min: suggestion.minute, kind: 'raid' as const, runs: suggestion.runs ?? 1}}] : []
+      if (!suggestion) return []
+      const block: DayScheduleBlock = suggestion.script
+        ? {start_min: suggestion.minute, kind: 'activity', script: suggestion.script,
+           event_key: suggestion.event_key || 'permanent', runs: suggestion.runs ?? 1}
+        : {start_min: suggestion.minute, kind: 'raid', runs: suggestion.runs ?? 1}
+      return [{index: -1, block}]
     })
 }
 function selectPopoverTask(entry: { index: number; block: DayScheduleBlock }) {
@@ -1122,23 +1131,26 @@ const runBlocks = computed(() => {
 const suggestionBlocks = computed(() => {
   const suggestions = data.value?.suggestions
   if (!suggestions) return []
-  // 已排联队战就展示正式安排；改过时间的安排也属于已采纳。
-  const hasRaid = (editing.value ? draft.value : data.value?.booking?.blocks || [])
-    .some(row => row.kind === 'raid' || (row.kind === 'activity' && row.script === 'raid'))
-  return suggestions.filter(s => s.runs == null || !hasRaid).map((s, i) => {
+  // 已排了同玩法的正式安排（含改过时间的草稿）就展示正式安排，淡影让位。
+  const blocks: Pick<DayScheduleBlock, 'kind' | 'script'>[] =
+    editing.value ? draft.value : data.value?.booking?.blocks || []
+  return suggestions.filter(s => !suggestionBooked(s, blocks)).map((s, i) => {
     const range = `${fmtMin(s.start_min)}–${fmtMin(s.start_min + s.duration_min)}`
-    const activityLabel = s.runs != null ? `联队战 ${s.runs} 圈` : '挂机建议'
-    const detail = `${s.runs != null ? `${s.runs} 圈 · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
+    const activityLabel = suggestionTitle(s)
+    const unit = s.script ? '次' : '圈'
+    const detail = `${s.runs != null ? `${s.runs} ${unit} · ` : '挂 '}${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''}`
     return {
       key: `suggest-${i}`,
       minute: s.start_min,
       runs: s.runs ?? undefined,
+      script: s.script,
+      event_key: s.event_key,
       left: pct(s.start_min),
       width: Math.max(pct(Math.max(s.duration_min, 4)), 0.7),
       suggestionIndex: data.value!.suggestions!.indexOf(s),
       cls: 'tlx-suggest',
       title: `建议：${activityLabel} · ${range} · ${durationText(s.duration_min)}${s.note ? ` · ${s.note}` : ''} · 点击配置或启用`,
-      text: s.runs != null ? `建议 ${s.runs} 圈` : '建议',
+      text: s.runs != null ? `建议 ${s.runs} ${unit}` : '建议',
       rowTitle: activityLabel,
       rowDetail: `${range} ${detail}`,
       time: fmtMin(s.start_min),
@@ -1153,11 +1165,9 @@ const suggestionBlocks = computed(() => {
 const suggestionShadows = computed(() => {
   const shadows = suggestionBlocks.value
   if (!editing.value) return shadows
-  const taken = new Set(draft.value
-    .filter(row => row.kind === 'raid')
-    .map(row => parseTime(row.time))
-    .filter((value): value is number => value != null))
-  return shadows.filter(shadow => !taken.has(shadow.minute))
+  const suggestions = data.value?.suggestions || []
+  return shadows.filter(shadow => !suggestionDraftTaken(
+    suggestions[shadow.suggestionIndex], draft.value, parseTime))
 })
 
 interface ScheduleLaneBlock {
@@ -1272,6 +1282,8 @@ const caption = computed(() => {
     if (!activity.target_runs) return '联队战今天的进度已够，等下一次记账再更新'
     return `联队战接下来建议 ${activity.target_runs} 圈 · 已找到 ${activity.planned_runs} 圈的空窗`
   }
+  const generic = (data.value?.suggestions || []).find(s => s.script)
+  if (generic) return `${generic.label || '活动'}按设置建议 ${generic.runs ?? 1} 次 · 淡影只是建议，点它配置或启用`
   const nextEnabled = expeditionBlocks.value
     .filter((block) => block.minute >= nowMin.value && block.enabled)
     .sort((a, b) => a.minute - b.minute)[0]

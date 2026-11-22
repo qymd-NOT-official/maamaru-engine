@@ -241,3 +241,66 @@ class TodayExecutionTests(unittest.TestCase):
         forced = ec.load_choice_sets(self.paths['choices_path'])[1]
         self.assertEqual(len(forced), 2)
         self.assertTrue(set(original_forced).issubset(forced))
+
+    def test_unified_plan_adopts_generic_activity_suggestions(self):
+        """一键执行/autoExecutePlan 同一条 unified 链路吃进非代币活动建议。"""
+        self.day['activity'] = None
+        self.day['suggestions'] = [{
+            'start_min': 700, 'duration_min': 30, 'runs': 6, 'note': '',
+            'script': 'edocastle', 'label': '江户城潜入调查',
+            'event_key': 'evt-edocastle', 'basis': 'saved'}]
+        self.day['gameplay_options'] = [{
+            'script': 'edocastle', 'label': '江户城潜入调查', 'available': True,
+            'event_key': 'evt-edocastle', 'end_at': None}]
+        preset = {'id': 'builtin-daily', 'name': '一键日课',
+                  'nodes': [{'type': 'signin', 'params': {}}],
+                  'daily_ui': {'startTime': '03:20'}}
+        settings = {'params': {'edocastle': {'team_no': '2', 'runs': 6}}}
+        with patch.object(dc.workflow, 'find_preset', return_value=preset), \
+                patch.object(server, '_load_panel_settings', return_value=settings):
+            result = execute_today(self.runner, lambda: self.day, lambda: {},
+                                   daily_preset=preset, **self.paths)
+        plan = dp.load_plan(self.paths['plan_path'])
+        # 03:20 早于现在（10:00），日课块按既有口径顺到次日凌晨窗口
+        self.assertEqual(plan['blocks'], [
+            {'start_min': 700, 'kind': 'activity', 'script': 'edocastle',
+             'event_key': 'evt-edocastle', 'runs': 6},
+            {'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': 1640}])
+        state = dc.load_state(self.paths['state_path'])
+        activity_state = next(b for b in state['blocks'] if b['kind'] == 'activity')
+        self.assertEqual(activity_state['label'], '江户城潜入调查 6 次')
+        self.assertEqual(activity_state['status'], 'pending')
+        self.assertIn('江户城潜入调查 6 次', result['message'])
+
+    def test_unified_plan_keeps_daily_only_without_suggestions(self):
+        self.day['activity'] = None
+        self.day['suggestions'] = None
+        preset = {'id': 'builtin-daily', 'name': '一键日课',
+                  'nodes': [{'type': 'signin', 'params': {}}],
+                  'daily_ui': {'startTime': ''}}
+        with patch.object(dc.workflow, 'find_preset', return_value=preset):
+            result = execute_today(self.runner, lambda: self.day, lambda: {},
+                                   daily_preset=preset, **self.paths)
+        plan = dp.load_plan(self.paths['plan_path'])
+        self.assertEqual(plan['blocks'], [
+            {'kind': 'workflow', 'workflow_id': 'builtin-daily', 'start_min': 600}])
+        self.assertNotIn('还收下', result['message'])
+
+    def test_compose_plan_adopts_generic_suggestion_once(self):
+        self.day['suggestions'] = [{
+            'start_min': 700, 'duration_min': 30, 'runs': 6, 'note': '',
+            'script': 'edocastle', 'label': '江户城潜入调查',
+            'event_key': 'evt-edocastle', 'basis': 'saved'}]
+        plan = compose_plan(self.day, None, {})
+        adopted = [b for b in plan['blocks'] if b['kind'] == 'activity']
+        self.assertEqual(adopted, [{'start_min': 700, 'kind': 'activity',
+                                    'script': 'edocastle', 'event_key': 'evt-edocastle',
+                                    'runs': 6}])
+        # 手动已排同玩法的不再重复收
+        old = dp.save_plan(DAY, None, [
+            {'start_min': 650, 'kind': 'activity', 'script': 'edocastle',
+             'event_key': 'evt-edocastle', 'runs': 3}], self.paths['plan_path'])
+        plan = compose_plan(self.day, old, {})
+        adopted = [b for b in plan['blocks'] if b['kind'] == 'activity']
+        self.assertEqual(len(adopted), 1)
+        self.assertEqual(adopted[0]['runs'], 3)

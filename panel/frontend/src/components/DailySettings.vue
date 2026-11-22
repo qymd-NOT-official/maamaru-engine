@@ -23,6 +23,7 @@ const after = ref<WorkflowPreset['after']>('none')
 const startTime = ref('')
 const autoSchedule = ref(false)
 const autoExecutePlan = ref(false)
+const trainingAutoSend = ref(false)
 const osakaRuns = ref<OsakaPaceRun[]>([])
 const osakaPaceError = ref(false)
 const clock = ref(new Date())
@@ -130,6 +131,18 @@ async function saveExpeditionPrefs(rounds: number, teams: number[]) {
   catch (err) { message.value = err instanceof Error ? err.message : '远征偏好没有保存成功' }
   finally { busy.value = false }
 }
+async function saveTrainingAutoSend(event: Event) {
+  // 全局配置（touken.json），保存即生效，不属于这份日课预设
+  const enabled = (event.target as HTMLInputElement).checked
+  busy.value = true
+  try {
+    await api.setTrainingAutoSend(enabled)
+    trainingAutoSend.value = enabled
+    message.value = enabled ? '自动送修行已开启：见申请就送，每次烧一套修行道具' : '自动送修行已关闭：申请一律婉拒'
+    emit('saved')
+  } catch (err) { message.value = err instanceof Error ? err.message : '自动送修行没有保存成功' }
+  finally { busy.value = false }
+}
 async function setResourceFocus(event: Event) {
   busy.value = true
   try { await api.setExpeditionResourceFocus((event.target as HTMLSelectElement).value); emit('saved') }
@@ -174,6 +187,11 @@ async function save(start = false) {
   finally { busy.value = false }
 }
 onMounted(load)
+onMounted(async () => {
+  // 开关读不到就保持关（安全默认），不挡日课设置页本身
+  try { trainingAutoSend.value = (await api.trainingAutoSend()).enabled }
+  catch { trainingAutoSend.value = false }
+})
 onMounted(async () => {
   try { osakaRuns.value = (await api.dataRuns(100, undefined, Date.now() / 1000 - 14 * 86400, undefined, undefined, '', 'osaka')).items }
   catch { osakaPaceError.value = true }
@@ -266,6 +284,7 @@ async function stopExpeditions() {
       <label>开始时间<input v-model="startTime" type="time" :disabled="busy || running" /><small>留空则现在开始</small></label>
       <label class="daily-autoschedule"><input v-model="autoSchedule" type="checkbox" :disabled="busy || running" /><span>每天自动预排这段日课<small v-if="autoSchedule && !startTime">还没填开始时间，自动预排不会生效</small></span></label>
       <label class="daily-autoschedule daily-auto-execute"><input v-model="autoExecutePlan" type="checkbox" :disabled="busy || running || !autoSchedule" /><span>到点自动执行今日安排<small v-if="autoExecutePlan && !autoSchedule">需要先开上面的「每天自动预排这段日课」</small><details class="daily-help"><summary aria-label="到点自动执行今日安排说明">?</summary><p>开了这个，每天到点自动把远征建议和活动窗口收编成今日安排并执行；建议内容仍是系统算好的，不会替你发明新安排。</p></details></span></label>
+      <label class="daily-autoschedule daily-training-send"><input type="checkbox" :checked="trainingAutoSend" :disabled="busy || running" @change="saveTrainingAutoSend" /><span>自动送修行<small>开关一按即生效，存在游戏配置里，不属于这份日课预设</small><details class="daily-help"><summary aria-label="自动送修行说明">?</summary><p>开了就见申请就送：扫地遇到「修行启程」直接点确认送走，每次烧一套修行道具，96 小时后回来。没全图鉴、或不想送谁的，别开。</p></details></span></label>
       <label>结束后<select v-model="after" :disabled="busy || running"><option value="none">留在本丸</option><option value="logout">退出游戏</option><option value="shutdown">退出游戏并关闭模拟器</option><option value="sleep">退出游戏、关闭模拟器并休眠电脑</option></select></label>
       <div class="daily-start"><small>已选 {{ enabledCount }} 项 · 最后同步家底</small><div><button class="daily-save" :disabled="busy || running" @click="save(false)">保存设置</button><button class="primary" :disabled="busy || running || !enabledCount" @click="save(true)">{{ busy ? '正在安排…' : running ? '正在执务中' : startTime ? '按时间执行今日安排' : '一键执行今日安排' }}</button></div></div>
     </footer>
@@ -332,6 +351,9 @@ async function stopExpeditions() {
 .daily-settings-footer .daily-autoschedule { display: flex; align-items: center; gap: 8px; }
 .daily-auto-execute { position: relative; }
 .daily-auto-execute .daily-help summary { flex: 0 0 auto; }
+.daily-training-send { position: relative; }
+.daily-training-send .daily-help summary { flex: 0 0 auto; }
+.daily-training-send .daily-help p { width: 280px; }
 .daily-autoschedule small { display: block; color: var(--ink-muted); }
 .daily-settings-footer small { font-size: 11px; }
 .daily-settings-footer input, .daily-settings select { padding: 8px; border: 1px solid var(--paper-line); border-radius: 5px; background: var(--paper-panel); color: inherit; max-width: 100%; }

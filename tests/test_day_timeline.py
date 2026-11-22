@@ -67,6 +67,10 @@ class DayTimelineExpeditionTests(unittest.TestCase):
         patcher = patch.object(scheduler, "map_options", lambda: _FAKE_MAPS)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # 非代币活动建议会读真实日历/面板设置，这些用例默认静音，专项另测。
+        silence = patch.object(dtl, "_generic_activity_suggestions", return_value=[])
+        silence.start()
+        self.addCleanup(silence.stop)
 
     def test_unforced_entry_is_not_projected(self):
         """没点名的排班条目不上轴（preset/custom 投影已撤）。"""
@@ -214,6 +218,9 @@ class DayTimelineRunTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = TelemetryStore(Path(self.tmp.name) / "t.db")
+        silence = patch.object(dtl, "_generic_activity_suggestions", return_value=[])
+        silence.start()
+        self.addCleanup(silence.stop)
 
     def tearDown(self):
         self.store.close()
@@ -307,6 +314,9 @@ class DayTimelineMiscTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = TelemetryStore(Path(self.tmp.name) / "t.db")
+        silence = patch.object(dtl, "_generic_activity_suggestions", return_value=[])
+        silence.start()
+        self.addCleanup(silence.stop)
 
     def tearDown(self):
         self.store.close()
@@ -465,6 +475,9 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
         patcher = patch.object(scheduler, "map_options", lambda: _FAKE_MAPS)
         patcher.start()
         self.addCleanup(patcher.stop)
+        silence = patch.object(dtl, "_generic_activity_suggestions", return_value=[])
+        silence.start()
+        self.addCleanup(silence.stop)
 
     def tearDown(self):
         self.store.close()
@@ -610,6 +623,143 @@ class DayTimelineSuggestionIntegrationTests(unittest.TestCase):
             player_tasks=[{"start_min": 480, "end_min": 493, "label": "一键日课"}])
         self.assertEqual(out['suggestions'][0]['start_min'], 493)
         self.assertIsNotNone(out['activity'])
+
+
+class DayTimelineGenericActivitySuggestionTests(unittest.TestCase):
+    """建议层扩到非代币活动（大阪城/江户城/南瓜/异去）：日历确认才开口，
+    次数取已保存玩法设置（没保存用注册默认），块时长按 30 分钟估计。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TelemetryStore(Path(self.tmp.name) / "t.db")
+        patcher = patch.object(scheduler, "map_options", lambda: _FAKE_MAPS)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tearDown(self):
+        self.store.close()
+        self.tmp.cleanup()
+
+    def _build(self, *, cards=None, announcements=None, settings=None,
+               now=None, forced=None, active=None):
+        from panel import server
+        patches = [
+            patch.object(dtl, "_hanafuda_active_plan", return_value=None),
+            patch.object(dtl, "_raid_active_plan", return_value=None),
+            patch.object(server, "_load_events_calendar",
+                         return_value=({"announcements": announcements or []}, False)),
+            patch("touken.advisor.load_event_cards", return_value=cards or {}),
+            patch.object(server, "_load_panel_settings", return_value=settings or {}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return dtl.build_day_timeline(
+            now or _today_at(8, 0), cfg=_cfg([]), store=self.store,
+            script_labels={}, active=active,
+            expedition_forced=forced or {},
+            expedition_records={},
+            expedition_help={"rounds_per_team": 0, "available_teams": []})
+
+    @staticmethod
+    def _today_card(name):
+        today = time.strftime("%Y-%m-%d")
+        return {name: {"mechanics": "?", "start_date": today, "end_date": today}}
+
+    def test_each_event_activity_gets_suggestion_when_calendar_confirms(self):
+        cases = [
+            ("osaka", "大阪城", {"runs": 2}),
+            ("edocastle", "江户城潜入调查", {"runs": 8}),
+            ("pumpkin", "南瓜大作战", {"runs": 5}),
+            ("yosari", None, {"runs": 3}),  # 异走去公告候选找证据
+        ]
+        for script, card_name, saved in cases:
+            with self.subTest(script=script):
+                cards = self._today_card(card_name) if card_name else {}
+                announcements = ([] if card_name else
+                                 [{"schedule_candidates": [{
+                                     "name": "战术强化训练 ~异去~",
+                                     "start_at": f"{time.strftime('%Y-%m-%d')}T00:00:00+08:00",
+                                     "end_at": f"{time.strftime('%Y-%m-%d')}T23:59:00+08:00"}]}])
+                settings = {"params": {script: {"team_no": "2", **saved}}}
+                out = self._build(cards=cards, announcements=announcements,
+                                  settings=settings)
+                suggestion = next((s for s in out["suggestions"] or []
+                                   if s.get("script") == script), None)
+                self.assertIsNotNone(suggestion)
+                self.assertEqual(suggestion["runs"], saved["runs"])
+                self.assertEqual(suggestion["duration_min"],
+                                 dtl.ACTIVITY_SUGGESTION_MINUTES)
+                self.assertEqual(suggestion["basis"], "saved")
+                self.assertTrue(suggestion["event_key"])
+                self.assertIn("按你保存的设置", out["hint"])
+
+    def test_no_calendar_evidence_no_suggestion(self):
+        out = self._build(cards={}, announcements=[],
+                          settings={"params": {"edocastle": {"team_no": "2", "runs": 8}}})
+        self.assertIsNone(out["suggestions"])
+        self.assertIsNone(out["hint"])
+
+    def test_yosari_needs_its_own_name_in_calendar(self):
+        """公告只开着江户城时异去不开口（江户城自己照常建议）；
+        对上「异去」名字异去才建议。"""
+        settings = {"params": {"yosari": {"team_no": "2", "runs": 3}}}
+        other = [{"schedule_candidates": [{
+            "name": "江户城潜入调查",
+            "start_at": f"{time.strftime('%Y-%m-%d')}T00:00:00+08:00",
+            "end_at": f"{time.strftime('%Y-%m-%d')}T23:59:00+08:00"}]}]
+        out = self._build(cards={}, announcements=other, settings=settings)
+        self.assertFalse(any(s.get("script") == "yosari"
+                             for s in out["suggestions"] or []))
+        self.assertTrue(any(s.get("script") == "edocastle"
+                            for s in out["suggestions"] or []))
+        own = [{"schedule_candidates": [{
+            "name": "特命调查 异去",
+            "start_at": f"{time.strftime('%Y-%m-%d')}T00:00:00+08:00",
+            "end_at": f"{time.strftime('%Y-%m-%d')}T23:59:00+08:00"}]}]
+        out = self._build(cards={}, announcements=own, settings=settings)
+        suggestion = next((s for s in out["suggestions"] or []
+                           if s.get("script") == "yosari"), None)
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion["event_key"], "permanent")
+
+    def test_runs_fall_back_to_register_defaults(self):
+        out = self._build(cards=self._today_card("江户城潜入调查"))
+        suggestion = next((s for s in out["suggestions"] or []
+                           if s.get("script") == "edocastle"), None)
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion["runs"], 6)  # 江户城注册默认 6 次
+        self.assertEqual(suggestion["basis"], "defaults")
+        self.assertIn("默认设置", out["hint"])
+
+    def test_running_activity_is_not_suggested_again(self):
+        out = self._build(cards=self._today_card("江户城潜入调查"),
+                          settings={"params": {"edocastle": {"team_no": "2", "runs": 8}}},
+                          active={"script": "edocastle"})
+        self.assertIsNone(out["suggestions"])
+
+    def test_saved_team_expedition_shift_avoided(self):
+        """建议按保存设置认出部队二，它要跑远征时整段避让：08:20 前的
+        碎片不足 30 分钟不出块，建议排到 10:10 远征收工之后。"""
+        forced = {"k": _forced_record(2, "B3", _today_at(8, 20))}
+        out = self._build(cards=self._today_card("江户城潜入调查"),
+                          settings={"params": {"edocastle": {"team_no": "2", "runs": 8}}},
+                          forced=forced)
+        suggestion = next(s for s in out["suggestions"] or []
+                          if s.get("script") == "edocastle")
+        self.assertGreaterEqual(suggestion["start_min"], 590)  # 09:50 收工后
+
+    def test_event_closing_soon_gets_no_suggestion(self):
+        """活动马上收摊（只剩 20 分钟）塞不下 30 分钟的块，诚实沉默。"""
+        closing = time.strftime("%Y-%m-%d %H:%M:%S",
+                               time.localtime(_today_at(8, 0) + 20 * 60))
+        announcements = [{"schedule_candidates": [{
+            "name": "战术强化训练 ~异去~",
+            "start_at": f"{time.strftime('%Y-%m-%d')}T00:00:00+08:00",
+            "end_at": closing.replace(" ", "T") + "+08:00"}]}]
+        out = self._build(cards={}, announcements=announcements,
+                          settings={"params": {"yosari": {"team_no": "2", "runs": 3}}})
+        self.assertIsNone(out["suggestions"])
 
 
 if __name__ == "__main__":

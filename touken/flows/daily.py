@@ -12,9 +12,9 @@
   ⑦ 锻刀（每日3炉，收完成的+点空闲的，刀位满了去刀解腾位置）
   ⑧ 刀解（白名单一把，任务奖励加速符）
   ⑨ 合成（白名单喂一把）
-  ⑩ 炼糖（收件箱清狗粮 + 习合循环）
-  ⑪ 出阵（配置驱动：活动=raid / 普通图=sortie / 不打=none）
-  ⑫ 手入（出阵打完的伤刀当天顺手修；零成本默认：不烧加速符，黑名单照守）
+  ⑩ 出阵（配置驱动：活动=raid / 普通图=sortie / 不打=none）
+  ⑪ 手入（出阵打完的伤刀当天顺手修；零成本默认：不烧加速符，黑名单照守）
+  ⑫ 炼糖（收件箱清狗粮 + 习合循环；上锁保护与乱舞七级跳过照炼糖玩法原样）
   ⑬ 领任务奖励
   ⑭ 库存快照（看板数据）
   ⑮ 下线（还没做，可选）
@@ -47,6 +47,7 @@ from .report_judge import (  # noqa: F401
     _repair_report_status,
     _shop_report_status,
     _snapshot_report_status,
+    _sugar_report_status,
 )
 
 
@@ -148,6 +149,7 @@ class DailyMixin:
             ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
             ("手入", lambda: self._daily_repair_step()),
+            ("炼糖", lambda: self._daily_sugar_step()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),
             ("库存快照", lambda: self._closing_snapshot_stream(_w("锻刀"))),
         ]
@@ -161,8 +163,9 @@ class DailyMixin:
             "刀解": "⑧ 刀解",
             "合成": "⑨ 合成",
             "手入": "⑫ 手入（伤刀当天修，不烧加速符）",
-            "任务奖励": "⑬ 领任务奖励",
-            "库存快照": "⑭ 库存快照（看板数据）",
+            "炼糖": "⑬ 炼糖（收件箱清狗粮 + 习合喂重刀）",
+            "任务奖励": "⑭ 领任务奖励",
+            "库存快照": "⑮ 库存快照（看板数据）",
         }
 
         # 出阵插到手入前面（就算没勾手入，单勾出阵也能跑）；
@@ -208,6 +211,8 @@ class DailyMixin:
                         detail_status = _snapshot_report_status(msg, detail_status)
                     if name == "手入":
                         detail_status = _repair_report_status(msg, detail_status)
+                    if name == "炼糖":
+                        detail_status = _sugar_report_status(msg, detail_status)
             except Exception as exc:
                 ok = False
                 yield f"[日课] {name}翻车: {exc}"
@@ -339,6 +344,14 @@ class DailyMixin:
                    "要用手入请先在「配置」页设好名单")
             return
         yield from self.repair_stream(use_speedup=False)
+
+    def _daily_sugar_step(self):
+        """日课的炼糖步：收件箱清狗粮 + 习合循环，整套安全逻辑复用炼糖玩法
+        原样（黄锁的刀永不作素材、未锁本体乱舞七级跳过），不加新参数。
+        邮箱没刀、没有可喂的本体都如实记日志跳过，不算翻车（判分见
+        report_judge._sugar_report_status）；真翻车（导航失败、习合未确认）
+        照旧走翻车词表判红。"""
+        yield from self.sugar_stream()
 
     def _daily_expedition_step(self, routes, fallback_redispatch="same"):
         """收菜后按独立“远征”的常用安排补派；不读取自动排班。"""
@@ -782,16 +795,23 @@ class DailyMixin:
                     clean = 0
                     continue
             # 刀剑男士申请修行：点穿对话后弹「修行启程」确认窗（是否消耗道具
-            # 派遣 XX 修行）。点【取消】婉拒——弹窗自己写着随时能在强化/组织
-            # 界面再派，可逆；点确认才要烧三件道具送走 96 小时，不替主人决定。
+            # 派遣 XX 修行）。默认点【取消】婉拒——弹窗自己写着随时能在强化/组织
+            # 界面再派，可逆；点确认才要烧一套道具送走 96 小时，不替主人决定。
+            # 配置了 daily.training_auto_send=true（面板「日课设置」的「自动送
+            # 修行」，全图鉴养老模式）才点【确认】送走。
             # （2026-09-11 真机取帧：取消在左 (496,614)，确认在右，别记反。）
             if self.device.ocr("修行启程", roi_4to4(450, 40, 830, 110)):
-                cancel = self.device.ocr("取消", roi_4to4(400, 560, 640, 670),
-                                      match_mode="exact")
-                self.device.click(cancel if cancel else Point(496, 614))
-                print("[扫地] 有刀剑男士申请修行，点【取消】婉拒"
-                      "（想去的话到强化/组织界面手动派）")
-                time.sleep(2.0)
+                if self._training_auto_send():
+                    if not self._send_training_request():
+                        # 送完认不出后续（被拒/陌生窗）：不盲点，停手交回人工
+                        return False
+                else:
+                    cancel = self.device.ocr("取消", roi_4to4(400, 560, 640, 670),
+                                         match_mode="exact")
+                    self.device.click(cancel if cancel else Point(496, 614))
+                    print("[扫地] 有刀剑男士申请修行，点【取消】婉拒"
+                          "（想去的话到强化/组织界面手动派）")
+                    time.sleep(2.0)
                 clean = 0
                 continue
             # 修行中的来信：狐之助说有信、全屏信纸、读完后的提示分别推进。
@@ -838,6 +858,69 @@ class DailyMixin:
                 self.device.click(Point(993, 690))
                 clean = 0
             time.sleep(2.0)
+        return False
+
+    def _training_auto_send(self) -> bool:
+        """自动送修行开关（默认关）：存在 touken 配置 daily 区，面板「日课
+        设置」的「自动送修行」直接写配置。老配置没这个键一律视为关。"""
+        plan = getattr(self, "config", None) or {}
+        return bool(plan.get("daily", {}).get("training_auto_send", False))
+
+    def _send_training_request(self) -> bool:
+        """开关开：点【确认】把申请修行的刀送走，并记日志点名（认不出就如实
+        说没认出）。返回 False = 点完认不出后续弹窗（被拒或陌生窗），调用方
+        停手交回人工；True = 窗已关（送走了/安全婉拒），扫地继续。"""
+        name = self._training_applicant_name()
+        confirm = self.device.ocr("确认", roi_4to4(650, 560, 890, 670),
+                                  match_mode="exact")
+        if not confirm:
+            # 认不出确认键就不送：回退【取消】婉拒（可逆），绝不在修行窗上盲点
+            cancel = self.device.ocr("取消", roi_4to4(400, 560, 640, 670),
+                                     match_mode="exact")
+            self.device.click(cancel if cancel else Point(496, 614))
+            print("[扫地] 认出修行申请但没看到【确认】键，没敢送，按【取消】婉拒"
+                  "（想去的话到强化/组织界面手动派）")
+            time.sleep(2.0)
+            return True
+        self.device.click(confirm)
+        who = f"【{name}】" if name else "一位没认出名字的刀剑男士"
+        print(f"[扫地] 已送{who}修行（自动送修行已开启：每次烧一套修行道具，"
+              "96 小时后回来）")
+        time.sleep(2.0)
+        return self._verify_training_sent()
+
+    def _training_applicant_name(self):
+        """修行启程窗里点名（尽力而为）：OCR 窗体文字拿去刀名册查，查不到
+        返回 None——日志如实说没认出，不瞎编名字。"""
+        try:
+            tokens = self.device.ocr_all(roi_4to4(260, 120, 1020, 540))
+            text = "".join(str(t) for t, _pt in tokens)
+            if not text.strip():
+                return None
+            from ..sword_db import find_by_name
+            hit = find_by_name(text, fuzzy=False)
+        except Exception:
+            return None
+        if not hit:
+            return None
+        info = hit[1]
+        return info.get("name_zh") or info.get("name")
+
+    def _verify_training_sent(self) -> bool:
+        """点确认后的诚实兜底：游戏接受 → 启程窗消失（送别演出交给后续轮次
+        正常推进）；道具不足之类拒绝 → 窗还在且带「不足」类字样。两者都不占
+        的陌生窗不许盲点，如实报回 False 停手交回人工。"""
+        for _ in range(4):
+            self.device.screenshot(force=True)
+            if not self.device.ocr("修行启程", roi_4to4(450, 40, 830, 110)):
+                return True
+            if self.device.ocr("不足", roi_4to4(260, 180, 1020, 540)):
+                print("[扫地] ⚠️ 送修行被游戏拒绝（道具不足？）：不盲点，"
+                      "停在这里等你处理")
+                return False
+            time.sleep(2.0)
+        print("[扫地] ⚠️ 点确认后修行窗迟迟不关（认不出的情况）：不盲点，"
+              "停在这里等你处理")
         return False
 
     def _probe_nav_ready(self) -> bool:

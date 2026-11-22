@@ -97,7 +97,7 @@ class DailyRepairStepTests(unittest.TestCase):
         self.assertEqual([name for name, *_ in calls], ["repair", "rewards"])
         sortie_at = messages.index("========== ⑩ 出阵 ==========")
         repair_at = messages.index("========== ⑫ 手入（伤刀当天修，不烧加速符） ==========")
-        rewards_at = messages.index("========== ⑬ 领任务奖励 ==========")
+        rewards_at = messages.index("========== ⑭ 领任务奖励 ==========")
         self.assertLess(sortie_at, repair_at)
         self.assertLess(repair_at, rewards_at)
         self.assertIn(("手入", "✓"), host.flushed[-1][0])

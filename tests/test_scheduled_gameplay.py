@@ -226,3 +226,42 @@ def test_planned_dispatch_still_reserves_its_actual_action_window():
                                "state": "pending", "will_run": True}]
     with patch.object(server, "_load_panel_settings", return_value={"params": {"hanafuda": {"team_no": "2"}}}):
         assert any("派遣" in problem for problem in gp.issues(block(), current))
+
+
+def test_configured_runs_saved_settings_beat_register_defaults():
+    saved = {"params": {"edocastle": {"team_no": "2", "runs": 9}}}
+    with patch.object(server, "_load_panel_settings", return_value=saved):
+        assert gp.configured_runs("edocastle") == (9, True)
+    with patch.object(server, "_load_panel_settings", return_value={}):
+        # 没保存过：注册默认值，并如实报告来源
+        assert gp.configured_runs("edocastle") == (6, False)
+        assert gp.configured_runs("osaka") == (1, False)
+        assert gp.configured_runs("pumpkin") == (4, False)
+        assert gp.configured_runs("yosari") == (1, False)
+
+
+def test_configured_runs_garbage_and_zero_fall_back_to_default():
+    saved = {"params": {"pumpkin": {"runs": "abc"}}}
+    with patch.object(server, "_load_panel_settings", return_value=saved):
+        assert gp.configured_runs("pumpkin") == (4, True)
+    saved = {"params": {"edocastle": {"runs": 0}}}
+    with patch.object(server, "_load_panel_settings", return_value=saved):
+        assert gp.configured_runs("edocastle") == (6, True)
+
+
+def test_yosari_suggestion_window_requires_calendar_evidence():
+    now = datetime(2026, 10, 2, 12, tzinfo=gp.events._TZ).timestamp()
+    # 异去的 event_window 口径是常驻，建议层必须另找证据：没有就不建议
+    assert gp.suggestion_window("yosari", {}, [], now) is None
+    anns = [{"schedule_candidates": [{
+        "name": "战术强化训练 ~异去~",
+        "start_at": "2026-10-01T00:00:00+08:00",
+        "end_at": "2026-10-03T00:00:00+08:00"}]}]
+    window = gp.suggestion_window("yosari", {}, anns, now)
+    assert window and window["event_key"] == "permanent"
+    assert window["end_at"] > now
+    # 窗口外的异去证据不算数；其他活动仍走 event_window 的期次钥匙
+    assert gp.suggestion_window("yosari", {}, anns, now + 3 * 86400) is None
+    cards = {"大阪城": {"start_date": "2026-10-01", "end_date": "2026-10-03"}}
+    osaka = gp.suggestion_window("osaka", cards, [], now)
+    assert osaka and osaka["event_key"] != "permanent"

@@ -2227,6 +2227,7 @@
   },
   "daily": {
     "expedition_redispatch": "same",
+    "training_auto_send": false,
     "sortie": {
       "mode": "raid",
       "rounds": 3

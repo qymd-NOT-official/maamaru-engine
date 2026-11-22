@@ -25,6 +25,11 @@ ACTION_WINDOW_AFTER_MIN = 5
 MIN_SUGGESTION_MIN = 30        # 一圈约 7 分钟，不足 30 分钟的碎片不建议
 MAX_SUGGESTION_BLOCKS = 2      # 一块装不下才切第二块
 
+# 非代币活动建议块（江户城/大阪城/南瓜/异去）的时长估计：这些玩法没有
+# 实测单圈用时，与 day_plan.GENERIC_BLOCK_MINUTES 同口径按 30 分钟估，
+# 和安排保存后的占用估算保持一致，不虚构圈速。
+ACTIVITY_SUGGESTION_MINUTES = 30
+
 _RUN_TONES = {
     "waiting": "waiting",
     "completed": "ok",
@@ -427,6 +432,92 @@ def _hanafuda_hint(plan: dict | None) -> str | None:
     return f"秘宝之里：按现在的节奏，拿完剩下的玉还要{duration}。"
 
 
+def _generic_activities_hint(suggestions: list[dict]) -> str:
+    """非代币活动建议的人话：谁的设置出多少次，一是一二是二。"""
+    bits = []
+    for s in suggestions:
+        if s.get("basis") == "saved":
+            bits.append(f"{s['label']}：按你保存的设置建议跑 {s['runs']} 次")
+        else:
+            bits.append(f"{s['label']}：按默认设置建议跑 {s['runs']} 次"
+                        "（可在玩法设置里改）")
+    return ("；".join(bits) + "。找的是今天已有的空窗，只是建议，不会自动开工。")
+
+
+def _generic_activity_suggestions(now: float, now_min: float, day_start: float,
+                                  expeditions: list[dict], cfg: dict,
+                                  player_tasks: list | None,
+                                  active_script: str | None) -> list[dict]:
+    """非代币活动（大阪城/江户城/南瓜/异去）的建议淡影。
+
+    证据门槛与常用功能同一套（知识卡窗口或公告候选窗口），异去额外要求
+    日历对上名字；确认不了正在开就不建议，绝不发明活动。次数取该玩法
+    已保存设置（没保存过用注册默认值），块时长按 30 分钟估计（与安排
+    保存后的占用估算同口径）。raid/秘宝之里有目标算盘，走自己的分支，
+    不经这里。
+    """
+    from . import scheduled_gameplay as sg
+    try:
+        from .server import _load_events_calendar, _SCRIPTS
+        from touken.advisor import load_event_cards
+        from touken.runtime_paths import STATE_DIR
+        calendar, _ = _load_events_calendar()
+        cards = load_event_cards(STATE_DIR)
+    except Exception:
+        return []
+    suggestions = []
+    occupied_extra = list(player_tasks or [])
+    for script in sg.SUGGESTION_SCRIPTS:
+        if active_script == script:
+            continue  # 正在跑的玩法不再建议一遍
+        try:
+            window = sg.suggestion_window(script, cards,
+                                          (calendar or {}).get("announcements", []),
+                                          now)
+        except Exception:
+            continue
+        if not window:
+            continue
+        try:
+            runs, from_saved = sg.configured_runs(script)
+            team_no = sg.spec(script)["team_no"]
+        except ValueError:
+            continue  # 出阵部队都认不清，别排块
+        occupied = _occupied_segments(expeditions, cfg, team_no) + occupied_extra
+        end_at = window.get("end_at")
+        if end_at:
+            # 活动收摊前留五分钟收尾，不把块安排到收摊之后。
+            finish_min = math.floor((end_at - day_start) / 60 - 5)
+            if finish_min < now_min + ACTIVITY_SUGGESTION_MINUTES:
+                continue  # 连一块都塞不下，诚实沉默
+            if finish_min < DAY_MINUTES:
+                occupied.append({"start_min": finish_min, "end_min": DAY_MINUTES,
+                                 "label": "活动收摊"})
+        blocks, shortfall = suggest_windows(
+            now_min, occupied, ACTIVITY_SUGGESTION_MINUTES * 60)
+        if not blocks or shortfall:
+            continue  # 今天空窗不够整块，不排半个块
+        block = blocks[0]
+        suggestions.append({
+            "start_min": block["start_min"],
+            "duration_min": block["duration_min"],
+            "runs": runs,
+            "script": script,
+            "label": _SCRIPTS[script]["label"],
+            "note": block.get("note") or "",
+            # 收编成的安排块要过 review：非异沿用 event_window 的期次钥匙，
+            # 异走的 catalog 常驻口径（证据只用于决定开不开口）。
+            "event_key": window.get("event_key") or "permanent",
+            "end_at": end_at,
+            "basis": "saved" if from_saved else "defaults",
+        })
+        # 多个活动同时开放时，后面的建议避开已建议的块。
+        occupied_extra.append({"start_min": block["start_min"],
+                               "end_min": block["start_min"] + block["duration_min"],
+                               "label": f"{_SCRIPTS[script]['label']}建议"})
+    return suggestions
+
+
 def _daily_quota_seconds(plan: dict, remaining_today: float,
                          now: float) -> int | None:
     """今天该挂多少秒。
@@ -754,6 +845,15 @@ def build_day_timeline(now: float | None = None, *, cfg: dict | None = None,
             occupied = _occupied_segments(expeditions, cfg, hanafuda_team_no) + list(player_tasks or [])
             suggestions, shortfall_seconds = suggest_windows(now_min, occupied, quota)
         hint = _hanafuda_hint(hanafuda_plan)
+        if not hanafuda_plan:
+            # 秘宝之里没开：轮到大阪城/江户城/南瓜/异去——日历确认正在开
+            # 的，按各自已保存的玩法设置出建议淡影。
+            generic = _generic_activity_suggestions(
+                now, now_min, day_start, expeditions, cfg, player_tasks,
+                (active or {}).get("script"))
+            if generic:
+                suggestions = generic
+                hint = _generic_activities_hint(generic)
     return {
         "now": now,
         "day_start": day_start,

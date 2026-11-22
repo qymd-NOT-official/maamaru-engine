@@ -10,6 +10,27 @@ from touken import event_timeline as events
 SCRIPTS = ("raid", "hanafuda", "osaka", "edocastle", "pumpkin", "sortie", "yosari")
 COUNT_KEYS = {"runs", "rounds", "loops", "floors", "max_runs", "refill_run_limit"}
 
+# 建议层（时间表淡影）覆盖的非代币活动玩法：raid/hanafuda 有目标算盘走
+# 自己的口径；sortie 是常驻合战场不算活动。这四个按「日历确认正在开
+# + 已保存玩法设置出次数」给建议，确认不了就不开口。
+SUGGESTION_SCRIPTS = ("osaka", "edocastle", "pumpkin", "yosari")
+
+# 异去在 SCRIPT_EVENT_MAP 里按常驻处理（概览页常用功能不收它），但建议
+# 层必须有「日历确认正在开」的证据才对玩家开口：公告候选或知识卡对上
+# 这些名字才算数。
+_YOSARI_EVENT_NAMES = ("异去", "特命调查")
+
+# 各玩法 builder 的取次数字段口径（与 server 的 _run_count 兼容链一致：
+# 新版统一 "runs"，旧字段兜底；默认值与注册 schema 相同，schema 缺键时
+# 才用得到这里的兜底）。
+_RUN_DEFAULTS = {"osaka": 1, "edocastle": 6, "pumpkin": 4, "yosari": 1}
+_RUN_LEGACY_KEYS = {
+    "osaka": ("floors",),
+    "edocastle": ("max_runs", "refill_run_limit"),
+    "pumpkin": ("max_skips",),
+    "yosari": ("loops",),
+}
+
 
 def _digest(value) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
@@ -46,9 +67,7 @@ def spec(script: str) -> dict:
     if script not in SCRIPTS:
         raise ValueError("这个玩法暂不支持按次数安排，请使用定时任务流")
     info = _SCRIPTS[script]
-    saved = _load_panel_settings().get("params", {}).get(script, {})
-    params = {field["key"]: field.get("default", "") for field in info["params"]}
-    params.update(saved if isinstance(saved, dict) else {})
+    params = merged_params(script)
     settings = {key: value for key, value in params.items() if key not in COUNT_KEYS}
     formation = None
     team = settings.get("team_no", "3")
@@ -63,6 +82,84 @@ def spec(script: str) -> dict:
         raise ValueError("出阵部队还没认清，请检查玩法设置")
     return {"label": info["label"], "params": settings, "team_no": team,
             "signature": _digest([script, settings, formation])}
+
+
+def merged_params(script: str, saved: dict | None = None) -> dict:
+    """注册默认值打底 + 用户已保存玩法设置覆盖（含次数字段，未经剔除）。
+
+    建议层与 spec 共用这一份，保证「建议按你的设置跑」和实际执行用的是
+    同一组参数；没保存过设置时就是注册默认值。
+    """
+    from .server import _load_panel_settings, _SCRIPTS
+    if script not in SCRIPTS:
+        raise ValueError("这个玩法暂不支持按次数安排，请使用定时任务流")
+    info = _SCRIPTS[script]
+    if saved is None:
+        saved = _load_settings(script)
+    params = {field["key"]: field.get("default", "") for field in info["params"]}
+    params.update(saved)
+    return params
+
+
+def _load_settings(script: str) -> dict:
+    from .server import _load_panel_settings
+    saved = _load_panel_settings().get("params", {}).get(script, {})
+    return saved if isinstance(saved, dict) else {}
+
+
+def configured_runs(script: str) -> tuple[int, bool]:
+    """按该玩法 builder 的口径取「这次跑几次」。
+
+    返回 (次数, 是否来自玩家已保存设置)。非法值与旧版的 0 遗留都迁回
+    安全默认值（与 server._positive_run_count 同口径），建议层绝不照
+    garbage 数字排块。
+    """
+    saved = _load_settings(script)
+    params = merged_params(script, saved)
+    default = _RUN_DEFAULTS.get(script, 1)
+    raw = params.get("runs")
+    if raw in (None, ""):
+        for key in _RUN_LEGACY_KEYS.get(script, ()):
+            if params.get(key) not in (None, ""):
+                raw = params[key]
+                break
+    try:
+        runs = int(raw)
+    except (TypeError, ValueError):
+        runs = default
+    if runs <= 0:
+        runs = default
+    return runs, bool(saved)
+
+
+def suggestion_window(script: str, cards: dict, announcements: list,
+                      now: float) -> dict | None:
+    """建议层的「活动正在开」证据，确认不了返回 None（绝不发明活动）。
+
+    绑定日历的玩法沿用 event_window 的同一套证据（知识卡窗口或公告候选
+    窗口）；异去在 event_window 里恒返回常驻，不能当证据，这里额外要求
+    公告/知识卡对上「异去/特命调查」名字。收编成的安排块仍用 catalog 的
+    event_key 口径（异去=permanent），保证 review 时对得上。
+    """
+    if script != "yosari":
+        return event_window(script, cards, announcements, now)
+    current = datetime.fromtimestamp(now, events._TZ)
+    for name in _YOSARI_EVENT_NAMES:
+        candidates = []
+        card = cards.get(name)
+        if card:
+            start, end, _ = events._card_window(card)
+            candidates.append((start, end))
+        for announcement in announcements or []:
+            for candidate in announcement.get("schedule_candidates") or []:
+                if events._event_names_match(candidate.get("name"), name):
+                    candidates.append((events._parse_dt(candidate.get("start_at")),
+                                       events._parse_dt(candidate.get("end_at"))))
+        for start, end in candidates:
+            if start and start <= current and (end is None or current < end):
+                return {"event_key": "permanent",
+                        "end_at": end.timestamp() if end else None}
+    return None
 
 
 def catalog(now: float | None = None) -> list[dict]:
