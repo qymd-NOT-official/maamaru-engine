@@ -4,6 +4,9 @@ POST /api/event-briefing：入参是活动各字段 + enemy_fast_spear（平铺 
 后端读刀帐档案（机器盘点 + 人工标注合并视图）转成 roster 契约，
 交给 touken.event_briefing.build_briefing 出简报。刀帐没数据就如实报错，
 绝不编一份假的糊弄玩家。
+
+GET /api/event-briefing/guide：攻略库（活动+合战场参数与要点）全量条目，
+前端表单顶部的下拉从这里取数回填；文件坏了就 500 喊出来，不装没事。
 """
 
 from fastapi import APIRouter, HTTPException, Request
@@ -176,6 +179,19 @@ def archive_to_roster(archive: dict) -> list[dict]:
 
 def create_event_briefing_router():
     router = APIRouter(prefix="/api/event-briefing")
+
+    @router.get("/guide")
+    async def get_guide():
+        """攻略库全量条目：面板表单顶部的「选活动/地图」下拉从这里取数。
+
+        攻略库是正式资源：读不出来就 500 如实报，不拿空列表糊弄。
+        """
+        from touken.event_briefing import load_guide
+        try:
+            guide = load_guide()
+        except ValueError as exc:
+            raise HTTPException(500, str(exc))
+        return {"entries": guide["entries"]}
 
     @router.post("")
     async def build_event_briefing(request: Request):

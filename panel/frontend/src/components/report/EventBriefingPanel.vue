@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
-import type { EventBriefingResponse } from '../../types'
+import type { EventBriefingResponse, EventGuideEntry } from '../../types'
 import PanelHeader from '../PanelHeader.vue'
 import {
   BATTLE_OPTIONS,
   BONUS_VERDICT_META,
   DAMAGE_OPTIONS,
+  GUIDE_CAVEAT_LABEL,
   PRESET_TEAM_OPTIONS,
+  autofillFromGuide,
   briefingRequestBody,
   canSaveFormation,
   defaultBriefingForm,
   fatigueLabel,
   formLabel,
   formationSaveBody,
+  guideEntryCaveat,
   loadBriefingForm,
   saveBriefingForm,
+  splitGuideEntries,
   type EventBriefingFormData,
 } from './eventBriefingModel'
 
@@ -26,6 +30,17 @@ const swordOptionsFailed = ref(false)
 const generating = ref(false)
 const error = ref('')
 const briefing = ref<EventBriefingResponse | null>(null)
+
+// 攻略库：表单顶部的「选活动/地图」下拉数据源。加载失败不挡表单——手动填照旧能用。
+const guideEntries = ref<EventGuideEntry[]>([])
+const guideFailed = ref(false)
+const guidePick = ref('')
+
+const guideGroups = computed(() => splitGuideEntries(guideEntries.value))
+const selectedGuideEntry = computed(() =>
+  guideEntries.value.find(entry => entry.id === guidePick.value) ?? null)
+// 数据存疑的条目（confidence medium/low）：回填字段旁挂「（待考）」，别把存疑数据当圣旨
+const guideCaveat = computed(() => guideEntryCaveat(selectedGuideEntry.value))
 
 onMounted(async () => {
   // 表单记忆只走 localStorage，不进后端 saved-settings 白名单
@@ -38,9 +53,22 @@ onMounted(async () => {
   } catch {
     swordOptionsFailed.value = true
   }
+  try {
+    const guide = await api.eventBriefingGuide()
+    guideEntries.value = guide.entries || []
+  } catch {
+    guideFailed.value = true
+  }
 })
 
 watch(form, value => saveBriefingForm(value), { deep: true })
+
+function applyGuide() {
+  const entry = selectedGuideEntry.value
+  if (!entry) return
+  // 一次性回填：之后手动怎么改都不会被顶掉，再选别的条目才重填
+  form.value = autofillFromGuide(form.value, entry)
+}
 
 const availableSwordOptions = computed(() =>
   swordOptions.value.filter(option => !form.value.bonusSwords.includes(option.name)))
@@ -108,29 +136,48 @@ async function saveFormation(apply: boolean) {
     <PanelHeader variant="section" title="活动开幕参谋" subtitle="喂一期活动参数，对着刀帐出编队 / 刀装 / 控花简报" />
 
     <form class="briefing-form" @submit.prevent="generate">
+      <label class="guide-pick">选活动/地图（选了自动回填，每格都能再改）
+        <select v-model="guidePick" :disabled="guideFailed || !guideEntries.length" @change="applyGuide">
+          <option value="">{{ guideFailed ? '攻略库没加载出来，手动填照旧能用' : '手动填写，或挑一份攻略……' }}</option>
+          <optgroup label="轮替活动">
+            <option v-for="entry in guideGroups.events" :key="entry.id" :value="entry.id">{{ entry.name }}</option>
+          </optgroup>
+          <optgroup label="常驻合战场">
+            <option v-for="entry in guideGroups.maps" :key="entry.id" :value="entry.id">{{ entry.name }}</option>
+          </optgroup>
+        </select>
+      </label>
+      <p v-if="guideCaveat" class="guide-caveat-line">这条攻略的部分数据还在考证中，回填后请对着游戏公告再核一眼。</p>
+
       <div class="briefing-fields">
         <label>活动名
           <input v-model="form.name" maxlength="40" required placeholder="比如：战力扩充计划">
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
         <label>伤害类型
           <select v-model="form.damage">
             <option v-for="option in DAMAGE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
         <label>战场类型
           <select v-model="form.battle">
             <option v-for="option in BATTLE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
         <label>地图点数
           <input v-model="form.mapPoints" inputmode="numeric" placeholder="不知道就空着（1~99）">
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
         <label>建议等级
           <input v-model="form.recommendedLevel" inputmode="numeric" placeholder="不知道就空着（1~99）">
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
         <label class="briefing-spear">
           <input v-model="form.enemyFastSpear" type="checkbox">
           <span>敌方有高速枪（短刀优先铳兵）</span>
+          <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
         </label>
       </div>
 
@@ -141,6 +188,7 @@ async function saveFormation(apply: boolean) {
             <option v-for="option in availableSwordOptions" :key="option.name" :value="option.name">{{ option.name }}（{{ option.type }}）</option>
           </select>
         </label>
+        <p v-if="selectedGuideEntry?.bonus_rule" class="briefing-bonus-hint">加成提示：{{ selectedGuideEntry.bonus_rule }}</p>
         <div v-if="form.bonusSwords.length" class="briefing-chips">
           <button
             v-for="name in form.bonusSwords"
@@ -158,6 +206,16 @@ async function saveFormation(apply: boolean) {
         <button type="submit" class="primary" :disabled="generating">{{ generating ? '参谋翻阅刀帐中……' : '生成简报' }}</button>
       </div>
     </form>
+
+    <details v-if="selectedGuideEntry?.tips.length" class="guide-tips">
+      <summary>
+        攻略要点 · {{ selectedGuideEntry.name }}
+        <small v-if="guideCaveat" class="guide-caveat">{{ GUIDE_CAVEAT_LABEL }}</small>
+      </summary>
+      <ul>
+        <li v-for="tip in selectedGuideEntry.tips" :key="tip">{{ tip }}</li>
+      </ul>
+    </details>
 
     <p v-if="error" class="briefing-error" role="alert">{{ error }}</p>
 
@@ -243,6 +301,15 @@ async function saveFormation(apply: boolean) {
 
 <style scoped>
 .briefing-panel { display: grid; gap: 10px; }
+.guide-pick { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }
+.guide-pick select { width: 100%; }
+.guide-caveat { color: var(--fox-gold-deep); font-size: 11px; font-weight: 400; }
+.guide-caveat-line { margin: 0; padding: 6px 10px; color: var(--fox-gold-deep); background: color-mix(in srgb, #f4e8cf 75%, var(--paper-card)); border: 1px solid #d9bd84; border-radius: 8px; font-size: 12px; }
+.guide-tips { padding: 10px 14px; background: color-mix(in srgb, #eef3e6 60%, var(--paper-card)); border: 1px solid var(--paper-line); border-radius: 10px; }
+.guide-tips summary { color: var(--ink-dim); font-size: 13px; font-weight: 700; cursor: pointer; }
+.guide-tips summary small { margin-left: 6px; }
+.guide-tips ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 5px; color: var(--ink-dim); font-size: 13px; }
+.briefing-bonus-hint { margin: 6px 0 0; padding: 6px 10px; color: var(--fox-gold-deep); background: color-mix(in srgb, #f4e8cf 75%, var(--paper-card)); border: 1px solid #d9bd84; border-radius: 8px; font-size: 12px; }
 .briefing-form { display: grid; gap: 12px; padding: 16px 18px; background: var(--paper-card); border: 1px solid var(--paper-line); border-radius: 12px; }
 .briefing-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .briefing-form label { display: grid; gap: 5px; color: var(--ink-dim); font-size: 12px; }

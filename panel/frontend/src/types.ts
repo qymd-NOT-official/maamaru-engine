@@ -1683,3 +1683,25 @@ export interface EventBriefingResponse {
   flower: string[]
   warnings: string[]
 }
+
+/** 活动参谋攻略库条目：GET /api/event-briefing/guide 的单条。
+ *  null 值是「研究员没查到可靠来源」的透明性设计，前端不许脑补填上。 */
+export interface EventGuideEntry {
+  id: string
+  kind: 'event' | 'map'
+  name: string
+  aliases: string[]
+  damage: 'virtual' | 'real' | null
+  battle: 'day' | 'night' | 'indoor' | 'mixed' | null
+  map_points: number | null
+  recommended_level: number | null
+  bonus_swords: string[]
+  bonus_rule: string | null
+  enemy_fast_spear: boolean
+  tips: string[]
+  confidence: 'high' | 'medium' | 'low'
+  sources: string[]
+  /** 仅常驻合战场（kind=map）条目带 */
+  chapter?: number
+  map_no?: number
+}

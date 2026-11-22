@@ -1,0 +1,1131 @@
+{
+  "_description": "活动参谋的攻略库：8 个轮替活动 + 32 张常驻合战场图的参数与要点，面板「活动参谋」表单顶部的「选活动/地图」下拉从这里取数回填。confidence（high/medium/low）与 sources 是透明性设计，前端据 confidence 给存疑字段标「待考」；null 值如实保留，表示研究员没查到可靠来源，不许脑补填上。改数据改这张表，不动代码；条目出处见每条 sources。",
+  "_schema_version": 1,
+  "sources": [
+    ".tmp/guide_events.json（2026-11-23 研究员整理：8 个轮替活动）",
+    ".tmp/guide_maps.json（2026-11-23 研究员整理：32 张常驻合战场图）",
+    "每条目 sources 字段为最终出处（官方攻略/BWiki/wikiwiki/玩家实测等）"
+  ],
+  "entries": [
+    {
+      "id": "raid",
+      "kind": "event",
+      "name": "联队战",
+      "aliases": [
+        "連隊戦"
+      ],
+      "damage": "virtual",
+      "battle": "mixed",
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": "多数期数无特効加成；个别主题期数有特定刀剑加成（如「初夏之阵」携带萤丸/萤丸·极提升收集道具获取），当期加成看官方公告。",
+      "enemy_fast_spear": false,
+      "tips": [
+        "虚拟伤害每场血量重置、不碎刀，但队长重伤强制回城且令牌照扣，别硬送。",
+        "通行令牌上限6张，每天5:00/17:00各回3张，烧完300小判/张。",
+        "连战直接开打：无地图、无索敌、无阵形选择，只有最终场掉落刀剑（AS胜必掉，BC胜概率掉）。",
+        "战场是混合属性：易有夜战，普/难有夜战+市街战+屋内战，超难有夕战+夜战+市街战，夜战场次换短刀胁差打刀队。",
+        "超难主流打法：极短45+一队流带远程，或太刀大太刀99级队+短胁队换队流，最强一队留最后防翻车。",
+        "海边之阵额外有水炮战：带限定刀装「水炮兵」才有夜光贝，集7个彩虹夜光贝进特别合战场。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://www.taptap.cn/app/24439/strategy/entity/7678407 （虚拟伤害/门票300小判/连战机制/最终场掉落）",
+        "https://wiki.biligame.com/djlw/联队战 （各难度战场属性：夜战·市街战·屋内战；各难度推荐阵容等级线；令牌规则；水炮战；萤丸加成）",
+        "https://koyuuseed.com/rentai-sen-beach1/ （JP交叉：海边之阵第9战夜战、5~8战昼战）",
+        "仓库 touken/data/events_meta.json「联队战」note（虚拟伤害、每场血量重置不碎刀；令牌6张5:00/17:00回3张；游族官网票价核实）"
+      ]
+    },
+    {
+      "id": "hanafuda",
+      "kind": "event",
+      "name": "秘宝之里（花札）",
+      "aliases": [
+        "秘宝の里",
+        "花牌收集"
+      ],
+      "damage": "virtual",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": "无特効刀剑机制；集齐花牌组合（三光/青短/赤短/猪鹿蝶等）可使装备刀剑获得经验+5%/7%/10%加成。",
+      "enemy_fast_spear": false,
+      "tips": [
+        "虚拟伤害不碎刀，重伤的刀只是不参战不吃经验，回本丸自动满血，放心烧门票。",
+        "通行手形上限6张，每天5:00/17:00各回3张，烧完300小判/张。",
+        "优先打高难度，玉效率差很多；队长重伤或强制回城，到手的玉只剩1/4。",
+        "建议等级：难度·难（e3）90+普太大太；超难（e4）50+极刀稳过、60+无脑过，最低35+极短要手动逆行阵。",
+        "超难省心编队：队长极大太或白山吉光带5极短。",
+        "翻牌优先凑组合：三光>花见酒/月见酒>青短/赤短/猪鹿蝶，组合触发经验加成。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://www.taptap.cn/moment/334110424666474153 （虚拟伤害、无特殊战场=昼战；e3/e4建议等级；花牌组合经验加成）",
+        "https://mobile.moegirl.org.cn/刀剑乱舞/活动 （秘宝之里为虚拟伤害、不会碎刀）",
+        "https://www.7723.cn/strategy/12837.html （e3/e4建议等级与编队：队长极大太+5极短/白山+5极短）",
+        "https://wikiwiki.jp/toulove/戦闘について （JP wiki交叉：秘宝の里列入昼·屋外·无限制合战场总表）",
+        "仓库 touken/data/events_meta.json「秘宝之里」note（虚拟伤害；令牌6张300小判/张）"
+      ]
+    },
+    {
+      "id": "edocastle",
+      "kind": "event",
+      "name": "江户城潜入调查",
+      "aliases": [
+        "江戸城潜入調査"
+      ],
+      "damage": "virtual",
+      "battle": "indoor",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": "部分期数有特定刀剑编队加成（如物吉贞宗编入队伍击破首领钥匙+1），当期看公告；多数期数无。",
+      "enemy_fast_spear": false,
+      "tips": [
+        "虚拟伤害不碎刀，但疲劳会累积，连续挂机要换队或刷花。",
+        "钥匙只有打赢王点boss才能带回本丸：中途回城、败北、行动回数归零、断线全丢，令牌也不退。",
+        "令牌上限6张，5:00/17:00各回3张，1800小判补满（300/张）；国服踩钥匙点不耗行动回数。",
+        "屋内战：马匹属性加成无效，薙刀大太刀变单体攻击，别指望马补机动。",
+        "走图安全线：剩余回数≥当前位置到王点最短距离才允许绕路贪钥匙，贴线直奔王点。",
+        "宝箱5钥匙开1个，宝物库二/三/四的钥匙藏在前一库里，按顺序开；超难普刀50级以上就能打。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wiki.biligame.com/djlw/江户城潜入调查 （虚拟伤害原文：回本丸恢复但疲劳累积、重伤不破坏；钥匙规则；令牌规则；超难推荐普刀50级以上）",
+        "https://touken.youzu.com/guide/5134431.html （国服官方：4个合战场都是日战屋内战，马无效、薙刀大太单体）",
+        "仓库 交接文档.md §26 + touken/data/events_meta.json「江户城潜入调查」（令牌机制、踩钥匙点不耗回数、物吉贞宗钥匙+1）"
+      ]
+    },
+    {
+      "id": "osaka",
+      "kind": "event",
+      "name": "大阪城（沉眠于地下的千两箱）",
+      "aliases": [
+        "地下に眠る千両箱",
+        "地下城"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": "小判加成刀：队中带博多藤四郎小判1.5倍（普）/2倍（极），通关层数时生效，是本期必带加成刀。",
+      "enemy_fast_spear": true,
+      "tips": [
+        "真伤，会碎刀：重伤千万别进军，刀装也保不住，回家老实手入。",
+        "不用门票不限次数，小判全靠挖；每层boss点概率掉千两箱，50层通关送当期刀。",
+        "带博多藤四郎吃小判加成：普1.5倍、极2倍；1~50层和60/70/80/90层建议必带。",
+        "89层起道中概率出高速枪、boss点必出高速枪（最低伤害8，99层boss为9），6极短带铳兵、机动要跑过它，有丙子椒林剑更稳。",
+        "层数线参考：1~30层极薙一带五随便打；31层起50+极薙开始手滑；51~88层建议极刀或99级四五花满合成普太；99层全极短满刀装也可能手滑。",
+        "首通层给传送符可直接到boss点，低练度留给99层用。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://news.17173.com/z/djlw/content/03092017/174010664.shtml （国服：与联队战/收集玉等不同，大阪城和普通图一样会碎刀=真伤）",
+        "https://www.taptap.cn/moment/545686789952636146 （国服攻略：真实伤害不用门票；博多1.5/2倍小判；89层起高速枪出没与层数练度线；千两箱；传送符）",
+        "https://wikiwiki.jp/toulove/戦闘について （JP wiki交叉：地下に眠る千両箱列入昼·屋外·无限制合战场总表）",
+        "https://nodownmemo.com/katana/005.php （JP交叉：51~70层/71~98层建议等级线）"
+      ]
+    },
+    {
+      "id": "yosari",
+      "kind": "event",
+      "name": "异去",
+      "aliases": [
+        "異去",
+        "よさり（JP读音，待考）"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "真伤会碎刀；敌人是高伤害高机动短刀，等级不够被先手一刀一个——建议一队极短带满远程，或高等级三槽太刀队。",
+        "门票是归城提灯：每天补3个五倍经验灯，出阵一次烧一个；500小判买一倍灯很不值，建议每天三圈就跑。",
+        "等级线：1-4（鸟羽）敌Lv50，建议极Lv50以上；2-3（江户·元禄）敌Lv57同线；2-4（大坂冬之阵）敌Lv72，建议极Lv65以上。",
+        "火车切按累计出阵回数送：500/800/1100回各一振，先打满1-4的500回解锁第二章。",
+        "掉落只有宝物碎片没有刀，碎片掉率低，等双倍/三倍活动集中刷，合成剂第一个免费后面小判买。",
+        "通关普图6-4解锁；出阵扣疲劳（维新-6/江户-7），挂机连打注意控花。"
+      ],
+      "confidence": "medium",
+      "sources": [
+        "https://liahaishin00.livedoor.blog/archives/14802080.html （JP攻略：刀剣破壊あり=真伤；昼屋外；1-4敌Lv50建议极Lv50+、2-4敌Lv72建议极Lv65+；火车切500/800/1100回；疲劳数值）",
+        "https://www.taptap.cn/moment/821887220746029919 （国服向日服经验tips：每天3个五倍提灯、500小判一倍灯；敌为高伤害短刀建议极短满远程或三槽太；碎片机制）",
+        "https://wikiwiki.jp/toulove/戦闘について （JP wiki交叉：異去地图列入昼·屋外·无限制合战场总表，伤害按通常图公式）",
+        "仓库 touken/data/gameplay_meta.json「异去」（解锁条件、门票、里程碑、国服碎片名游戏内核实）"
+      ]
+    },
+    {
+      "id": "pumpkin",
+      "kind": "event",
+      "name": "南瓜大作战",
+      "aliases": [
+        "かぼちゃ大作戦",
+        "戦術強化訓練",
+        "战术强化训练"
+      ],
+      "damage": "virtual",
+      "battle": "mixed",
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": "无特効刀；9格训练面板各有出题条件（部队合计等级、刀派、刀种、刀装、二刀开眼、夜战编成等），达成条件才解锁面板拿南瓜Pt。",
+      "enemy_fast_spear": true,
+      "tips": [
+        "不碎刀：战斗受的伤害打完自动复原，随便打。",
+        "更新手形第一天送7张，之后每天5:00回2张；900小判/张，最多囤99张——烧手形换板是主要小判开销。",
+        "官方建议等级：初级初始50+，中级初始90+/极35+，上级极50+。",
+        "题目要凑刀派/刀种/刀装，提前存好几套编队（昼用、夜用、二刀开眼用、初用、枪薙用），刀装三种类分开装。",
+        "上级的夜战题（如「打刀N振以上(夜)」）用短刀胁差编队；昼间的太刀/大太刀编成题里有高速枪，打不过就插一把枪。",
+        "9格打满拿剪影刀；认出板子不是目标刀可以烧手形提前换板省小判，令牌预算要留够。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://gametohkenranbu.com/article/kabocha-daisakusen-beginner.html （JP攻略：破坏なし=虚拟伤害；官方建议等级初级50+/中级90+·极35+/上级极50+；手形900小判每天2张）",
+        "https://gametohkenranbu.com/article/kabocha-daisakusen.html （JP攻略：昼/夜训练题并存=混合战场；上级昼间太刀大太刀编成题有高速枪；9格面板机制）",
+        "仓库 交接文档.md §14.2（令牌驱动逻辑：打满拿刀、剪影更新烧令牌、板子不耗令牌）"
+      ]
+    },
+    {
+      "id": "senryoku",
+      "kind": "event",
+      "name": "战力扩充计划",
+      "aliases": [
+        "戦力拡充計画",
+        "战扩"
+      ],
+      "damage": "real",
+      "battle": "mixed",
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "真伤会碎刀，刀装也会真没：重伤别进军，打完记得手入。",
+        "不要门票不限次数；每张图王点击破累计80次送当期刀剑（活动任务里领），还送一套极化道具。",
+        "E-1基本演习限部队平均等级30（超了没经验和掉落，练级圣地）；E-2市中演习限平均50。",
+        "战场混合：E-2是夜战+市街战（上马无效）上短刀胁差，E-4是市街战；E-1/E-3是昼战。",
+        "E-3有固定强度的虚拟检非违使（掉髭切膝丸），竹薮只有打刀胁差短刀编队能穿。",
+        "难/超难图有高速枪：机动跑不过就带丙子椒林剑（挡一次高速枪攻击）+极短先手收拾。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://news.17173.com/z/djlw/content/03302017/103359871.shtml （国服：战力扩充与秘宝之里/连队战不同，受伤要手入、有破坏危险=真伤）",
+        "https://www.taptap.cn/moment/673278266609502307 （国服攻略：真实伤害、不限次数、王点80次拿刀、送极化道具）",
+        "https://3g.7723.cn/strategy/12909.html （国服速报：真实伤害×3；e2夜战图组短胁；e3跑不过枪=高速枪）",
+        "https://wikiwiki.jp/toulove/期間限定イベント/戦力拡充計画 其の伍 （JP wikiwiki官方转述：E-2夜战+市街战、E-4市街战、E-3竹薮与虚拟检非违使；JP交叉）",
+        "https://gametohkenranbu.com/article/189638348.html （JP交叉：战扩高速枪对策、丙子椒林剑挡一次）"
+      ]
+    },
+    {
+      "id": "tokumei",
+      "kind": "event",
+      "name": "特命调查",
+      "aliases": [
+        "特命調査"
+      ],
+      "damage": "real",
+      "battle": null,
+      "map_points": null,
+      "recommended_level": null,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "真伤会碎刀，重伤行军就是赌命。",
+        "骰子最多持有2个，每天5:00/17:00回满，不能花小判买；七福骰白加7步，商店和奖励都有。",
+        "出阵部队会驻留在活动地图里，期间不能远征/演练/手入/结成，千万别派第一部队进去。",
+        "文久土佐藩限5人出阵；天保江户要找鉴札排炮烙箱。",
+        "胜栗原地回满生存和刀装兵力，捷径钥匙直开最终boss近道，都是氪金/奖励道具。",
+        "打完最终boss剩余步数保留到下次出阵，次数奖励靠多刷boss拿。"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wiki.biligame.com/djlw/特命调查 （BWiki：所有特命调查伤害为真实伤害、重伤行军可能碎刀；骰子/七福骰/胜栗/捷径钥匙机制；国服已开聚乐第/文久土佐藩/天保江户/庆长熊本/庆应甲府）",
+        "http://www.zzhc56.com/news/12608.html （文久土佐藩：刀剑及刀装真实伤害、限5人、部队驻留机制）",
+        "https://touken.youzu.com/notice/7017998.html （国服官网公告：特命调查文久土佐藩2023-07再开，证实国服开过）",
+        "https://gamerch.com/tohken/510315 （JP交叉：天保江户七福賽/勝栗/抜け道の鍵道具细节）"
+      ]
+    },
+    {
+      "id": "map-1-1",
+      "kind": "map",
+      "name": "1-1 函館",
+      "chapter": 1,
+      "map_no": 1,
+      "aliases": [
+        "1-1 函馆",
+        "维新的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "新人第一图，敌人只有短刀・脇差而且没有检非违使；也是老玩家单骑刷樱（樱吹雪/疲劳恢复）的圣地",
+        "王点掉加州清光、歌仙兼定、陆奥守吉行、山姥切国广、蜂须贺虎彻等打刀"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/維新の記憶 （1-1~1-4战场类型均为昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （1-1难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-1-2",
+      "kind": "map",
+      "name": "1-2 会津",
+      "chapter": 1,
+      "map_no": 2,
+      "aliases": [
+        "1-2 会津",
+        "维新的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "路线必到王点，适合顺手做每日任务『击破Boss』",
+        "王点掉笑面青江、鯰尾藤四郎、骨喰藤四郎、堀川国广等脇差和主流打刀",
+        "B点岔路有木炭资源点"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/維新の記憶 （战场类型昼・野戦・晴；王点必达与掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-1-3",
+      "kind": "map",
+      "name": "1-3 宇都宮",
+      "chapter": 1,
+      "map_no": 3,
+      "aliases": [
+        "1-3 宇都宫",
+        "维新的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "整体和1-2差不多，B点有砥石资源点",
+        "王点掉脇差（青江・鯰尾・骨喰・堀川）和主流打刀"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/維新の記憶 （战场类型昼・野戦・晴；掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-1-4",
+      "kind": "map",
+      "name": "1-4 鳥羽",
+      "chapter": 1,
+      "map_no": 4,
+      "aliases": [
+        "1-4 鸟羽",
+        "维新的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "从这图开始敌人加入打刀、变成4人编制，上下两条路线都能摸到资源点",
+        "王点在1-3掉落池基础上加大倶利伽罗"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/維新の記憶 （战场类型昼・野戦・晴；敌方编制变化与王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-2-1",
+      "kind": "map",
+      "name": "2-1 鳥羽",
+      "chapter": 2,
+      "map_no": 1,
+      "aliases": [
+        "2-1 鸟羽",
+        "江户的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "2图经验比1图高，是新手期常见练级图",
+        "王点掉太郎太刀、次郎太刀（大太刀）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/江戸の記憶 （2-1~2-4战场类型均为昼・野戦・晴；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （2-1难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-2-2",
+      "kind": "map",
+      "name": "2-2 江戸",
+      "chapter": 2,
+      "map_no": 2,
+      "aliases": [
+        "2-2 江户",
+        "江户的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉日向正宗（日服2026-03-24改修后新增，国服以自家版本为准）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/江戸の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-2-3",
+      "kind": "map",
+      "name": "2-3 江戸（元禄）",
+      "chapter": 2,
+      "map_no": 3,
+      "aliases": [
+        "2-3 江户（元禄）",
+        "江户的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉大包平（日服2026-03-24改修后新增，国服以自家版本为准）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/江戸の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-2-4",
+      "kind": "map",
+      "name": "2-4 大阪（大阪冬の陣）",
+      "chapter": 2,
+      "map_no": 4,
+      "aliases": [
+        "2-4 大阪（大阪冬之阵）",
+        "江户的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉泛尘（日服2026-03-24改修后新增，国服以自家版本为准）",
+        "这图能触发的回想（剧情）很多，想开图鉴可以多刷"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/江戸の記憶 （战场类型昼・野戦・晴；王点掉落表与回想列表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-3-1",
+      "kind": "map",
+      "name": "3-1 関ヶ原",
+      "chapter": 3,
+      "map_no": 1,
+      "aliases": [
+        "3-1 关原",
+        "织丰的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 10,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉丰前江（日服2026-03-24改修后新增，国服以自家版本为准）",
+        "主loop掉率池出现毛利藤四郎、不动行光"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/織豊の記憶 （3-1~3-4战场类型均为昼・野戦・晴；道中与王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （3-1难度☆1→官方目安等级：普刀Lv10+）"
+      ]
+    },
+    {
+      "id": "map-3-2",
+      "kind": "map",
+      "name": "3-2 本能寺",
+      "chapter": 3,
+      "map_no": 2,
+      "aliases": [
+        "3-2 本能寺",
+        "织丰的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 25,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉烛台切光忠、山伏国广、狮子王"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/織豊の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （3-2难度☆2→官方目安等级：普刀Lv25+）"
+      ]
+    },
+    {
+      "id": "map-3-3",
+      "kind": "map",
+      "name": "3-3 越前",
+      "chapter": 3,
+      "map_no": 3,
+      "aliases": [
+        "3-3 越前",
+        "织丰的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 25,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点在3-2掉落池基础上加掉小豆长光"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/織豊の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （3-3难度☆2→官方目安等级：普刀Lv25+）"
+      ]
+    },
+    {
+      "id": "map-3-4",
+      "kind": "map",
+      "name": "3-4 安土",
+      "chapter": 3,
+      "map_no": 4,
+      "aliases": [
+        "3-4 安土",
+        "织丰的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 25,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉一期一振（日服2026-03-24改修后掉落池调整，老玩家印象里它在5-4，以自家服务器版本为准）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/織豊の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （3-4难度☆2→官方目安等级：普刀Lv25+）"
+      ]
+    },
+    {
+      "id": "map-4-1",
+      "kind": "map",
+      "name": "4-1 長篠",
+      "chapter": 4,
+      "map_no": 1,
+      "aliases": [
+        "4-1 长筱",
+        "战国的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉大般若长光、御手杵"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/戦国の記憶 （4-1~4-4战场类型均为昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （4-1难度☆3→官方目安等级：普刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-4-2",
+      "kind": "map",
+      "name": "4-2 三方ヶ原",
+      "chapter": 4,
+      "map_no": 2,
+      "aliases": [
+        "4-2 三方原",
+        "战国的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉蜻蛉切、御手杵",
+        "想顺路攒砥石在这图打（wikiwiki建议砥石采集去4-2）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/戦国の記憶 （战场类型昼・野戦・晴；王点掉落表与砥石采集建议）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （4-2难度☆3→官方目安等级：普刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-4-3",
+      "kind": "map",
+      "name": "4-3 桶狭間",
+      "chapter": 4,
+      "map_no": 3,
+      "aliases": [
+        "4-3 桶狭间",
+        "战国的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点在4-2掉落池基础上加掉江雪左文字"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/戦国の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （4-3难度☆3→官方目安等级：普刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-4-4",
+      "kind": "map",
+      "name": "4-4 京都（西陣）",
+      "chapter": 4,
+      "map_no": 4,
+      "aliases": [
+        "4-4 京都（西阵）",
+        "京都（椿寺）（2022-04-12改名前旧称）",
+        "战国的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "名产捞刀图：王点掉三日月宗近和小狐丸，长期是最亲民的三日月打捞点",
+        "2022-04改名前叫京都（椿寺），老攻略里说椿寺就是这张图"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/戦国の記憶 （战场类型昼・野戦・晴；王点掉三日月宗近・小狐丸；旧称京都（椿寺）脚注）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （4-4难度☆3→官方目安等级：普刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-5-1",
+      "kind": "map",
+      "name": "5-1 鎌倉（元弘の乱）",
+      "chapter": 5,
+      "map_no": 1,
+      "aliases": [
+        "5-1 镰仓（元弘之乱）",
+        "武家的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉鬼丸国纲、小乌丸、石切丸、祢祢切丸——5图开始王点掉率池明显豪华",
+        "道中掉笑面青江系脇差，B路线有木炭"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/武家の記憶 （5-1~5-4战场类型均为昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （5-1难度☆3→官方目安等级：普刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-5-2",
+      "kind": "map",
+      "name": "5-2 元寇（博多湾）",
+      "chapter": 5,
+      "map_no": 2,
+      "aliases": [
+        "5-2 元寇（博多湾）",
+        "武家的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉日本号、太郎太刀、次郎太刀"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/武家の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （5-2难度☆4→官方目安等级：普刀Lv75+）"
+      ]
+    },
+    {
+      "id": "map-5-3",
+      "kind": "map",
+      "name": "5-3 墨俣（承久の乱）",
+      "chapter": 5,
+      "map_no": 3,
+      "aliases": [
+        "5-3 墨俣（承久之乱）",
+        "武家的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "王点掉髭切、膝丸、萤丸"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/武家の記憶 （战场类型昼・野戦・晴；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （5-3难度☆4→官方目安等级：普刀Lv75+）"
+      ]
+    },
+    {
+      "id": "map-5-4",
+      "kind": "map",
+      "name": "5-4 阿津賀志山（厚樫山）",
+      "chapter": 5,
+      "map_no": 4,
+      "aliases": [
+        "5-4 阿津贺志山（厚樫山）",
+        "武家的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": false,
+      "tips": [
+        "名产捞刀图：王点掉三日月宗近、小狐丸，和4-4并列的长期三日月打捞点",
+        "wikiwiki明确记载本图没有高速枪这类怪脾气敌人，推图到王点相对省心",
+        "王点还掉岩融、巴形薙刀、静形薙刀"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/武家の記憶 （战场类型昼・野戦・晴；王点掉三日月宗近・小狐丸；明确记载无高速枪）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （5-4难度☆4→官方目安等级：普刀Lv75+）"
+      ]
+    },
+    {
+      "id": "map-6-1",
+      "kind": "map",
+      "name": "6-1 京都（市中）",
+      "chapter": 6,
+      "map_no": 1,
+      "aliases": [
+        "6-1 京都（市中）",
+        "池田屋的记忆"
+      ],
+      "damage": "real",
+      "battle": "night",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "6图全图夜战+市街战：短刀打撃統率大幅强化，太刀・大太刀・枪・薙刀被削，马效果减半；高速枪从此图开始登场（快、硬、穿透刀装直伤本体）",
+        "带5振以上短刀更容易进王点；社区口径结满短刀特40~50级可推（国服官方攻略建议短刀40+/脇差60/打刀70）",
+        "王点掉小狐丸、一期一振、莺丸、鹤丸国永等"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/池田屋の記憶 （6-1战场类型夜・市街；高速枪对策与短刀编成建议Lv50~60；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （6-1难度☆4→官方目安等级：普刀Lv75+）",
+        "https://touken.youzu.com/zixun/5056009.html （国服官方6图建议等级：短刀40+/脇差60左右/打刀70+，6-4除外）",
+        "https://game.zol.com.cn/1039/10391678.html （国服向6~8图机制总结：夜战/室内战效果、高速枪标注，与wikiwiki一致）"
+      ]
+    },
+    {
+      "id": "map-6-2",
+      "kind": "map",
+      "name": "6-2 京都（三条大橋）",
+      "chapter": 6,
+      "map_no": 2,
+      "aliases": [
+        "6-2 京都（三条大桥）",
+        "池田屋的记忆"
+      ],
+      "damage": "real",
+      "battle": "night",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "夜战市街，最长12连战，最后3格高速枪必出，修刀压力大于6-1",
+        "王点稀有掉明石国行（实装时的招牌掉落）",
+        "社区口径50级短刀能打通，难点在修刀不在通关"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/池田屋の記憶 （6-2战场类型夜・市街；最后3格高速枪确定出现；明石国行王点稀有掉落）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （6-2难度☆4→官方目安等级：普刀Lv75+）",
+        "https://www.taptap.cn/moment/15204062853070964 （国服玩家经验：50级短刀可通6-2）"
+      ]
+    },
+    {
+      "id": "map-6-3",
+      "kind": "map",
+      "name": "6-3 京都（池田屋二階）",
+      "chapter": 6,
+      "map_no": 3,
+      "aliases": [
+        "6-3 京都（池田屋二楼）",
+        "池田屋的记忆"
+      ],
+      "damage": "real",
+      "battle": "indoor",
+      "map_points": null,
+      "recommended_level": 75,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "常驻图首个屋内图（同时全图夜战）：马完全无效，弓兵・投石兵不能参加远战（只有铳兵能动），大太刀・薙刀变单体攻击",
+        "高速枪在F/K/L/N格和Boss出没；Boss队长打刀统率异常高，打不动也记B胜过关，别恋战"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/池田屋の記憶 （6-3战场类型夜・屋内；屋内战规则：马无效・非铳远战不可・大太刀薙刀单体；敌编成表高速枪标注）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （6-3难度☆4→官方目安等级：普刀Lv75+）",
+        "https://game.zol.com.cn/1039/10391678.html （国服向室内战机制总结，与wikiwiki一致）"
+      ]
+    },
+    {
+      "id": "map-6-4",
+      "kind": "map",
+      "name": "6-4 京都（池田屋一階）",
+      "chapter": 6,
+      "map_no": 4,
+      "aliases": [
+        "6-4 京都（池田屋一楼）",
+        "池田屋的记忆"
+      ],
+      "damage": "real",
+      "battle": "mixed",
+      "map_points": null,
+      "recommended_level": 35,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "三连Boss图：同一图里Boss要打3遍，1・2周目全图夜战+屋内，第3周目Boss格单独变昼战市街（夜战补正消失、马效果减半、投石弓恢复可用）",
+        "高速枪多格出没（含3周目A格）；通关后解锁极化系统，第3遍Boss稀掉日本号，Boss格还稀掉南泉一文字",
+        "社区口径结满短刀特50~60级+好刀装可推（官方目安：普刀Lv90+/极Lv35+，此处取极线35）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/池田屋の記憶 （6-4三张MAP构成：1・2周目夜・屋内、3周目Boss昼・市街；高速枪出没格；日本号・南泉一文字稀掉；通关解锁极）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （6-4难度☆5→官方目安等级：普刀Lv90+/极刀Lv35+，取极线35）",
+        "https://dj.yeyou.com/content/01102016/195446490.shtml （国服早期6-4攻略：到王点10格、高速枪伤害5~9、王点有日本号，与wikiwiki一致）"
+      ]
+    },
+    {
+      "id": "map-7-1",
+      "kind": "map",
+      "name": "7-1 江戸（新橋）",
+      "chapter": 7,
+      "map_no": 1,
+      "aliases": [
+        "7-1 江户（新桥）",
+        "延享的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 35,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "白天市街战（马效果减半），7图全图都有高速枪出没",
+        "队伍里放1振以上太刀/大太刀/枪/薙刀更容易到王点；王点稀掉大典太光世（2026-03改修后）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/延享の記憶 （7-1战场类型昼・市街；『全マップで高速槍が出現』；编成建议；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （7-1难度☆5→官方目安等级：普刀Lv90+/极刀Lv35+，取极线35）"
+      ]
+    },
+    {
+      "id": "map-7-2",
+      "kind": "map",
+      "name": "7-2 江戸（白金台）",
+      "chapter": 7,
+      "map_no": 2,
+      "aliases": [
+        "7-2 江户（白金台）",
+        "延享的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 40,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "雨天图：铳兵不能参加远战（属性补正仍然有效），高速枪比7-1更强，低统率刀种吃一枪10+伤害",
+        "王点掉太鼓钟贞宗（实装时的招牌掉落，2026-03改修后掉率池扩大）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/延享の記憶 （7-2战场类型昼・市街・雨；雨天铳兵远战不可；高速枪强化记述；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （7-2难度☆6→官方目安等级：极刀Lv40+）"
+      ]
+    },
+    {
+      "id": "map-7-3",
+      "kind": "map",
+      "name": "7-3 江戸（江戸城下）",
+      "chapter": 7,
+      "map_no": 3,
+      "aliases": [
+        "7-3 江户城下",
+        "江戸城下（2020-04-07改名前旧称）",
+        "延享的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "白天市街图，但2022-03难度调整后是白天常驻图里官方建议等级最高的一张（☆7）；高速枪出现频率比7-2更高，Boss队可能带1~2把高速枪或高速大太刀",
+        "王点掉大包平、大典太光世、小乌丸、日光一文字；日服玩家1000周实测大包平掉率约0.3%"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/延享の記憶 （7-3战场类型昼・市街；高速枪高频与Boss编成；王点掉落表；旧称江戸城下脚注）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （7-3难度☆7→官方目安等级：极刀Lv50+）",
+        "https://gametohkenranbu.com/article/7-3-drop-rate.html （日服玩家7-3千周掉率实测：大包平0.30%、小乌丸0.20%等）",
+        "https://dj.yeyou.com/content/01102017/234820919.shtml （国服7-3攻略：F点与Boss点出苦无・中脇差，与wikiwiki敌编成一致）"
+      ]
+    },
+    {
+      "id": "map-7-4",
+      "kind": "map",
+      "name": "7-4 江戸（江戸城内）",
+      "chapter": 7,
+      "map_no": 4,
+      "aliases": [
+        "7-4 江户城内",
+        "江戸城内（2020-04-07改名前旧称）",
+        "延享的记忆"
+      ],
+      "damage": "real",
+      "battle": "indoor",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "夜战+屋内（首个『城内』图，长短中三路段共用一张图）：马完全无效，只有铳兵能远战，短刀・脇差・打刀依然是主力",
+        "王点掉数珠丸恒次（稀有）、小豆长光；想稳刷Boss建议全队平均70级以上"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/延享の記憶 （7-4战场类型夜・屋内・城内；高速枪出没；王点掉数珠丸恒次・小豆长光；Boss周回平均Lv70+建议）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （7-4难度☆7→官方目安等级：极刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-8-1",
+      "kind": "map",
+      "name": "8-1 京都（阿弥陀ヶ峰）",
+      "chapter": 8,
+      "map_no": 1,
+      "aliases": [
+        "8-1 京都（阿弥陀峰）",
+        "青野原的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 40,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "8图入门，白天野战；8图整体格子比7图多、刀装被剥得快，有高速枪（生存10）出没",
+        "王点掉千代金丸、姬鹤一文字（另有三日月宗近・鹤丸国永等，2026-03改修后掉率池扩大）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/青野原の記憶 （8-1战场类型昼・野戦・晴；主な敵一覧标注高速枪；王点掉落表，2026-03-24改修后）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （8-1难度☆6→官方目安等级：极刀Lv40+）",
+        "https://game.zol.com.cn/1039/10391678.html （国服向8图机制与练级建议：35级左右极化刀可通过8图大部分关卡）"
+      ]
+    },
+    {
+      "id": "map-8-2",
+      "kind": "map",
+      "name": "8-2 信濃（上田城）",
+      "chapter": 8,
+      "map_no": 2,
+      "aliases": [
+        "8-2 信浓（上田城）",
+        "青野原的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 40,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "白天野战，8图里相对温和的一张；P点以后随机出高速枪（生存20）",
+        "王点掉大千鸟十文字枪（2026-03改修后掉率池含三日月宗近・鹤丸国永等）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/青野原の記憶 （8-2战场类型昼・野戦・晴；P点后高速枪随机出现记述；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （8-2难度☆6→官方目安等级：极刀Lv40+）",
+        "https://game.zol.com.cn/1039/10391678.html （国服向练级建议：6*35级极短8-2不过桥低损耗）"
+      ]
+    },
+    {
+      "id": "map-8-3",
+      "kind": "map",
+      "name": "8-3 美濃（青野原）",
+      "chapter": 8,
+      "map_no": 3,
+      "aliases": [
+        "8-3 美浓（青野原）",
+        "青野原的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 50,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "清晨（朝）野战；薙刀和苦无会大量剥刀装，刀装消耗明显比8-2大",
+        "王点掉松井江、丰前江、南泉一文字（2026-03改修后掉率池，国服以自家版本为准）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/青野原の記憶 （8-3战场类型朝・野戦；敌编成表高速枪标注；薙刀・苦无刀装损耗记述；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （8-3难度☆7→官方目安等级：极刀Lv50+）"
+      ]
+    },
+    {
+      "id": "map-8-4",
+      "kind": "map",
+      "name": "8-4 京都（五条）",
+      "chapter": 8,
+      "map_no": 4,
+      "aliases": [
+        "8-4 京都（五条）",
+        "青野原的记忆"
+      ],
+      "damage": "real",
+      "battle": "day",
+      "map_points": null,
+      "recommended_level": 65,
+      "bonus_swords": [],
+      "bonus_rule": null,
+      "enemy_fast_spear": true,
+      "tips": [
+        "8面最终图，三张分段图（第一/第二/第三）全是白天市街战；☆8是全部常驻图官方建议等级最高的一张",
+        "敌方太刀打击落刀装很凶，wikiwiki评价其比7-4更难伺候；敌编成含多组枪_甲（按wikiwiki定义即高速枪）",
+        "王点掉山鸟毛、日光一文字、小乌丸（2026-03改修后掉率池，国服以自家版本为准）"
+      ],
+      "confidence": "high",
+      "sources": [
+        "https://wikiwiki.jp/toulove/青野原の記憶 （8-4京都（五条）难度☆8、第一~第三MAP战场类型均昼・市街・晴；敌编成表多组枪_甲；王点掉落表）",
+        "https://wikiwiki.jp/toulove/合戦場一覧 （8-4难度☆8→官方目安等级：极刀Lv65+）",
+        "https://game.zol.com.cn/1039/10391678.html （国服向：8-4也有三张图、检非违使只掉特定刀剑，与wikiwiki结构一致）"
+      ]
+    }
+  ]
+}

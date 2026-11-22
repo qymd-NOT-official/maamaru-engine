@@ -136,6 +136,32 @@ class EventBriefingApiTests(unittest.TestCase):
         self.assertNotIn("enemy_fast_spear", event_arg)
 
 
+class EventGuideApiTests(unittest.TestCase):
+    """GET /api/event-briefing/guide：攻略库全量下发，坏了 500 喊出来。"""
+
+    def setUp(self):
+        self.client = TestClient(server.app)
+
+    def test_happy_path_returns_all_entries(self):
+        resp = self.client.get("/api/event-briefing/guide")
+        self.assertEqual(resp.status_code, 200)
+        entries = resp.json()["entries"]
+        self.assertEqual(len(entries), 40)
+        kinds = {e["kind"] for e in entries}
+        self.assertEqual(kinds, {"event", "map"})
+        first = entries[0]
+        for key in ("id", "name", "damage", "battle", "confidence",
+                    "sources", "tips"):
+            self.assertIn(key, first)
+
+    def test_broken_guide_file_is_500_honest(self):
+        with patch("touken.event_briefing.load_guide",
+                   side_effect=ValueError("活动参谋攻略库读不出来：boom")):
+            resp = self.client.get("/api/event-briefing/guide")
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("攻略库", resp.json()["detail"])
+
+
 class BriefingFormationApiTests(unittest.TestCase):
     """POST /api/event-briefing/formation：候选回刀帐认人、存预设、重名覆盖。"""
 

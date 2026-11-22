@@ -1,6 +1,6 @@
 // 活动开幕参谋的表单模型：localStorage 记忆、入参组装、评级配色元数据。
 // 纯函数不碰组件，测试照 dailySettingsModel 的装置风格来。
-import type { BriefingFormationSaveBody, EventBriefingResponse } from '../../types'
+import type { BriefingFormationSaveBody, EventBriefingResponse, EventGuideEntry } from '../../types'
 
 export const EVENT_BRIEFING_STORAGE_KEY = 'maamaru.eventBriefing.form'
 
@@ -172,4 +172,45 @@ export function formationSaveBody(
 /** 存预设按钮能不能点：没候选就是没东西可存 */
 export function canSaveFormation(briefing: EventBriefingResponse | null): boolean {
   return !!briefing && briefing.formation.candidates.length > 0
+}
+
+// ---- 攻略库回填：选中条目 → 表单字段 ----
+// 回填是一次性的：改完表单还是玩家的，手动改动不会被再次覆盖。
+// null 值是「研究员没查到」的透明标记：damage/battle 为 null 时保留表单
+// 现状不硬塞，map_points/recommended_level 为 null 时清空（不知道就空着）。
+
+/** 攻略条目按下拉分组拆开：轮替活动 / 常驻合战场（各自保持库里原序） */
+export function splitGuideEntries(entries: EventGuideEntry[]): { events: EventGuideEntry[]; maps: EventGuideEntry[] } {
+  return {
+    events: entries.filter(entry => entry.kind === 'event'),
+    maps: entries.filter(entry => entry.kind === 'map'),
+  }
+}
+
+/** 选中条目落进「活动名」框的名字：地图条目带「合战场」全名 */
+export function guideEntryFormName(entry: EventGuideEntry): string {
+  return entry.kind === 'map' ? `合战场 ${entry.name}` : entry.name
+}
+
+/** 数据存疑标记：confidence 不是 high 的条目，回填字段旁要挂「（待考）」 */
+export function guideEntryCaveat(entry: EventGuideEntry | null | undefined): boolean {
+  return !!entry && entry.confidence !== 'high'
+}
+
+export const GUIDE_CAVEAT_LABEL = '（待考）'
+
+/** 选中攻略条目 → 新表单。不动 bonusSwords（加成刀是玩家自己填的）。 */
+export function autofillFromGuide(
+  form: EventBriefingFormData,
+  entry: EventGuideEntry,
+): EventBriefingFormData {
+  return {
+    ...form,
+    name: guideEntryFormName(entry),
+    damage: entry.damage ?? form.damage,
+    battle: entry.battle ?? form.battle,
+    mapPoints: entry.map_points != null ? String(entry.map_points) : '',
+    recommendedLevel: entry.recommended_level != null ? String(entry.recommended_level) : '',
+    enemyFastSpear: entry.enemy_fast_spear,
+  }
 }

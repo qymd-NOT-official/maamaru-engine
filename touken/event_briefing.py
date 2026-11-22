@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 _RULES_PATH = Path(__file__).resolve().parent / "data" / "event_briefing_rules.json"
+_GUIDE_PATH = Path(__file__).resolve().parent / "data" / "event_guide.json"
 
 DAMAGE_TYPES = ("virtual", "real")
 BATTLE_TYPES = ("day", "night", "indoor", "mixed")
@@ -31,6 +32,22 @@ def load_rules(path: Path | None = None) -> dict:
         raise ValueError(f"活动参谋规则表读不出来：{exc}") from exc
     if not isinstance(data, dict) or "troops" not in data or "fatigue" not in data:
         raise ValueError("活动参谋规则表格式不对（缺 troops/fatigue）")
+    return data
+
+
+def load_guide(path: Path | None = None) -> dict:
+    """读攻略库（活动+合战场参数与要点）；文件缺失或损坏就 ValueError。
+
+    攻略库是正式资源，坏了要喊出来——前端拿到 500 如实告诉玩家，
+    不许拿空列表装没事。
+    """
+    path = Path(path) if path else _GUIDE_PATH
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"活动参谋攻略库读不出来：{exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+        raise ValueError("活动参谋攻略库格式不对（缺 entries）")
     return data
 
 

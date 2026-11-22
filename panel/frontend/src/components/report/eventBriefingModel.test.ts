@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { EventBriefingResponse } from '../../types'
+import type { EventBriefingResponse, EventGuideEntry } from '../../types'
 import { api } from '../../api'
 import {
   BONUS_VERDICT_META,
   EVENT_BRIEFING_STORAGE_KEY,
+  GUIDE_CAVEAT_LABEL,
+  autofillFromGuide,
+  guideEntryCaveat,
+  guideEntryFormName,
+  splitGuideEntries,
   briefingPresetName,
   briefingRequestBody,
   canSaveFormation,
@@ -239,5 +244,105 @@ describe('编队候选存预设', () => {
     vi.stubGlobal('fetch', fetcher)
     await expect(api.saveBriefingFormation({ event_name: 'x', target_team: 1, candidates: [] }))
       .rejects.toThrow('分不清')
+  })
+})
+
+describe('攻略库回填', () => {
+  function guideEntry(over: Partial<EventGuideEntry> = {}): EventGuideEntry {
+    return {
+      id: 'senryoku',
+      kind: 'event',
+      name: '战力扩充计划',
+      aliases: [],
+      damage: 'real',
+      battle: 'mixed',
+      map_points: null,
+      recommended_level: null,
+      bonus_swords: [],
+      bonus_rule: null,
+      enemy_fast_spear: true,
+      tips: ['真伤会碎刀'],
+      confidence: 'high',
+      sources: ['https://example.com/1'],
+      ...over,
+    }
+  }
+
+  it('下拉分组：轮替活动 / 常驻合战场，各自保持原序', () => {
+    const a = guideEntry({ id: 'raid', kind: 'event', name: '联队战' })
+    const b = guideEntry({ id: 'map-1-1', kind: 'map', name: '1-1 函館', chapter: 1, map_no: 1 })
+    const c = guideEntry({ id: 'map-8-4', kind: 'map', name: '8-4 京都（五条）', chapter: 8, map_no: 4 })
+    const { events, maps } = splitGuideEntries([b, a, c])
+    expect(events.map(entry => entry.id)).toEqual(['raid'])
+    expect(maps.map(entry => entry.id)).toEqual(['map-1-1', 'map-8-4'])
+  })
+
+  it('选中活动条目：name 用条目原名，字段全量回填', () => {
+    const filled = autofillFromGuide(defaultBriefingForm(), guideEntry({
+      name: '异去', damage: 'real', battle: 'day',
+      recommended_level: 50, enemy_fast_spear: false,
+    }))
+    expect(filled.name).toBe('异去')
+    expect(filled.damage).toBe('real')
+    expect(filled.battle).toBe('day')
+    expect(filled.recommendedLevel).toBe('50')
+    expect(filled.enemyFastSpear).toBe(false)
+  })
+
+  it('选中地图条目：name 带「合战场」全名，高速枪标注回填', () => {
+    const entry = guideEntry({
+      id: 'map-8-3', kind: 'map', name: '8-3 美濃（青野原）',
+      chapter: 8, map_no: 3, recommended_level: 50, enemy_fast_spear: true,
+    })
+    expect(guideEntryFormName(entry)).toBe('合战场 8-3 美濃（青野原）')
+    const filled = autofillFromGuide(defaultBriefingForm(), entry)
+    expect(filled.name).toBe('合战场 8-3 美濃（青野原）')
+    expect(filled.recommendedLevel).toBe('50')
+    expect(filled.enemyFastSpear).toBe(true)
+  })
+
+  it('null 不脑补：damage/battle 为 null 保留表单现状，数字为 null 清空', () => {
+    const form = filledForm({ damage: 'real', battle: 'night', mapPoints: '7', recommendedLevel: '60' })
+    const filled = autofillFromGuide(form, guideEntry({
+      id: 'tokumei', name: '特命调查', damage: 'real', battle: null,
+      map_points: null, recommended_level: null,
+    }))
+    expect(filled.name).toBe('特命调查')
+    expect(filled.battle).toBe('night')       // battle=null：不硬塞，保留玩家现状
+    expect(filled.mapPoints).toBe('')          // 不知道就空着
+    expect(filled.recommendedLevel).toBe('')
+  })
+
+  it('加成刀是玩家自己填的，回填不碰', () => {
+    const form = filledForm({ bonusSwords: ['后家兼光'] })
+    const filled = autofillFromGuide(form, guideEntry({ bonus_swords: [] }))
+    expect(filled.bonusSwords).toEqual(['后家兼光'])
+  })
+
+  it('回填不动原表单：玩家手动改过的内容不会被顶掉', () => {
+    const form = filledForm({ name: '我手改的名字', mapPoints: '9' })
+    autofillFromGuide(form, guideEntry())
+    expect(form.name).toBe('我手改的名字')
+    expect(form.mapPoints).toBe('9')
+    // 二次回填只会发生在玩家再选条目时；手动改动保持原样
+    const once = autofillFromGuide(form, guideEntry({ name: '异去' }))
+    const edited = { ...once, name: '异去（这期双倍）' }
+    expect(edited.name).toBe('异去（这期双倍）')
+    expect(once.name).toBe('异去')
+  })
+
+  it('数据存疑标记：medium/low 挂「（待考）」，high 不挂', () => {
+    expect(guideEntryCaveat(guideEntry({ confidence: 'high' }))).toBe(false)
+    expect(guideEntryCaveat(guideEntry({ confidence: 'medium' }))).toBe(true)
+    expect(guideEntryCaveat(guideEntry({ confidence: 'low' }))).toBe(true)
+    expect(guideEntryCaveat(null)).toBe(false)
+    expect(GUIDE_CAVEAT_LABEL).toBe('（待考）')
+  })
+
+  it('GET /api/event-briefing/guide：攻略库下拉数据源', async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ entries: [] }) }))
+    vi.stubGlobal('fetch', fetcher)
+    await api.eventBriefingGuide()
+    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toBe('/api/event-briefing/guide')
   })
 })
