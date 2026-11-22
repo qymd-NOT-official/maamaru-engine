@@ -1626,3 +1626,53 @@ export interface DayTimeline {
     occupied: { start_min: number; end_min: number; label: string }[]
   } | null
 }
+
+/** 活动开幕参谋：入参（平铺活动字段 + 敌方快枪开关） */
+export interface EventBriefingBonus {
+  name: string
+  owned: boolean
+  level: number | null
+  form: 'kiwame' | 'normal' | null
+  verdict: 'carry' | 'free' | 'marginal' | 'burden' | 'missing' | 'unknown'
+  reason: string
+}
+
+export interface EventBriefingCandidate {
+  name: string
+  type: string
+  level: number
+  form: 'kiwame' | 'normal'
+  fatigue: number | null
+  injury: string | null
+  slots: number | null
+}
+
+export interface EventBriefingTroopsAdvice {
+  name: string
+  type: string
+  troop: string
+  why: string
+}
+
+export interface EventBriefingResponse {
+  event: {
+    name: string
+    damage: 'virtual' | 'real'
+    battle: 'day' | 'night' | 'indoor' | 'mixed'
+    map_points: number | null
+    recommended_level: number | null
+    bonus_swords: string[]
+    notes: string
+  }
+  summary: string
+  bonus: EventBriefingBonus[]
+  formation: {
+    template_note: string
+    wanted_types: string[]
+    candidates: EventBriefingCandidate[]
+    train_note: string | null
+  }
+  troops: EventBriefingTroopsAdvice[]
+  flower: string[]
+  warnings: string[]
+}

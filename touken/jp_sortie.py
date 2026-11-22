@@ -18,6 +18,18 @@
   medium 中伤以上 / heavy 只靠重伤硬拦）；触线收工不硬刷。
 - 记录只写日服数据目录（JP_DATA_DIR 的独立账房库）。
 
+出阵前整备与手入续跑（2026-11-22 接线，键名对齐国服合战场）：
+
+- 换队长/补刀装照 jp_formation 的集成契约：成功后画面在部队屏且
+  数据新鲜，之后补一次 _pick_map 防编成页行程带偏选图，照旧选队。
+  数据不齐/不新鲜时那两个流程自己跳过（「本轮不换/不补」），不拦出阵。
+- 手入照 jp_repair 的调用契约：触线才修，每圈最多修一轮；RepairReport
+  .unconfirmed 按仍带伤处理（复查仍触线就收工），绝不假绿。
+  【手入 E2E 首修未真机验证】（标定期账号无伤员）：repair_stop/continue
+  上线后前几跑要盯着日志，验证不了就如实报，不许假绿。
+- 重伤硬拦（_check_party）保持整任务停车不动，不进手入——比国服的
+  重伤也先修后跑保守，有意为之。
+
 【实机标定进度】（2026-11-11 云端骨架 → 本机标定）：
 
 1. ERA_OFFSETS / MAP_OFFSETS：已真机标定。8 张时代卡同屏（编号竖排：
@@ -45,7 +57,8 @@ from __future__ import annotations
 
 import time
 
-from . import jp_browser, jp_game_device, jp_party, jp_sally, jp_vision
+from . import jp_browser, jp_formation, jp_game_device, jp_party, jp_repair
+from . import jp_sally, jp_vision
 from . import team_state
 
 SCRIPT_NAME = 'jp-sortie'
@@ -55,10 +68,14 @@ _ERROR_SCREEN = ('error', ('error/screen',))
 _ERROR_FULL_SCREEN = ('error_full', ('error/screen-full',))
 
 # 画面分类：覆盖层（前 6 条）之后插入错误页（弹窗版+整页版），
+# 目录页之后再插入手入室两条（照 jp_repair.REPAIR_SCREENS 的顺序，
+# repair_select 在前——选人面板会盖住手入室标题锚点），
 # 其余沿用 Sally（普通出阵的时代/小图/部队屏锚点都是 Sally 自带的）。
 SCREENS = (jp_sally.SCREENS[:6]
            + (_ERROR_SCREEN, _ERROR_FULL_SCREEN)
-           + jp_sally.SCREENS[6:])
+           + jp_sally.SCREENS[6:9]
+           + jp_repair.REPAIR_SCREENS
+           + jp_sally.SCREENS[9:])
 
 # 进图导航：与 Sally 同一张表，但到时代屏就停（时代/小图由 _pick_map
 # 状态驱动地选，不让 route 拿游戏记忆的选择自动决定）。
@@ -130,13 +147,21 @@ class JpSortie(jp_sally.Sally):
             return None
 
     def _preflight(self) -> list[str]:
-        """模板体检：缺的逐条列出（绝不静默、绝不给假值）。"""
+        """模板体检：缺的逐条列出（绝不静默、绝不给假值）。
+
+        按本次参数合并体检：换队长/补刀装开了才查编成页素材
+        （jp_formation.missing_templates），手入续跑开了才查手入素材
+        （jp_repair.preflight）——不开的功能不拦起跑。"""
         missing = []
         for name in _REQUIRED_TEMPLATES:
             try:
                 jp_vision.load_template(name)
             except jp_vision.TemplateNotFound as exc:
                 missing.append(str(exc))
+        if self._params.get('rotate_captain') or self._params.get('auto_equip'):
+            missing.extend(jp_formation.missing_templates())
+        if self._params.get('repair_on_injury', 'stop') != 'stop':
+            missing.extend(jp_repair.preflight())
         return missing
 
     # ==================== 导航 ====================
@@ -363,12 +388,80 @@ class JpSortie(jp_sally.Sally):
             raise jp_sally.SallyStop(
                 f'{names}，按伤势停止条件收工；请先手入或换人')
 
+    # ==================== 伤势停止 + 手入分派 ====================
+
+    def _injury_gate(self, latest, team_no: int, party_watch, chapter: int,
+                     map_no: int, injury_threshold: str,
+                     repair_on_injury: str):
+        """伤势停止检查；触线时按 repair_on_injury 分派，返回通过检查的
+        最新 (捕获时间, 载荷)。
+
+        repair_on_injury='stop' 照旧收工；非 stop 且本圈还没修过 → 调
+        jp_repair.repair_team_stream 修一轮（continue=札秒修，
+        repair_stop=慢修），回来后重跑 _check_party + _check_injury，
+        仍触线才真正收工。每圈最多修一轮，防「修完又触线 → 再修」横跳。
+        repair_stop 修完（或修不了）就收工；continue 修好才继续。
+        修复没能确认（RepairReport.unconfirmed）一律按仍带伤处理——
+        复查时数据里还带伤就收工，绝不当成修好了继续跑。重伤硬拦在
+        _check_party，照旧整任务停车，不进手入（比国服保守，有意为之）。"""
+        repaired = False
+        while True:
+            try:
+                self._check_injury(latest, team_no, injury_threshold)
+                return latest
+            except jp_sally.SallyStop:
+                if repair_on_injury == 'stop' or repaired:
+                    raise
+                repaired = True
+            use_speedup = repair_on_injury == 'continue'
+            self.log('伤势触线，送手入一轮（'
+                     + ('札秒修后继续' if use_speedup else '慢修后收工')
+                     + '）…')
+            report = jp_repair.repair_team_stream(
+                self, party_watch, team_no, use_speedup=use_speedup)
+            detail = self._repair_report_lines(report)
+            if repair_on_injury == 'repair_stop':
+                self.log(detail)
+                raise jp_sally.SallyStop(
+                    '伤势触线，已送手入，按「手入后停止任务」收工')
+            # continue：修完拿新数据复查（repair 完事回本丸，重新进图）
+            self.log(detail + '，复查队伍状态…')
+            latest = self._await_party_data(party_watch)
+            if latest is None:
+                self._fetch_party_fresh(party_watch)
+                latest = self._await_party_data(party_watch)
+            self._goto_sortie()
+            self._pick_map(chapter, map_no)
+            self._check_party(party_watch, team_no, latest)
+
+    @staticmethod
+    def _repair_report_lines(report) -> str:
+        parts = []
+        if report.repaired:
+            parts.append('已确认修好：' + '、'.join(report.repaired))
+        if report.slow_running:
+            parts.append('慢修已开工：' + '、'.join(report.slow_running)
+                         + '（回满要现实时间）')
+        if report.unconfirmed:
+            # 没能确认的按仍带伤处理，措辞里必须说清，绝不假绿
+            parts.append('修复没能确认：' + '、'.join(report.unconfirmed)
+                         + '（按仍带伤处理）')
+        return '；'.join(parts) if parts else '手入位里没有要修的伤刀'
+
     # ==================== 主流程 ====================
 
     def run(self, chapter: int, map_no: int, team_no: int, rounds: int,
             party_watch=None, stop_on_fatigue: bool = True,
-            fatigue_threshold: int = 30, injury_threshold: str = 'heavy') -> None:
-        """跑 rounds 圈普通合战场；日志经 self.log 输出。"""
+            fatigue_threshold: int = 30, injury_threshold: str = 'heavy',
+            rotate_captain: bool = False, rotate_captain_margin: int = 10,
+            auto_equip: bool = False,
+            repair_on_injury: str = 'stop') -> None:
+        """跑 rounds 圈普通合战场；日志经 self.log 输出。
+
+        rotate_captain/auto_equip：出阵前换队长/补刀装（要队伍数据通道），
+        成功后画面在部队屏，照旧继续选队出发。repair_on_injury：
+        伤势触线后的处理——stop=直接收工（现状），repair_stop=送手入后
+        收工，continue=札秒修后复查、修好才继续剩余圈数。"""
         if chapter not in ERAS:
             raise ValueError('章节（时代）应在 1-8 之间')
         if map_no not in MAP_NOS:
@@ -381,6 +474,26 @@ class JpSortie(jp_sally.Sally):
             raise ValueError('疲劳阈值应在 1-99 之间')
         if injury_threshold not in ('light', 'medium', 'heavy'):
             raise ValueError('伤势停止条件应是 light、medium 或 heavy')
+        try:
+            rotate_captain_margin = int(rotate_captain_margin)
+        except (TypeError, ValueError):
+            raise ValueError('换队长阈值应是 5、10 或 20')
+        if rotate_captain_margin not in (5, 10, 20):
+            raise ValueError('换队长阈值应是 5、10 或 20')
+        if repair_on_injury not in ('continue', 'repair_stop', 'stop'):
+            raise ValueError('停止后的处理应是 continue、repair_stop 或 stop')
+        rotate_captain = bool(rotate_captain)
+        auto_equip = bool(auto_equip)
+        if party_watch is None and (rotate_captain or auto_equip
+                                    or repair_on_injury != 'stop'):
+            raise ValueError('换队长、补刀装和手入续跑都需要队伍数据通道')
+        # 体检按本次实参合并：preflight 从 self._params 读开关状态
+        self._params.update({
+            'rotate_captain': rotate_captain,
+            'rotate_captain_margin': rotate_captain_margin,
+            'auto_equip': auto_equip,
+            'repair_on_injury': repair_on_injury,
+        })
         missing = self._preflight()
         if missing:
             self.log('日服画面素材没标定，先干不了活。缺这些模板：')
@@ -393,20 +506,25 @@ class JpSortie(jp_sally.Sally):
         if self.classify(self.device.screenshot(force=True)) in (
                 'boot_arrow', 'boot_honmaru', 'loading'):
             self._boot_to_home()
+        options = dict(stop_on_fatigue=stop_on_fatigue,
+                       fatigue_threshold=fatigue_threshold,
+                       injury_threshold=injury_threshold,
+                       rotate_captain=rotate_captain,
+                       rotate_captain_margin=rotate_captain_margin,
+                       auto_equip=auto_equip,
+                       repair_on_injury=repair_on_injury)
         done = 0
         for round_no in range(1, rounds + 1):
             try:
                 self._run_one(round_no, rounds, chapter, map_no, team_no,
-                              party_watch, stop_on_fatigue, fatigue_threshold,
-                              injury_threshold)
+                              party_watch, **options)
             except _CommError:
                 # 通信错误页：自愈后本轮重试一次；恢复途中圈已收完
                 # （瞬断回本丸）就不再重跑
                 if not self._recover_error():
                     try:
                         self._run_one(round_no, rounds, chapter, map_no,
-                                      team_no, party_watch, stop_on_fatigue,
-                                      fatigue_threshold, injury_threshold)
+                                      team_no, party_watch, **options)
                     except _CommError:
                         raise jp_sally.SallyStop(
                             '通信错误反复出现，这一轮放弃；'
@@ -420,7 +538,10 @@ class JpSortie(jp_sally.Sally):
 
     def _run_one(self, round_no: int, rounds: int, chapter: int, map_no: int,
                  team_no: int, party_watch, stop_on_fatigue: bool,
-                 fatigue_threshold: int, injury_threshold: str) -> None:
+                 fatigue_threshold: int, injury_threshold: str,
+                 rotate_captain: bool = False, rotate_captain_margin: int = 10,
+                 auto_equip: bool = False,
+                 repair_on_injury: str = 'stop') -> None:
         self.log(f'第 {round_no}/{rounds} 圈：前往出阵（时代{NUMERAL[chapter - 1]}'
                  f'小图{NUMERAL[map_no - 1]}）')
         self._goto_sortie()
@@ -442,9 +563,24 @@ class JpSortie(jp_sally.Sally):
                 self._pick_map(chapter, map_no)
                 latest = self._await_party_data(party_watch)
             self._check_party(party_watch, team_no, latest)
-            self._check_injury(latest, team_no, injury_threshold)
+            latest = self._injury_gate(latest, team_no, party_watch, chapter,
+                                       map_no, injury_threshold,
+                                       repair_on_injury)
             if stop_on_fatigue:
                 self._check_fatigue(latest, team_no, fatigue_threshold)
+            if rotate_captain:
+                for line in jp_formation.rotate_captain_stream(
+                        self, party_watch, team_no, rotate_captain_margin):
+                    self.log(line)
+            if auto_equip:
+                for line in jp_formation.auto_equip_stream(
+                        self, party_watch, team_no):
+                    self.log(line)
+            if rotate_captain or auto_equip:
+                # 两个整备流程成功收场都在部队屏，但编成页行程可能带偏
+                # 选图——补一次 _pick_map 确认，再照旧选队（jp_formation
+                # 模块头的集成建议）
+                self._pick_map(chapter, map_no)
         self._select_team(team_no)
         if self._automarch_active(self.device.screenshot(force=True)):
             self.log('自动行军委托已开着')
@@ -478,6 +614,11 @@ def run_script(config_path=None, params: dict | None = None):
             'fatigue_threshold': int(params.get('fatigue_threshold', 30)),
             # 键名对齐国服合战场：伤势停止条件 light/medium/heavy
             'injury_threshold': params.get('repair_threshold', 'heavy'),
+            # 键名对齐国服合战场：出阵前整备 + 手入续跑
+            'rotate_captain': bool(params.get('rotate_captain', False)),
+            'rotate_captain_margin': int(params.get('rotate_captain_margin', 10)),
+            'auto_equip': bool(params.get('auto_equip', False)),
+            'repair_on_injury': params.get('repair_on_injury') or 'stop',
         }
     except (TypeError, ValueError):
         raise ValueError('参数格式不正确')
@@ -492,7 +633,11 @@ def run_script(config_path=None, params: dict | None = None):
                     party_watch=watch,
                     stop_on_fatigue=normalized['stop_on_fatigue'],
                     fatigue_threshold=normalized['fatigue_threshold'],
-                    injury_threshold=normalized['injury_threshold'])
+                    injury_threshold=normalized['injury_threshold'],
+                    rotate_captain=normalized['rotate_captain'],
+                    rotate_captain_margin=normalized['rotate_captain_margin'],
+                    auto_equip=normalized['auto_equip'],
+                    repair_on_injury=normalized['repair_on_injury'])
     except jp_party.PartyWatchError as exc:
         raise FlowAborted(str(exc)) from exc
     except jp_vision.TemplateNotFound as exc:

@@ -8,6 +8,7 @@ const goalResources = resourceNames.filter(name => name !== '甲州金')
 // 异去碎片清单由服务端途径卡给出（数据卡没收录就是空，不硬编）
 const fragmentNames = computed(() => Object.keys(planning.value?.fragments || {}))
 import EventPointsHistory from './EventPointsHistory.vue'
+import EventBriefingPanel from './EventBriefingPanel.vue'
 import EventTimeline from './EventTimeline.vue'
 import ResourceGoalGuide from './ResourceGoalGuide.vue'
 import FragmentGoalGuide from './FragmentGoalGuide.vue'
@@ -455,6 +456,8 @@ onMounted(load)
     />
 
     <EventPointsHistory v-if="!isJp" />
+    <!-- 活动参谋只读国服刀帐出简报：日服家底走自己的档案，先不混用 -->
+    <EventBriefingPanel v-if="!isJp" />
     <section v-if="isJp && planning" class="planning-form" aria-label="日服规划家底"><h4>最近读取的家底</h4><p v-for="name in goalResources" :key="name">{{ name }}：{{ planning.current?.[name] == null ? '未读取' : fmt(planning.current?.[name]) }}</p></section>
     <header class="planning-toolbar">
       <div><h3>自定目标</h3><span v-if="customGoals.length">{{ customGoals.length }} 个</span></div>

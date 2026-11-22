@@ -29,6 +29,7 @@ from .log_store import get_store
 from .honmaru_home import create_home_router
 from .template_lab import create_template_lab_router
 from .flow_lab import create_flow_lab_router
+from .event_briefing_api import create_event_briefing_router
 from .script_runner import _SCRIPTS, get_runner, list_scripts, register_script, ScriptRunner
 from .daily_workflow import install_daily_template, recipe_fields, recipe_from_params
 from touken.diagnostics import (
@@ -83,6 +84,7 @@ app = FastAPI(title="まあ丸 近侍面板", lifespan=_lifespan)
 app.include_router(create_home_router(STATUS_DIR / "honmaru_home.json", JP_DATA_DIR / "state" / "honmaru_home.json"))
 app.include_router(create_template_lab_router())
 app.include_router(create_flow_lab_router())
+app.include_router(create_event_briefing_router())
 _server_mode = threading.local()
 
 
@@ -1468,7 +1470,8 @@ def _build_jp_sortie(config_path, params):
 
 register_script("jp-sortie", "日服合战场",
                 "指定时代和小图连刷已攻略的图，委托游戏自动行军。"
-                "出发前验伤（重伤绝不出阵，轻伤/中伤可选停），气力掉线自动收工；"
+                "出发前验伤（重伤绝不出阵，轻伤/中伤可选停/手入续跑），"
+                "气力掉线自动收工；可选出阵前自动换队长、用库存补刀装；"
                 "行军中任何弹窗一律停等人工",
                 _build_jp_sortie,
                 params=[{"key": "chapter", "type": "select", "label": "时代",
@@ -1492,7 +1495,26 @@ register_script("jp-sortie", "日服合战场",
                          "options": [["light", "轻伤时停止"], ["medium", "中伤时停止"],
                                      ["heavy", "重伤时停止"]],
                          "default": "heavy",
-                         "help": "到线就收工，不带伤硬刷；日服暂时没有自动手入，停下来后自己去修刀或换队"}],
+                         "help": "到线就收工，不带伤硬刷；停下来之后的处理见下方「停止后的处理」"},
+                        {"key": "rotate_captain", "type": "toggle", "label": "自动换队长",
+                         "default": False,
+                         "help": "出阵前读全队气力，气力最低的换到队长位吃加成（保花用）"},
+                        {"key": "rotate_captain_margin", "type": "select", "label": "换队长阈值",
+                         "options": [["5", "相差 5 点"], ["10", "相差 10 点"],
+                                     ["20", "相差 20 点"]],
+                         "default": "10",
+                         "help": "全队最低气力比当前队长低到这个差值才换，避免差距很小时频繁调整",
+                         "visibleWhen": {"key": "rotate_captain", "is": True}},
+                        {"key": "auto_equip", "type": "toggle", "label": "是否自动补充刀装",
+                         "default": False,
+                         "help": "只用库存现成刀装逐空槽补，绝不碰刀装作成（不做新刀装）"},
+                        {"key": "repair_on_injury", "type": "select", "label": "停止后的处理",
+                         "options": [["continue", "手入加速后继续剩余圈数"],
+                                     ["repair_stop", "手入后停止任务"],
+                                     ["stop", "停止任务，不进行手入"]],
+                         "default": "stop",
+                         "help": "日服手入首修还没真机验证过，前几次用盯着点；"
+                                 "修复结果确认不了的刀按仍带伤处理，不会硬跑出阵"}],
                 hidden=True, server="jp")
 
 

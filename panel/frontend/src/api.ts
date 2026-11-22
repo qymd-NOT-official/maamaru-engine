@@ -1,6 +1,7 @@
 import type { TrainingOverviewResponse, TrainingHistoryResponse, InternalAffairsResponse, DropStatsResponse, ForgeHistoryResponse, EventPointsListResponse, EventPointsTimelineResponse, SwordJournalResponse } from './types'
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptInfo, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 import type { DailyReport, JpListenerStatus } from './types'
+import type { EventBriefingResponse } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
@@ -232,6 +233,11 @@ export const api = {
   logsForRun: (runId: string, limit = 3000) => request<{ logs: any[] }>(`/api/logs?run_id=${encodeURIComponent(runId)}&limit=${limit}`),
   configLists: () => request<Record<string, string[]>>('/api/config-lists'),
   swords: () => request<{ swords: Array<{ id: string; name: string; name_zh: string; type: string }> }>('/api/swords'),
+  /** 活动开幕参谋：平铺活动字段 + 敌方快枪开关，简报由国服刀帐现场生成 */
+  eventBriefing: (event: Record<string, unknown>, enemyFastSpear = false) => request<EventBriefingResponse>('/api/event-briefing', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...event, enemy_fast_spear: enemyFastSpear }),
+  }),
   saveConfigLists: (value: Record<string, string[]>) => request<{ ok: boolean }>('/api/config-lists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),

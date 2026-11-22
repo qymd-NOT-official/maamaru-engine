@@ -205,7 +205,7 @@ def _stub_run_one(host, behavior):
     rounds_run = []
 
     def _fake(round_no, rounds, chapter, map_no, team_no, watch,
-              stop_on_fatigue, fatigue_threshold, injury_threshold):
+              stop_on_fatigue, fatigue_threshold, injury_threshold, **options):
         rounds_run.append(round_no)
         behavior(round_no)
     host._run_one = _fake
@@ -468,6 +468,121 @@ def test_run_script_maps_repair_threshold(monkeypatch):
     assert captured['injury_threshold'] == 'heavy'   # 默认不加新拦截
 
 
+def test_run_script_maps_new_options(monkeypatch):
+    # 键名对齐国服合战场：换队长/补刀装/手入续跑四个新参数
+    captured = {}
+
+    class _FakeCtx:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(jp_sortie.jp_browser, 'JpBrowser', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.jp_game_device, 'JpGameDevice', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.jp_party, 'PartyWatch', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.JpSortie, 'run',
+                        lambda self, **kw: captured.update(kw))
+    list(jp_sortie.run_script(params={
+        'rotate_captain': True, 'rotate_captain_margin': '20',
+        'auto_equip': True, 'repair_on_injury': 'continue'}))
+    assert captured['rotate_captain'] is True
+    assert captured['rotate_captain_margin'] == 20
+    assert captured['auto_equip'] is True
+    assert captured['repair_on_injury'] == 'continue'
+    list(jp_sortie.run_script(params={}))
+    assert captured['rotate_captain'] is False
+    assert captured['rotate_captain_margin'] == 10
+    assert captured['auto_equip'] is False
+    assert captured['repair_on_injury'] == 'stop'   # 默认=现状
+
+
+def test_run_script_rejects_bad_new_params():
+    with pytest.raises(ValueError):
+        list(jp_sortie.run_script(params={'rotate_captain_margin': 'abc'}))
+
+
+# ==================== 新参数校验 ====================
+
+def test_run_validates_rotate_captain_margin():
+    host, _ = make_host()
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 rotate_captain=True, rotate_captain_margin=7)
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 rotate_captain=True, rotate_captain_margin='x')
+    # 合法值要能通过校验：体检拦下后续流程 = 没在校验处被拒
+    host._preflight = lambda: ['missing-fake']
+    for margin in (5, 10, 20, '10'):
+        with pytest.raises(jp_sally.SallyStop, match='模板没标定全'):
+            host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                     rotate_captain=True, rotate_captain_margin=margin,
+                     party_watch=object())
+
+
+def test_run_validates_repair_on_injury():
+    host, _ = make_host()
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 repair_on_injury='heal')
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 repair_on_injury=None)
+    host._preflight = lambda: ['missing-fake']
+    for action in ('continue', 'repair_stop', 'stop'):
+        with pytest.raises(jp_sally.SallyStop, match='模板没标定全'):
+            host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                     repair_on_injury=action, party_watch=object())
+
+
+def test_run_new_options_require_party_watch():
+    # 换队长/补刀装/手入续跑都靠队伍数据通道决策，没有通道就不许静默忽略
+    host, _ = make_host()
+    with pytest.raises(ValueError, match='队伍数据通道'):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 rotate_captain=True, party_watch=None)
+    with pytest.raises(ValueError, match='队伍数据通道'):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 auto_equip=True, party_watch=None)
+    with pytest.raises(ValueError, match='队伍数据通道'):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 repair_on_injury='continue', party_watch=None)
+
+
+# ==================== 体检按参数合并 ====================
+
+def test_preflight_merges_by_options(templates_missing, monkeypatch):
+    monkeypatch.setattr(jp_sortie.jp_formation, 'missing_templates',
+                        lambda: ['formation-fake'])
+    monkeypatch.setattr(jp_sortie.jp_repair, 'preflight',
+                        lambda: ['repair-fake'])
+    base = [f'{name}（模拟缺失）' for name in jp_sortie._REQUIRED_TEMPLATES]
+    host, _ = make_host()
+    assert host._preflight() == base
+    host, _ = make_host({'rotate_captain': True})
+    assert host._preflight() == base + ['formation-fake']
+    host, _ = make_host({'auto_equip': True})
+    assert host._preflight() == base + ['formation-fake']
+    host, _ = make_host({'repair_on_injury': 'continue'})
+    assert host._preflight() == base + ['repair-fake']
+    host, _ = make_host({'rotate_captain': True, 'auto_equip': True,
+                         'repair_on_injury': 'repair_stop'})
+    assert host._preflight() == base + ['formation-fake', 'repair-fake']
+
+
+def test_screens_table_includes_repair_screens():
+    names = [name for name, _ in jp_sortie.SCREENS]
+    assert names.index('repair_select') < names.index('repair')
+    # 手入两条排在 shiki_menu 之前（照 jp_repair 的插法）
+    assert names.index('repair') < names.index('shiki_menu')
+    assert 'error' in names and 'error_full' in names
+
+
 def test_run_one_stops_on_injury_threshold_before_selecting_team():
     # 气力也触线（fatigue=10 ≤ 30）：收工文案是伤势不是气力，
     # 证明顺序是 验伤硬拦 → 伤势阈值 → 气力
@@ -488,3 +603,212 @@ def test_run_one_heavy_wound_still_hard_blocked_by_party_check():
     watch = FakeWatch(_injury_payload([(1, 101, 3, 10, 40, 80)]))   # 重伤
     with pytest.raises(jp_sally.SallyStop, match='重伤'):
         host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'heavy')
+
+
+# ==================== 出阵前整备接线（换队长 / 补刀装） ====================
+
+class MutableWatch:
+    """可换载荷的 party_watch 桩：修一轮后切到复查数据。"""
+
+    def __init__(self, payload):
+        self._latest = (time.time(), payload)
+
+    def set(self, payload):
+        self._latest = (time.time(), payload)
+
+    def latest(self):
+        return self._latest
+
+
+def _stub_formation(monkeypatch, calls):
+    def _rotate(nav, watch, team_no, margin):
+        calls.append(('rotate', team_no, margin))
+        return ['[换队长] 假日志']
+
+    def _equip(nav, watch, team_no):
+        calls.append(('equip', team_no))
+        return ['[补刀装] 假日志']
+
+    monkeypatch.setattr(jp_sortie.jp_formation, 'rotate_captain_stream',
+                        _rotate)
+    monkeypatch.setattr(jp_sortie.jp_formation, 'auto_equip_stream', _equip)
+
+
+def _record_run_one_tail(host, calls):
+    host._goto_sortie = lambda: calls.append(('goto',))
+    host._pick_map = lambda chapter, map_no: calls.append(
+        ('pick', chapter, map_no))
+    host._select_team = lambda team_no: calls.append(('select', team_no))
+    host._automarch_active = lambda image: True
+    host._depart = lambda: calls.append(('depart',))
+    host._watch_march = lambda: calls.append(('watch',))
+
+
+def test_run_one_prepares_team_before_selecting_in_order(monkeypatch):
+    # 换队长 → 补刀装 → 补一次 _pick_map 防选图带偏 → 照旧选队出发
+    host, logs = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    _stub_formation(monkeypatch, calls)
+    host._run_one(1, 1, 2, 1, 3, FakeWatch(_injury_payload(
+        [(1, 101, 3, 40, 40, 80)], team_no=3)), True, 30, 'heavy',
+        rotate_captain=True, rotate_captain_margin=20, auto_equip=True)
+    assert calls == [('goto',), ('pick', 2, 1), ('rotate', 3, 20),
+                     ('equip', 3), ('pick', 2, 1), ('select', 3),
+                     ('depart',), ('watch',)]
+
+
+def test_run_one_skips_repick_and_formation_when_options_off():
+    host, _ = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    host._run_one(1, 1, 2, 1, 3, FakeWatch(_injury_payload(
+        [(1, 101, 3, 40, 40, 80)], team_no=3)), True, 30, 'heavy')
+    assert calls == [('goto',), ('pick', 2, 1), ('select', 3),
+                     ('depart',), ('watch',)]
+
+
+def test_run_passes_new_options_into_each_round():
+    host, _ = make_host()
+    seen = []
+
+    def _fake(round_no, rounds, chapter, map_no, team_no, watch, **options):
+        seen.append(options)
+
+    host._run_one = _fake
+    host._preflight = lambda: []
+    host.record_event = lambda *a, **k: None
+    host.classify = lambda image: 'home'
+    host.run(chapter=1, map_no=1, team_no=2, rounds=2, party_watch=object(),
+             rotate_captain=True, rotate_captain_margin=5, auto_equip=True,
+             repair_on_injury='continue')
+    assert seen == [{'stop_on_fatigue': True, 'fatigue_threshold': 30,
+                     'injury_threshold': 'heavy', 'rotate_captain': True,
+                     'rotate_captain_margin': 5, 'auto_equip': True,
+                     'repair_on_injury': 'continue'}] * 2
+
+
+# ==================== 手入续跑接线 ====================
+
+def _stub_repair(monkeypatch, reports):
+    """假 repair_team_stream：按顺序吐 RepairReport，记录调用参数。"""
+    calls = []
+    queue = iter(reports)
+
+    def _fake(nav, watch, team_no, use_speedup=True):
+        calls.append((team_no, use_speedup))
+        return next(queue)
+
+    monkeypatch.setattr(jp_sortie.jp_repair, 'repair_team_stream', _fake)
+    return calls
+
+
+def test_repair_continue_redoes_checks_and_proceeds_when_healed(monkeypatch):
+    # continue：修一轮（札秒修）→ 回部队屏拿新数据复查 → 好了才继续跑
+    host, logs = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    repair_calls = []
+    watch = MutableWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))  # 轻伤
+    healed = _injury_payload([(1, 101, 3, 40, 40, 80)])
+
+    def _flip(nav, party_watch, team_no, use_speedup=True):
+        repair_calls.append((team_no, use_speedup))
+        watch.set(healed)
+        return jp_sortie.jp_repair.RepairReport(
+            team_no=1, repaired=('三日月宗近',), slow_running=(), unconfirmed=())
+
+    monkeypatch.setattr(jp_sortie.jp_repair, 'repair_team_stream', _flip)
+    host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                  repair_on_injury='continue')
+    assert repair_calls == [(1, True)]          # continue=札秒修，只修一轮
+    # 修完重新进图（goto+pick 第二遍）再照常选队出发
+    assert calls == [('goto',), ('pick', 1, 1), ('goto',), ('pick', 1, 1),
+                     ('select', 1), ('depart',), ('watch',)]
+    text = '\n'.join(logs)
+    assert '已确认修好：三日月宗近' in text
+    assert '复查' in text
+
+
+def test_repair_continue_stops_when_still_hurt_after_one_round(monkeypatch):
+    # 防横跳：修完一轮复查仍触线就真收工，绝不再修第二轮
+    host, _ = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    host._goto_sortie = lambda: None
+    repair_calls = _stub_repair(monkeypatch, [
+        jp_sortie.jp_repair.RepairReport(team_no=1, repaired=(),
+                                         slow_running=(), unconfirmed=())])
+    watch = MutableWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                      repair_on_injury='continue')
+    assert repair_calls == [(1, True)]          # 每圈最多修一轮
+    assert ('select', 1) not in calls           # 没当成修好了继续跑
+
+
+def test_repair_continue_treats_unconfirmed_as_still_hurt(monkeypatch):
+    # 修复没能确认 = 仍带伤：复查数据里还带伤就必须收工，绝不假绿续跑
+    host, logs = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    host._goto_sortie = lambda: None
+    repair_calls = _stub_repair(monkeypatch, [
+        jp_sortie.jp_repair.RepairReport(team_no=1, repaired=(),
+                                         slow_running=(),
+                                         unconfirmed=('三日月宗近',))])
+    watch = MutableWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                      repair_on_injury='continue')
+    assert repair_calls == [(1, True)]
+    assert '修复没能确认：三日月宗近（按仍带伤处理）' in '\n'.join(logs)
+    assert ('select', 1) not in calls
+
+
+def test_repair_stop_finishes_task_after_repair(monkeypatch):
+    # repair_stop：慢修（不用札），修完就收工，不继续出阵
+    host, logs = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    repair_calls = _stub_repair(monkeypatch, [
+        jp_sortie.jp_repair.RepairReport(
+            team_no=1, repaired=('三日月宗近',), slow_running=('小狐丸',),
+            unconfirmed=())])
+    watch = FakeWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='手入后停止任务'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                      repair_on_injury='repair_stop')
+    assert repair_calls == [(1, False)]         # repair_stop=慢修不用札
+    assert '已确认修好：三日月宗近' in '\n'.join(logs)
+    assert '慢修已开工：小狐丸' in '\n'.join(logs)
+    assert ('select', 1) not in calls
+
+
+def test_repair_stop_propagates_when_repair_cannot_proceed(monkeypatch):
+    # 修不了（如手入位全满）：repair 模块自己的安全停车原样向上抛
+    host, _ = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+
+    def _boom(nav, watch, team_no, use_speedup=True):
+        raise jp_sally.SallyStop('手入位全满了，已停止')
+
+    monkeypatch.setattr(jp_sortie.jp_repair, 'repair_team_stream', _boom)
+    watch = FakeWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='手入位全满'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                      repair_on_injury='repair_stop')
+    assert ('select', 1) not in calls
+
+
+def test_repair_on_injury_stop_keeps_plain_stop_behavior():
+    # stop（默认=现状）：触线直接收工，不修
+    host, _ = make_host()
+    calls = []
+    _record_run_one_tail(host, calls)
+    watch = FakeWatch(_injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light',
+                      repair_on_injury='stop')
+    assert ('select', 1) not in calls
