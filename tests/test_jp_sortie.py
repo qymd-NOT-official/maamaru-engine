@@ -5,6 +5,8 @@
 记录调用；素材体检用 monkeypatch 模拟模板缺失——宿主必须把缺什么列清楚
 然后停，绝不盲点。
 """
+import time
+
 import pytest
 
 from touken import jp_sally, jp_sortie, jp_vision
@@ -203,7 +205,7 @@ def _stub_run_one(host, behavior):
     rounds_run = []
 
     def _fake(round_no, rounds, chapter, map_no, team_no, watch,
-              stop_on_fatigue, fatigue_threshold):
+              stop_on_fatigue, fatigue_threshold, injury_threshold):
         rounds_run.append(round_no)
         behavior(round_no)
     host._run_one = _fake
@@ -286,7 +288,7 @@ def _stub_departure(host, automarch_active):
 def test_run_one_skips_enable_when_automarch_already_active():
     host, logs = make_host()
     calls = _stub_departure(host, automarch_active=True)
-    host._run_one(1, 1, 1, 1, 2, None, True, 30)
+    host._run_one(1, 1, 1, 1, 2, None, True, 30, 'heavy')
     assert calls['enable'] == 0
     assert '自动行军委托已开着' in '\n'.join(logs)
 
@@ -294,7 +296,7 @@ def test_run_one_skips_enable_when_automarch_already_active():
 def test_run_one_enables_automarch_when_not_active():
     host, _ = make_host()
     calls = _stub_departure(host, automarch_active=False)
-    host._run_one(1, 1, 1, 1, 2, None, True, 30)
+    host._run_one(1, 1, 1, 1, 2, None, True, 30, 'heavy')
     assert calls['enable'] == 1
 
 
@@ -360,3 +362,129 @@ def test_check_fatigue_unknown_fatigue_does_not_block():
 def test_check_fatigue_unrecognizable_payload_does_not_block():
     host, _ = make_host()
     host._check_fatigue((1000.0, {'party': {}}), team_no=1, threshold=30)
+
+
+# ==================== 伤势停止 ====================
+
+# hp/hp_max=40 的伤势档：40/40 满血（None）、35/40 轻伤、26/40 中伤、
+# 10/40 重伤。sword_id 3 = 三日月宗近（sword_db 实名，文案要点名）。
+def _injury_payload(members, team_no=1):
+    """合成 /sally 响应：members = [(slot, serial_id, sword_id, hp, hp_max, fatigue)]"""
+    slot = {str(i): {'serial_id': None} for i in range(1, 7)}
+    sword = {}
+    for slot_no, serial, sword_id, hp, hp_max, fatigue in members:
+        slot[str(slot_no)] = {'serial_id': serial}
+        sword[str(serial)] = {'serial_id': serial, 'sword_id': sword_id,
+                              'hp': hp, 'hp_max': hp_max, 'fatigue': fatigue}
+    return {'party': {str(team_no): {'status': 1, 'slot': slot}},
+            'sword': sword}
+
+
+class FakeWatch:
+    """party_watch 桩：latest() 永远返回一份刚捕获的数据。"""
+
+    def __init__(self, payload):
+        self._latest = (time.time(), payload)
+
+    def latest(self):
+        return self._latest
+
+
+def test_check_injury_light_stops_on_light_wound():
+    host, _ = make_host()
+    latest = (1000.0, _injury_payload([(1, 101, 3, 35, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工') as exc:
+        host._check_injury(latest, team_no=1, threshold='light')
+    text = str(exc.value)
+    assert '三日月宗近' in text and '轻伤' in text   # 点名到刀、说清什么伤
+
+
+def test_check_injury_medium_passes_light_wound():
+    host, _ = make_host()
+    latest = (1000.0, _injury_payload([(1, 101, 3, 35, 40, 80)]))
+    host._check_injury(latest, team_no=1, threshold='medium')   # 轻伤放行
+
+
+def test_check_injury_medium_stops_on_medium_wound():
+    host, _ = make_host()
+    latest = (1000.0, _injury_payload([(1, 101, 3, 26, 40, 80)]))
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工') as exc:
+        host._check_injury(latest, team_no=1, threshold='medium')
+    assert '三日月宗近' in str(exc.value) and '中伤' in str(exc.value)
+
+
+def test_check_injury_heavy_adds_no_new_block():
+    # heavy=不加新拦截：中伤照旧放行（真重伤在 _check_party 已被硬拦）
+    host, _ = make_host()
+    latest = (1000.0, _injury_payload([(1, 101, 3, 26, 40, 80)]))
+    host._check_injury(latest, team_no=1, threshold='heavy')
+
+
+def test_check_injury_healthy_team_passes():
+    # 满血成员 injury 是 None：injury_reaches_threshold 把 None 当
+    # 「伤势未知」按最保守档拦，必须先滤掉——否则健康队永远走不了
+    host, _ = make_host()
+    latest = (1000.0, _injury_payload([(1, 101, 3, 40, 40, 80)]))
+    host._check_injury(latest, team_no=1, threshold='light')
+
+
+def test_check_injury_unrecognizable_payload_does_not_block():
+    host, _ = make_host()
+    host._check_injury((1000.0, {'party': {}}), team_no=1, threshold='light')
+
+
+def test_run_validates_injury_threshold():
+    host, _ = make_host()
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 injury_threshold='extreme')
+    with pytest.raises(ValueError):
+        host.run(chapter=1, map_no=1, team_no=1, rounds=1,
+                 injury_threshold=None)
+
+
+def test_run_script_maps_repair_threshold(monkeypatch):
+    # 键名对齐国服合战场：repair_threshold → run(injury_threshold=...)
+    captured = {}
+
+    class _FakeCtx:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(jp_sortie.jp_browser, 'JpBrowser', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.jp_game_device, 'JpGameDevice', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.jp_party, 'PartyWatch', _FakeCtx)
+    monkeypatch.setattr(jp_sortie.JpSortie, 'run',
+                        lambda self, **kw: captured.update(kw))
+    list(jp_sortie.run_script(params={'repair_threshold': 'medium'}))
+    assert captured['injury_threshold'] == 'medium'
+    list(jp_sortie.run_script(params={}))
+    assert captured['injury_threshold'] == 'heavy'   # 默认不加新拦截
+
+
+def test_run_one_stops_on_injury_threshold_before_selecting_team():
+    # 气力也触线（fatigue=10 ≤ 30）：收工文案是伤势不是气力，
+    # 证明顺序是 验伤硬拦 → 伤势阈值 → 气力
+    host, _ = make_host()
+    _stub_departure(host, automarch_active=True)
+    selected = []
+    host._select_team = lambda team_no: selected.append(team_no)
+    watch = FakeWatch(_injury_payload([(1, 101, 3, 35, 40, 10)]))   # 轻伤
+    with pytest.raises(jp_sally.SallyStop, match='按伤势停止条件收工'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'light')
+    assert selected == []   # 选队之前就叫停
+
+
+def test_run_one_heavy_wound_still_hard_blocked_by_party_check():
+    # heavy 阈值遇重伤：新检查放行，照旧由 _check_party 硬拦（真方法）
+    host, _ = make_host()
+    _stub_departure(host, automarch_active=True)
+    watch = FakeWatch(_injury_payload([(1, 101, 3, 10, 40, 80)]))   # 重伤
+    with pytest.raises(jp_sally.SallyStop, match='重伤'):
+        host._run_one(1, 1, 1, 1, 1, watch, True, 30, 'heavy')

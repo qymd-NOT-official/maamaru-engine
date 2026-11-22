@@ -14,6 +14,8 @@
 - 出发前经队伍数据通道确认状态：重伤拦截、空队/不在待命/数据不新鲜
   一律停（复用 Sally._check_party）。
 - 疲劳停止走 jp_party 数据通道读气力值，阈值是参数；触线收工不硬刷。
+- 伤势停止走同一数据通道的伤势分级，阈值是参数（light 带伤即停 /
+  medium 中伤以上 / heavy 只靠重伤硬拦）；触线收工不硬刷。
 - 记录只写日服数据目录（JP_DATA_DIR 的独立账房库）。
 
 【实机标定进度】（2026-11-11 云端骨架 → 本机标定）：
@@ -44,6 +46,7 @@ from __future__ import annotations
 import time
 
 from . import jp_browser, jp_game_device, jp_party, jp_sally, jp_vision
+from . import team_state
 
 SCRIPT_NAME = 'jp-sortie'
 
@@ -339,11 +342,32 @@ class JpSortie(jp_sally.Sally):
                 f'{names}的气力已经掉到 {threshold} 或以下，'
                 f'按疲劳停止收工；去喂喂团子或者换队吧')
 
+    def _check_injury(self, latest, team_no: int, threshold: str) -> None:
+        """伤势停止：任一成员达到伤势阈值就收工（不硬刷）。
+
+        light=带伤即停、medium=中伤以上、heavy=不加新拦截（重伤成员在
+        _check_party 已被硬拦，到不了这里）。分级复用国服
+        team_state.injury_reaches_threshold；满血成员 injury 是 None，
+        先滤掉再比——该函数把 None 当「伤势未知」按最保守档拦，不适用。"""
+        captured_at, payload = latest
+        snapshot = jp_party.build_team_snapshot(payload, team_no,
+                                                now=captured_at)
+        if snapshot is None:
+            return  # 编制认不出：_check_party 已经停过了，到不了这里
+        hurt = [m for m in snapshot.members
+                if m.injury is not None
+                and team_state.injury_reaches_threshold(m.injury, threshold)]
+        if hurt:
+            names = '、'.join(f'{m.name or f"#{m.serial_id}"}（{m.injury}）'
+                              for m in hurt)
+            raise jp_sally.SallyStop(
+                f'{names}，按伤势停止条件收工；请先手入或换人')
+
     # ==================== 主流程 ====================
 
     def run(self, chapter: int, map_no: int, team_no: int, rounds: int,
             party_watch=None, stop_on_fatigue: bool = True,
-            fatigue_threshold: int = 30) -> None:
+            fatigue_threshold: int = 30, injury_threshold: str = 'heavy') -> None:
         """跑 rounds 圈普通合战场；日志经 self.log 输出。"""
         if chapter not in ERAS:
             raise ValueError('章节（时代）应在 1-8 之间')
@@ -355,6 +379,8 @@ class JpSortie(jp_sally.Sally):
             raise ValueError('圈数应在 1-200 之间')
         if not 1 <= fatigue_threshold <= 99:
             raise ValueError('疲劳阈值应在 1-99 之间')
+        if injury_threshold not in ('light', 'medium', 'heavy'):
+            raise ValueError('伤势停止条件应是 light、medium 或 heavy')
         missing = self._preflight()
         if missing:
             self.log('日服画面素材没标定，先干不了活。缺这些模板：')
@@ -371,7 +397,8 @@ class JpSortie(jp_sally.Sally):
         for round_no in range(1, rounds + 1):
             try:
                 self._run_one(round_no, rounds, chapter, map_no, team_no,
-                              party_watch, stop_on_fatigue, fatigue_threshold)
+                              party_watch, stop_on_fatigue, fatigue_threshold,
+                              injury_threshold)
             except _CommError:
                 # 通信错误页：自愈后本轮重试一次；恢复途中圈已收完
                 # （瞬断回本丸）就不再重跑
@@ -379,7 +406,7 @@ class JpSortie(jp_sally.Sally):
                     try:
                         self._run_one(round_no, rounds, chapter, map_no,
                                       team_no, party_watch, stop_on_fatigue,
-                                      fatigue_threshold)
+                                      fatigue_threshold, injury_threshold)
                     except _CommError:
                         raise jp_sally.SallyStop(
                             '通信错误反复出现，这一轮放弃；'
@@ -393,7 +420,7 @@ class JpSortie(jp_sally.Sally):
 
     def _run_one(self, round_no: int, rounds: int, chapter: int, map_no: int,
                  team_no: int, party_watch, stop_on_fatigue: bool,
-                 fatigue_threshold: int) -> None:
+                 fatigue_threshold: int, injury_threshold: str) -> None:
         self.log(f'第 {round_no}/{rounds} 圈：前往出阵（时代{NUMERAL[chapter - 1]}'
                  f'小图{NUMERAL[map_no - 1]}）')
         self._goto_sortie()
@@ -415,6 +442,7 @@ class JpSortie(jp_sally.Sally):
                 self._pick_map(chapter, map_no)
                 latest = self._await_party_data(party_watch)
             self._check_party(party_watch, team_no, latest)
+            self._check_injury(latest, team_no, injury_threshold)
             if stop_on_fatigue:
                 self._check_fatigue(latest, team_no, fatigue_threshold)
         self._select_team(team_no)
@@ -448,6 +476,8 @@ def run_script(config_path=None, params: dict | None = None):
             'rounds': int(params.get('rounds', 1)),
             'stop_on_fatigue': bool(params.get('stop_on_fatigue', True)),
             'fatigue_threshold': int(params.get('fatigue_threshold', 30)),
+            # 键名对齐国服合战场：伤势停止条件 light/medium/heavy
+            'injury_threshold': params.get('repair_threshold', 'heavy'),
         }
     except (TypeError, ValueError):
         raise ValueError('参数格式不正确')
@@ -461,7 +491,8 @@ def run_script(config_path=None, params: dict | None = None):
                     rounds=normalized['rounds'],
                     party_watch=watch,
                     stop_on_fatigue=normalized['stop_on_fatigue'],
-                    fatigue_threshold=normalized['fatigue_threshold'])
+                    fatigue_threshold=normalized['fatigue_threshold'],
+                    injury_threshold=normalized['injury_threshold'])
     except jp_party.PartyWatchError as exc:
         raise FlowAborted(str(exc)) from exc
     except jp_vision.TemplateNotFound as exc:

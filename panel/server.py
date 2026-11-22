@@ -1468,7 +1468,7 @@ def _build_jp_sortie(config_path, params):
 
 register_script("jp-sortie", "日服合战场",
                 "指定时代和小图连刷已攻略的图，委托游戏自动行军。"
-                "出发前验伤（重伤绝不出阵），气力掉线自动收工；"
+                "出发前验伤（重伤绝不出阵，轻伤/中伤可选停），气力掉线自动收工；"
                 "行军中任何弹窗一律停等人工",
                 _build_jp_sortie,
                 params=[{"key": "chapter", "type": "select", "label": "时代",
@@ -1487,7 +1487,12 @@ register_script("jp-sortie", "日服合战场",
                          "help": "任一成员气力掉到阈值及以下就停止刷图，不硬刷"},
                         {"key": "fatigue_threshold", "type": "number", "label": "气力阈值",
                          "default": 30, "min": 1, "max": 99,
-                         "visibleWhen": {"key": "stop_on_fatigue", "is": True}}],
+                         "visibleWhen": {"key": "stop_on_fatigue", "is": True}},
+                        {"key": "repair_threshold", "type": "select", "label": "伤势停止条件",
+                         "options": [["light", "轻伤时停止"], ["medium", "中伤时停止"],
+                                     ["heavy", "重伤时停止"]],
+                         "default": "heavy",
+                         "help": "到线就收工，不带伤硬刷；日服暂时没有自动手入，停下来后自己去修刀或换队"}],
                 hidden=True, server="jp")
 
 

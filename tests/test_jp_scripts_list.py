@@ -30,7 +30,7 @@ def test_jp_scripts_list_only_jp_scripts():
     assert sortie["label"] == "日服合战场"
     assert {field["key"] for field in sortie["params"]} == {
         "chapter", "map_no", "team_no", "rounds",
-        "stop_on_fatigue", "fatigue_threshold"}
+        "stop_on_fatigue", "fatigue_threshold", "repair_threshold"}
     collect = data["scripts"]["jp-expedition-collect"]
     assert collect["label"] == "日服收远征"
     assert collect["params"] == []
