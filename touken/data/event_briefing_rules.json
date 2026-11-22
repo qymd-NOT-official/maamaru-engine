@@ -1,0 +1,95 @@
+{
+  "_description": "活动开幕参谋的规则表：改规矩改这张表，不动代码。出处见 sources。",
+  "_schema_version": 1,
+  "sources": [
+    "https://www.taptap.cn/moment/533675727535475531 （刀装决策树/编队模板/刀种梯度）",
+    "https://www.taptap.cn/moment/573204975065238133 （疲劳数值/控花/刷花/阵型）",
+    "https://shouyou.gamersky.com/gl/201703/883876.shtml （疲劳档位交叉验证）",
+    "老大口述（弓兵=誉输送工具，配给需要控花的非老板位刀；2026-11-22 与攻略口径核对一致）"
+  ],
+  "fatigue": {
+    "tiers": [
+      {"min": 50, "label": "樱吹雪", "note": "战意高昂，属性加成，远征易大成功"},
+      {"min": 20, "label": "通常", "note": "无加成"},
+      {"min": 6, "label": "黄脸", "note": "打不动、脆、易受伤；除薙刀一带五外不建议出阵"},
+      {"min": 0, "label": "红脸", "note": "重度疲劳，别出阵"}
+    ],
+    "sortie_cost": -10,
+    "mvp_gain": 10,
+    "captain_gain": 3,
+    "s_win_gain": 1,
+    "mvp_rule": "造成伤害最多者拿誉；伤害同量时最上面（编队列靠前）的拿誉",
+    "keep_rule": "拿一次誉即可维持樱吹雪",
+    "reflower": {
+      "solo_map": "1-1 单刷（能带远程带远程）",
+      "a_win_gain": 16,
+      "s_win_gain": 18,
+      "event_spots": ["地下城 88 层", "花火", "江户城"],
+      "note": "其他活动可用极短放队长刷花"
+    }
+  },
+  "flower_control": {
+    "min_map_points": 5,
+    "rules": [
+      {"when": "地图点数>=5", "do": "勤换队长（队长每点 +3，四个点即可正增长）"},
+      {"when": "多数点敌军存活+刀装最多单位<=2", "do": "全队不带远程，最多一振大太刀且实际机动最低"},
+      {"when": "多数点敌军存活+刀装最多单位>2", "do": "全队带远程，最后出手的放队长位"},
+      {"when": "地图点数<5", "do": "控不了花，薙刀一带五摆烂"}
+    ],
+    "archer_rule": "远战弓最先出手。弓兵=誉输送工具：配给需要控花（保樱吹雪）又不在老板位的刀，让它先手收割拿誉。"
+  },
+  "troops": {
+    "_note": "按刀种的刀装决策树；condition 从上到下第一条命中的生效。need_flower=true 表示该振需要控花，优先按 archer_rule 配弓。",
+    "短刀": [
+      {"condition": "need_flower", "troop": "弓兵", "why": "远战弓最先出手，先手收割拿誉保花"},
+      {"condition": "always", "troop": "重步", "why": "短刀打击低，远程砸不掉敌军刀装"},
+      {"condition": "enemy_fast_spear", "troop": "铳兵", "why": "跑不过高速枪就带远程，优先铳"}
+    ],
+    "胁差": [
+      {"condition": "always", "troop": "弓兵", "why": "胁差远程能打掉刀装，优先弓"},
+      {"condition": "low_defense", "troop": "盾", "why": "防御低时保生存"}
+    ],
+    "打刀": [
+      {"condition": "need_flower", "troop": "弓兵", "why": "远战弓最先出手，先手收割拿誉保花"},
+      {"condition": "always", "troop": "投石", "why": "打刀远程打到刀装选投石"},
+      {"condition": "low_defense", "troop": "盾", "why": "防御低时保生存"},
+      {"condition": "low_attack", "troop": "重步/轻骑", "why": "打击不够补白刃"}
+    ],
+    "太刀": [
+      {"condition": "always", "troop": "重骑/重步", "why": "能削掉两个刀装就选重骑/重步"},
+      {"condition": "low_defense", "troop": "盾", "why": "防御低时保生存"}
+    ],
+    "大太刀": [
+      {"condition": "low_defense", "troop": "盾", "why": "防御不够先保命"},
+      {"condition": "always", "troop": "精锐/轻骑", "why": "防御够时补机动输出"}
+    ],
+    "枪": [
+      {"condition": "always", "troop": "自动装备", "why": "攻略没有特别建议，自动即可"}
+    ],
+    "薙刀": [
+      {"condition": "is_captain_trainee", "troop": "轻步", "why": "带队练级要跑过队员抢出手"},
+      {"condition": "always", "troop": "重步", "why": "其他情况重步"}
+    ],
+    "剑": [
+      {"condition": "always", "troop": "铳", "why": "非碰瓷场合带铳"},
+      {"condition": "touch_team", "troop": "盾", "why": "碰瓷队保生存"}
+    ]
+  },
+  "formation_templates": {
+    "day": {"types": ["太刀", "大太刀"], "note": "日战用太刀大太刀"},
+    "night_indoor": {"types": ["短刀", "胁差", "打刀"], "note": "夜战、室内战用短刀胁差打刀"},
+    "mixed": {"types": ["大太刀", "短刀"], "note": "日夜混战：2 大太 + 4 短"},
+    "train": {
+      "escort_types": ["短刀"],
+      "kiwame_tanto_universal": true,
+      "note": "练级队：极短万能带练（五带一/四带二/三带三，按副本难度和极短练度递减）；七星剑不放队长，带 3 金铳蹭 1~2 次誉",
+      "naginata_min_level": 70
+    }
+  },
+  "type_tier": {
+    "T0": ["短刀·极"],
+    "T0.5": ["太刀·极"],
+    "T1": ["大太刀·极", "薙刀·极(80+)"],
+    "note": "极短核心是机动：高机动跑得过高速枪，低机动满级也跑不过"
+  }
+}
