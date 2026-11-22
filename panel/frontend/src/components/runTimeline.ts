@@ -55,7 +55,7 @@ export const SCRIPT_NAMES: Record<string, string> = {
   yosari: '异去', osaka: '挖地', expedition: '远征', practice: '演练', smith: '锻刀',
   sakura: '刷花', sugar: '炼糖', repair: '手入', snapshot: '库存',
   rotate_captain: '换队长', formation: '编队换人', workflow: '工作流',
-  custom_flow: '流程', scheduler: '排班', system: '系统',
+  apply_formation_preset: '套预设', custom_flow: '流程', scheduler: '排班', system: '系统',
 }
 
 export function scriptLabel(script: string) { return SCRIPT_NAMES[script] || script || '任务' }

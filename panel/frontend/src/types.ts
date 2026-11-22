@@ -1654,6 +1654,13 @@ export interface EventBriefingTroopsAdvice {
   why: string
 }
 
+/** 参谋编队候选存预设：POST /api/event-briefing/formation 入参 */
+export interface BriefingFormationSaveBody {
+  event_name: string
+  target_team: number
+  candidates: Array<{ name: string; form: 'kiwame' | 'normal'; level: number | null }>
+}
+
 export interface EventBriefingResponse {
   event: {
     name: string

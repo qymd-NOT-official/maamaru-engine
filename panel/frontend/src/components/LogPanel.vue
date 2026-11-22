@@ -38,7 +38,7 @@ const scriptNames: Record<string, string> = {
   daily: '一键日课', pumpkin: '南瓜', raid: '联队战', sortie: '合战场',
   yosari: '异去', osaka: '挖地', expedition: '远征', practice: '演练', smith: '锻刀',
   sakura: '刷花', sugar: '炼糖', repair: '手入', snapshot: '库存',
-  rotate_captain: '换队长', formation: '编队换人',
+  rotate_captain: '换队长', formation: '编队换人', apply_formation_preset: '套预设',
   scheduler: '排班', system: '系统',
 }
 

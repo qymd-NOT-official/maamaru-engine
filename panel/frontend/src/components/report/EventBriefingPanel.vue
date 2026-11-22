@@ -7,10 +7,13 @@ import {
   BATTLE_OPTIONS,
   BONUS_VERDICT_META,
   DAMAGE_OPTIONS,
+  PRESET_TEAM_OPTIONS,
   briefingRequestBody,
+  canSaveFormation,
   defaultBriefingForm,
   fatigueLabel,
   formLabel,
+  formationSaveBody,
   loadBriefingForm,
   saveBriefingForm,
   type EventBriefingFormData,
@@ -64,6 +67,38 @@ async function generate() {
     error.value = cause instanceof Error ? cause.message : '简报没生成出来，请重试'
   } finally {
     generating.value = false
+  }
+}
+
+// ---- 编队候选一键落地：存成部队预设，可顺手直接套进游戏 ----
+const presetTeam = ref(1)
+const formationSaving = ref(false)
+const formationNotice = ref('')
+const formationNoticeFailed = ref(false)
+const presetTeamLabel = computed(() =>
+  PRESET_TEAM_OPTIONS.find(option => option.value === presetTeam.value)?.label ?? `部队${presetTeam.value}`)
+
+async function saveFormation(apply: boolean) {
+  if (!briefing.value || formationSaving.value) return
+  formationSaving.value = true
+  formationNotice.value = ''
+  formationNoticeFailed.value = false
+  try {
+    const saved = await api.saveBriefingFormation(
+      formationSaveBody(briefing.value, form.value.name, presetTeam.value))
+    const presetName = saved.formation.name
+    const stored = `${saved.overwritten ? '已覆盖同名预设' : '已存好'}「${presetName}」（覆盖${presetTeamLabel.value}）`
+    if (!apply) {
+      formationNotice.value = `${stored}。`
+      return
+    }
+    await api.run('apply_formation_preset', { preset_id: saved.formation.id })
+    formationNotice.value = `${stored}，已开工往游戏里套。过程和结果看左侧「当前任务」日志，套不完会如实喊停。`
+  } catch (cause) {
+    formationNoticeFailed.value = true
+    formationNotice.value = cause instanceof Error ? cause.message : '操作没完成，请重试'
+  } finally {
+    formationSaving.value = false
   }
 }
 </script>
@@ -166,6 +201,18 @@ async function generate() {
           </li>
         </ol>
         <p v-else class="briefing-empty">刀帐里没挑出能上的刀——先去提升练度，或回「刀剑」页跑一次盘点。</p>
+        <div v-if="canSaveFormation(briefing)" class="briefing-formation-actions">
+          <label>目标部队
+            <select v-model.number="presetTeam" :disabled="formationSaving">
+              <option v-for="option in PRESET_TEAM_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
+          <button type="button" :disabled="formationSaving" @click="saveFormation(false)">存为部队预设</button>
+          <button type="button" class="primary" :disabled="formationSaving" @click="saveFormation(true)">
+            {{ formationSaving ? '参谋跑腿中……' : `存预设并套进${presetTeamLabel}` }}
+          </button>
+        </div>
+        <p v-if="formationNotice" class="briefing-formation-notice" :class="{ failed: formationNoticeFailed }" role="status">{{ formationNotice }}</p>
         <p v-if="briefing.formation.train_note" class="briefing-train">{{ briefing.formation.train_note }}</p>
       </section>
 
@@ -227,6 +274,11 @@ async function generate() {
 .briefing-tags i.tired { color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border-color: #d8a195; }
 .briefing-tags i.injured { color: #8f2f1c; background: color-mix(in srgb, #f4dfd7 78%, var(--paper-card)); border-color: #cf8f7f; font-weight: 700; }
 .briefing-empty { margin: 0; color: var(--ink-dim); font-size: 12px; }
+.briefing-formation-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--paper-line); }
+.briefing-formation-actions label { display: grid; gap: 4px; color: var(--ink-dim); font-size: 12px; }
+.briefing-formation-actions select { min-width: 96px; }
+.briefing-formation-notice { margin: 8px 0 0; padding: 8px 10px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #a8c59c; border-radius: 8px; font-size: 12px; }
+.briefing-formation-notice.failed { color: #9f3d28; background: color-mix(in srgb, #f4dfd7 70%, var(--paper-card)); border-color: #d8a195; }
 .briefing-train { margin: 10px 0 0; padding: 8px 10px; color: #426b36; background: color-mix(in srgb, #dcebd6 72%, var(--paper-card)); border: 1px solid #a8c59c; border-radius: 8px; font-size: 12px; }
 .briefing-bonus-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
 .briefing-verdict { padding: 8px 10px; border: 1px solid var(--paper-line); border-left-width: 4px; border-radius: 9px; }

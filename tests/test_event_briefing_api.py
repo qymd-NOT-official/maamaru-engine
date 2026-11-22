@@ -5,13 +5,16 @@
 不依赖真实用户数据目录的盘点产物。
 """
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from panel import server
-from panel.event_briefing_api import archive_to_roster
+from panel.event_briefing_api import archive_to_roster, briefing_preset_name
+from touken import custom_formations as cf
 
 
 def _archive(entries, done=True):
@@ -46,11 +49,12 @@ def _entry(**over):
 
 _ROSTER_ENTRIES = [
     _entry(),
-    _entry(name_zh="拔丸", sword_type="太刀", level=22, fatigue=60),
-    _entry(name_zh="药研藤四郎", sword_type="短刀", level=99,
-           form_status="kiwame", fatigue=40),
+    _entry(observation_id="9:2", name_zh="拔丸", sword_type="太刀", level=22, fatigue=60),
+    _entry(observation_id="9:3", name_zh="药研藤四郎", sword_type="短刀", level=99,
+           form_status="kiwame", fatigue=40,
+           sword_catalog_id="touken_049_yagen"),
     # 等级没读出来：参谋侧应丢掉，不进编队候选
-    _entry(name_zh="笑面青江", sword_type="胁差", level=None, fatigue=None),
+    _entry(observation_id="9:4", name_zh="笑面青江", sword_type="胁差", level=None, fatigue=None),
 ]
 
 _EVENT = {
@@ -130,6 +134,165 @@ class EventBriefingApiTests(unittest.TestCase):
         event_arg = engine.call_args.args[0]
         self.assertEqual(event_arg["damage"], "real")
         self.assertNotIn("enemy_fast_spear", event_arg)
+
+
+class BriefingFormationApiTests(unittest.TestCase):
+    """POST /api/event-briefing/formation：候选回刀帐认人、存预设、重名覆盖。"""
+
+    def setUp(self):
+        # 存储隔离照 tests/test_custom_formations_panel.py 的口径：
+        # 逐用例把 cf.STATE_DIR 指到临时目录，绝不碰真实用户数据。
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        state = Path(self._tmp.name) / "state"
+        state.mkdir(parents=True)
+        patcher = patch.object(cf, "STATE_DIR", state)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        cf.save_formations([])
+        self.client = TestClient(server.app)
+        self.addCleanup(self.client.close)
+
+    def _post(self, body, entries=None, done=True):
+        archive = _archive(_ROSTER_ENTRIES if entries is None else entries, done=done)
+        with patch("touken.sword_archive.get_sword_archive", return_value=archive):
+            return self.client.post("/api/event-briefing/formation", json=body)
+
+    def _body(self, **over):
+        body = {
+            "event_name": "战力扩充计划",
+            "target_team": 2,
+            "candidates": [
+                {"name": "药研藤四郎", "form": "kiwame", "level": 99},
+                {"name": "后家兼光", "form": "normal", "level": 75},
+            ],
+        }
+        body.update(over)
+        return body
+
+    def test_save_resolves_full_identity_and_persists(self):
+        resp = self._post(self._body())
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["ok"])
+        self.assertFalse(data["overwritten"])
+        record = data["formation"]
+        self.assertEqual(record["name"], "活动·战力扩充计划")
+        self.assertEqual(record["target_team"], 2)
+        self.assertEqual(sorted(record["slots"]), ["1", "2"])
+        slot = record["slots"]["1"]
+        # 槽位快照照编队页选人那套身份字段落盘
+        self.assertEqual(slot["name_zh"], "药研藤四郎")
+        self.assertEqual(slot["form_status"], "kiwame")
+        self.assertEqual(slot["level"], 99)
+        self.assertEqual(slot["observation_id"], "9:3")
+        self.assertEqual(slot["sword_catalog_id"], "touken_049_yagen")
+        self.assertEqual(slot["stats"], {"atk": 100})
+        # 真落盘了
+        self.assertEqual(cf.load_formations(), [record])
+
+    def test_same_name_overwrites_in_place_keeping_id(self):
+        first = self._post(self._body()).json()["formation"]
+        resp = self._post(self._body(target_team=4))
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["overwritten"])
+        record = data["formation"]
+        self.assertEqual(record["id"], first["id"])
+        self.assertEqual(record["target_team"], 4)
+        self.assertEqual(record["created_at"], first["created_at"])
+        self.assertEqual(len(cf.load_formations()), 1)
+
+    def test_full_five_presets_reports_honestly(self):
+        for index in range(5):
+            self._post(self._body(event_name=f"活动{index}"))
+        resp = self._post(self._body(event_name="第六个活动"))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("最多 5 套", resp.json()["reason"])
+
+    def test_archive_not_ready_reports_guide(self):
+        resp = self._post(self._body(), done=False)
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("盘点", resp.json()["detail"])
+
+    def test_unknown_candidate_rejected_without_saving(self):
+        resp = self._post(self._body(candidates=[
+            {"name": "不存在的刀", "form": "normal", "level": 1}]))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("对不上号", resp.json()["reason"])
+        self.assertEqual(cf.load_formations(), [])
+
+    def test_level_drift_accepted_when_name_form_unique(self):
+        # 同名同形态只有一振：出阵升了级也认得回来（等级是参考）
+        resp = self._post(self._body(candidates=[
+            {"name": "药研藤四郎", "form": "kiwame", "level": 98}]))
+        self.assertEqual(resp.status_code, 200)
+        slot = resp.json()["formation"]["slots"]["1"]
+        self.assertEqual(slot["level"], 99)  # 存刀帐里的当前等级
+
+    def test_duplicate_name_form_with_wrong_level_is_ambiguous(self):
+        entries = [
+            _entry(name_zh="薬研", sword_type="短刀", level=90,
+                   form_status="kiwame", observation_id="9:1"),
+            _entry(name_zh="薬研", sword_type="短刀", level=95,
+                   form_status="kiwame", observation_id="9:2",
+                          sword_catalog_id="touken_049_yagen_dup"),
+        ]
+        resp = self._post(self._body(candidates=[
+            {"name": "薬研", "form": "kiwame", "level": 99}],), entries=entries)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("分不清", resp.json()["reason"])
+        self.assertEqual(cf.load_formations(), [])
+
+    def test_exact_level_picks_the_right_duplicate(self):
+        entries = [
+            _entry(name_zh="薬研", sword_type="短刀", level=90,
+                   form_status="kiwame", observation_id="9:1"),
+            _entry(name_zh="薬研", sword_type="短刀", level=95,
+                   form_status="kiwame", observation_id="9:2",
+                          sword_catalog_id="touken_049_yagen_dup"),
+        ]
+        resp = self._post(self._body(candidates=[
+            {"name": "薬研", "form": "kiwame", "level": 95}],), entries=entries)
+        self.assertEqual(resp.status_code, 200)
+        slot = resp.json()["formation"]["slots"]["1"]
+        self.assertEqual(slot["observation_id"], "9:2")
+
+    def test_same_sword_twice_rejected(self):
+        resp = self._post(self._body(candidates=[
+            {"name": "药研藤四郎", "form": "kiwame", "level": 99},
+            {"name": "药研藤四郎", "form": "kiwame", "level": 99},
+        ]))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("同一振", resp.json()["reason"])
+
+    def test_bad_target_team_rejected(self):
+        resp = self._post(self._body(target_team="第一队"))
+        self.assertEqual(resp.status_code, 400)
+        resp = self._post(self._body(target_team=9))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_empty_candidates_rejected(self):
+        resp = self._post(self._body(candidates=[]))
+        self.assertEqual(resp.status_code, 400)
+        resp = self._post(self._body(candidates=[{}] * 7))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_missing_identity_fields_rejected(self):
+        resp = self._post(self._body(candidates=[{"name": "", "form": "x"}]))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("身份信息不全", resp.json()["reason"])
+
+
+class PresetNameTests(unittest.TestCase):
+    def test_prefix_and_trim(self):
+        self.assertEqual(briefing_preset_name(" 战力扩充计划 "), "活动·战力扩充计划")
+        self.assertEqual(briefing_preset_name(""), "活动编队")
+
+    def test_truncated_to_contract_limit(self):
+        name = briefing_preset_name("超长活动名" * 10)
+        self.assertEqual(len(name), 20)
+        self.assertTrue(name.startswith("活动·"))
 
 
 class ArchiveToRosterTests(unittest.TestCase):

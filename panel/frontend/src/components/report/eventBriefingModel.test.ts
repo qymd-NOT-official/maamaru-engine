@@ -4,10 +4,13 @@ import { api } from '../../api'
 import {
   BONUS_VERDICT_META,
   EVENT_BRIEFING_STORAGE_KEY,
+  briefingPresetName,
   briefingRequestBody,
+  canSaveFormation,
   defaultBriefingForm,
   fatigueLabel,
   formLabel,
+  formationSaveBody,
   hasWarnings,
   loadBriefingForm,
   parseOptionalInt,
@@ -178,5 +181,63 @@ describe('API 接线', () => {
     vi.stubGlobal('fetch', fetcher)
     await expect(api.eventBriefing({ name: 'x', damage: 'virtual', battle: 'day', bonus_swords: [] }))
       .rejects.toThrow('刀剑盘点')
+  })
+})
+
+describe('编队候选存预设', () => {
+  function briefingWithCandidates(count: number): EventBriefingResponse {
+    const candidates = Array.from({ length: count }, (_, index) => ({
+      name: `刀${index + 1}`, type: '打刀', level: 90 + index,
+      form: 'normal' as const, fatigue: 50, injury: null, slots: 3,
+    }))
+    return {
+      summary: '', bonus: [],
+      formation: { template_note: '', wanted_types: [], candidates, train_note: null },
+      troops: [], flower: [], warnings: [],
+      event: { name: '战力扩充计划', damage: 'virtual', battle: 'day', map_points: null, recommended_level: null, bonus_swords: [], notes: '' },
+    }
+  }
+
+  it('预设名：活动·<活动名>，空白兜底，20 字截断', () => {
+    expect(briefingPresetName(' 战力扩充计划 ')).toBe('活动·战力扩充计划')
+    expect(briefingPresetName('')).toBe('活动编队')
+    expect(briefingPresetName('超长活动名'.repeat(10))).toHaveLength(20)
+  })
+
+  it('存预设入参：候选最多 6 振，只带 name/form/level', () => {
+    const body = formationSaveBody(briefingWithCandidates(8), ' 江户城 ', 3)
+    expect(body.event_name).toBe('江户城')
+    expect(body.target_team).toBe(3)
+    expect(body.candidates).toHaveLength(6)
+    expect(body.candidates[0]).toEqual({ name: '刀1', form: 'normal', level: 90 })
+  })
+
+  it('没候选不能存', () => {
+    expect(canSaveFormation(briefingWithCandidates(0))).toBe(false)
+    expect(canSaveFormation(briefingWithCandidates(2))).toBe(true)
+    expect(canSaveFormation(null)).toBe(false)
+  })
+
+  it('POST /api/event-briefing/formation：入参原样发出', async () => {
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true, formation: {}, overwritten: false }) }))
+    vi.stubGlobal('fetch', fetcher)
+    await api.saveBriefingFormation({ event_name: '江户城', target_team: 2, candidates: [{ name: '药研藤四郎', form: 'kiwame', level: 99 }] })
+    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toBe('/api/event-briefing/formation')
+    const init = (fetcher.mock.calls[0] as unknown[])[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      event_name: '江户城', target_team: 2,
+      candidates: [{ name: '药研藤四郎', form: 'kiwame', level: 99 }],
+    })
+  })
+
+  it('存预设失败（后端 400）的原因原样抛给界面', async () => {
+    const fetcher = vi.fn(async () => ({
+      ok: false, status: 400,
+      json: async () => ({ reason: '「薬研（极）」在刀帐里有 2 振同名同形态，分不清是哪一振' }),
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    await expect(api.saveBriefingFormation({ event_name: 'x', target_team: 1, candidates: [] }))
+      .rejects.toThrow('分不清')
   })
 })

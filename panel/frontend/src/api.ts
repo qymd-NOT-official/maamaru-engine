@@ -1,7 +1,7 @@
 import type { TrainingOverviewResponse, TrainingHistoryResponse, InternalAffairsResponse, DropStatsResponse, ForgeHistoryResponse, EventPointsListResponse, EventPointsTimelineResponse, SwordJournalResponse } from './types'
 import type { EventGoalResult, EventTimelineReport, EventsCalendar, FlowBuiltinDef, FlowLabFlow, FlowStep, FlowStepDef, FlowTestResult, HomeLayout, HomeLayoutEntry, Incident, LedgerImportPreview, LedgerOnboarding, ManualInventory, ManualSession, PlanningReport, ResourceLedger, ScriptInfo, ScriptParams, ScriptsResponse, SwordAnnotationBody, SwordArchiveAnnotation, SwordArchiveResponse, SwordInventoryResponse, TemplateLabAdoptResult, TemplateLabCaptureResult, TemplateLabCodeRoi, TemplateLabCropResult, TemplateLabDraft, TemplateLabOcrTestResult, TemplateLabRectXyxy, TemplateLabRoi, TemplateLabSession, TemplateLabStatus, TemplateLabVerifyResult, WorkflowNodeDef, WorkflowPreset } from './types'
 import type { DailyReport, JpListenerStatus } from './types'
-import type { EventBriefingResponse } from './types'
+import type { EventBriefingResponse, BriefingFormationSaveBody } from './types'
 
 import type { HonmaruHomeData, HonmaruProfile, HonmaruNote, HonmaruSituation, WorkflowIdentity } from './types'
 import type { CustomFormation, CustomFormationDraft, HonmaruFormationProfile } from './types'
@@ -237,6 +237,10 @@ export const api = {
   eventBriefing: (event: Record<string, unknown>, enemyFastSpear = false) => request<EventBriefingResponse>('/api/event-briefing', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...event, enemy_fast_spear: enemyFastSpear }),
+  }),
+  /** 参谋编队候选存成部队预设：候选回刀帐认人是后端的事，认不齐会如实拒绝 */
+  saveBriefingFormation: (value: BriefingFormationSaveBody) => request<{ ok: boolean; formation: CustomFormation; overwritten: boolean }>('/api/event-briefing/formation', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),
   }),
   saveConfigLists: (value: Record<string, string[]>) => request<{ ok: boolean }>('/api/config-lists', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value),

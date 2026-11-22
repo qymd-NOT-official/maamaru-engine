@@ -1382,6 +1382,26 @@ register_script("formation", "编队换人",
                 hidden=True)
 
 
+def _build_apply_formation_preset(agent, config_path, params):
+    """参谋/预设页「应用到游戏」的落地链路：按保存 id 套预设。
+
+    检查（刀账链接、同位冲突、删错队）和执行（匹配/翻页/同名裁决）全在
+    touken.custom_formations + formation_editor，这层只验参数，不包装、
+    不粉饰结果——套没套完以执行器自己的播报为准。"""
+    preset_id = str(params.get("preset_id") or "").strip()
+    if not preset_id:
+        yield "[部队预设] 请求无效：没找到要套的是哪套预设，没有动游戏"
+        return
+    from touken.custom_formations import apply_formation_preset_by_id_stream
+    yield from apply_formation_preset_by_id_stream(agent, preset_id)
+
+
+register_script("apply_formation_preset", "套用部队预设",
+                "把存好的部队预设整套套进游戏里的目标部队；开工前先对刀账、查同位冲突，套不完就停",
+                _wrap_inventory("部队预设", _build_apply_formation_preset),
+                hidden=True)
+
+
 # ── 日服 ──
 # 日服远征手动派遣：与国服设备链路完全分离，走 touken.jp_expedition。
 # 只派一支部队（选时代+小图卡位），出发前验出重伤绝不派遣；

@@ -283,6 +283,28 @@ class BuilderTests(PanelTestCase):
         self.assertEqual(agent.apply_calls[0][0], 5)
         self.assertFalse(any(_is_fail(message) for message in messages))
 
+    def test_apply_script_builder_uses_the_same_executor(self):
+        agent = AgentStub()
+        messages = list(server._build_apply_formation_preset(
+            agent, "cfg", {"preset_id": "pf1"}))
+        self.assertEqual(len(agent.apply_calls), 1)
+        self.assertEqual(agent.apply_calls[0][0], 5)
+        self.assertFalse(any(_is_fail(m) for m in messages))
+
+    def test_apply_script_builder_missing_id_refuses(self):
+        agent = AgentStub()
+        messages = list(server._build_apply_formation_preset(agent, "cfg", {}))
+        self.assertEqual(agent.apply_calls, [])
+        self.assertTrue(_is_fail(messages[-1]))
+
+    def test_apply_script_builder_deleted_preset_refuses(self):
+        cf.save_formations([])
+        agent = AgentStub()
+        messages = list(server._build_apply_formation_preset(
+            agent, "cfg", {"preset_id": "pf1"}))
+        self.assertEqual(agent.apply_calls, [])
+        self.assertTrue(_is_fail(messages[-1]))
+
     def test_all_battle_builders_are_wired(self):
         pairs = [("sortie", server._build_sortie),
                  ("yosari", server._build_yosari),

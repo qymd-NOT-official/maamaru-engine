@@ -1,6 +1,6 @@
 // 活动开幕参谋的表单模型：localStorage 记忆、入参组装、评级配色元数据。
 // 纯函数不碰组件，测试照 dailySettingsModel 的装置风格来。
-import type { EventBriefingResponse } from '../../types'
+import type { BriefingFormationSaveBody, EventBriefingResponse } from '../../types'
 
 export const EVENT_BRIEFING_STORAGE_KEY = 'maamaru.eventBriefing.form'
 
@@ -136,4 +136,40 @@ export function fatigueLabel(fatigue: number | null): string {
 
 export function formLabel(form: 'kiwame' | 'normal'): string {
   return form === 'kiwame' ? '极' : '普通'
+}
+
+// ---- 编队候选 → 部队预设 ----
+// 名字契约与后端 panel/event_briefing_api.briefing_preset_name 保持一致：
+// 「活动·<活动名>」总长按 20 字截断；重名由后端覆盖旧预设。
+
+export const PRESET_TEAM_OPTIONS = [
+  { value: 1, label: '部队一' },
+  { value: 2, label: '部队二' },
+  { value: 3, label: '部队三' },
+  { value: 4, label: '部队四' },
+  { value: 5, label: '部队五' },
+] as const
+
+export function briefingPresetName(eventName: string): string {
+  const base = eventName.trim()
+  return (base ? `活动·${base}` : '活动编队').slice(0, 20)
+}
+
+/** 简报编队候选（最多 6 振）→ POST /api/event-briefing/formation 入参 */
+export function formationSaveBody(
+  briefing: EventBriefingResponse,
+  eventName: string,
+  targetTeam: number,
+): BriefingFormationSaveBody {
+  return {
+    event_name: eventName.trim(),
+    target_team: targetTeam,
+    candidates: briefing.formation.candidates.slice(0, 6)
+      .map(candidate => ({ name: candidate.name, form: candidate.form, level: candidate.level })),
+  }
+}
+
+/** 存预设按钮能不能点：没候选就是没东西可存 */
+export function canSaveFormation(briefing: EventBriefingResponse | null): boolean {
+  return !!briefing && briefing.formation.candidates.length > 0
 }
