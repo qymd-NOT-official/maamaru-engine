@@ -123,7 +123,7 @@ const taskIcons: Record<string, string> = {
   daily: 'daily.png', raid: 'raid.png', pumpkin: 'pumpkin.png', edocastle: 'edocastle.png', hanafuda: 'hanafuda.png?v=2', sortie: 'sortie.png', yosari: 'yosari.png', osaka: 'digging.png',
   sakura: 'sakura.png', practice: 'practice.png', expedition: 'expedition.png', smith: 'forge.png',
   sugar: 'sugar.png', snapshot: 'snapshot.png', repair: 'repair-tools.png', workflow: 'workflow.svg',
-  'jp-sally': 'sortie.png', 'jp-sortie': 'sortie.png', 'jp-expedition': 'expedition.png',
+  'jp-sortie': 'sortie.png', 'jp-expedition': 'expedition.png',
   'jp-expedition-collect': 'expedition.png', 'jp-pumpkin': 'pumpkin.png', 'jp-edocastle': 'edocastle.png',
 }
 

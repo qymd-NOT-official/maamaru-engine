@@ -11,7 +11,7 @@ I have played Touken Ranbu for nine years, and I still want to keep playing. I j
 
 > **You decide what your Honmaru should do today. Maamaru handles the routine, keeps watch, wraps up, and keeps the records.**
 
-On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play, or start repeated runs on a cleared map through Japanese-server Sortie (日服出阵). The app's interface is in Simplified Chinese.
+On the China server, run tasks or simply keep a ledger. On the Japanese server, connect the dedicated game browser to update your Honmaru records while you play, or choose an era and map for repeated runs on cleared maps through 日服合战场. The app's interface is in Simplified Chinese.
 
 **[Visit the website (Chinese)](https://maamaru-honmaru.sassycoot2.chatgpt.site)** · **[Download](https://github.com/qymd-NOT-official/maamaru-engine/releases/latest)** · **[User guide (Chinese)](docs/user-manual.md)** · [Report an issue](https://github.com/qymd-NOT-official/maamaru-engine/issues)
 
@@ -111,10 +111,10 @@ Back in My Honmaru, write your own notes, change your avatar, edit your Saniwa p
 | Balance, item, and sword records | ✓ | ✓ |
 | Update records | Read balances, update the archive, or sync after related tasks | Connect the dedicated game browser; update during play |
 | Standalone tasks, custom workflows, and dailies | ✓ | — |
-| Automated sorties | Supported regular maps and events | Cleared maps, using the game's remembered map |
+| Automated sorties | Supported regular maps and events | Cleared maps, choose an era and map for repeated runs |
 | Automated expeditions and scheduled work | ✓ | — |
 
-Choose the corresponding Honmaru in the launcher. Settings, profiles, notes, and records stay separate between servers. Connecting the Japanese-server browser updates records. To run sorties, open 功能 → 执务台 → 日服出阵 and choose a team and run count. Maamaru checks the team before departure, blocks critical injuries, and stops for manual attention if a dialog appears during marching. [Japanese-server connection and sortie guide](docs/user-manual.md#日服本丸账房)
+Choose the corresponding Honmaru in the launcher. Settings, profiles, notes, and records stay separate between servers. Connecting the Japanese-server browser updates records. To run sorties, open 功能 → 执务台 → 日服合战场 and choose an era, map, team, and run count. Maamaru checks the team before departure, blocks critical injuries, and stops for manual attention if a dialog appears during marching. [Japanese-server connection and sortie guide](docs/user-manual.md#日服本丸账房)
 
 ## Get started
 

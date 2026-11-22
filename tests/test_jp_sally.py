@@ -90,6 +90,21 @@ def make_sally(device, **kwargs):
     return sally, logs
 
 
+def depart_one_round(sally, team_no=1, party_watch=None):
+    """用保留的 Sally 底座方法串一轮「进图→验队→委托→出发→盯行军」。
+
+    多轮编排曾由 Sally.run 提供（已随面板死入口移除），这里只为给底座
+    方法的导航/验伤/委托/行军行为提供端到端帧序列测试。"""
+    sally._navigate_to_team()
+    if party_watch is not None:
+        latest = sally._await_party_data(party_watch)
+        sally._check_party(party_watch, team_no, latest)
+    sally._select_team(team_no)
+    sally._enable_automarch()
+    sally._click_hit('team/depart', '出阵按钮')
+    sally._watch_march()
+
+
 def happy_frames():
     """一轮完整出阵的帧序列。导航点击复用分类帧不额外取帧；部队页签/
     自动行军/弹窗按钮/出发按钮各重新取一帧。"""
@@ -144,8 +159,8 @@ BACK_CLICK = (0.060 * 1508 + jp_sally.BACK_ARROW_OFFSET[0],
 def test_happy_path_single_round():
     browser = FakeDevice(happy_frames())
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
-    assert any('出阵完成' in line for line in logs)
+    depart_one_round(sally)
+    assert any('行军中' in line for line in logs)
     # 关键点击：目录按钮、目录出阵入口、部队一页签、自动行军、依頼、关窗、出发
     assert click_near(browser.clicks, *CATALOG_CLICK)
     assert click_near(browser.clicks, *DIR_SALLY_CLICK)
@@ -164,10 +179,10 @@ def test_menu_already_open_used_directly():
               ] + happy_frames()[2:]
     browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
+    depart_one_round(sally)
     assert not click_near(browser.clicks, *CATALOG_CLICK)  # 没绕道目录
     assert click_near(browser.clicks, *MENU_SALLY_CLICK)
-    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
 
 
 def test_navigation_continues_from_formation():
@@ -176,9 +191,9 @@ def test_navigation_continues_from_formation():
               ] + happy_frames()
     browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
+    depart_one_round(sally)
     assert click_near(browser.clicks[:1], *BACK_CLICK)
-    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
 
 
 def test_dialog_during_march_stops_everything():
@@ -186,7 +201,7 @@ def test_dialog_during_march_stops_everything():
     browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='弹窗'):
-        sally.run(team_no=2, rounds=1)
+        depart_one_round(sally, team_no=2)
     # 弹窗之后绝不再有点击（出发是行军前的最后一下）
     assert len(browser.clicks) == 9
 
@@ -199,7 +214,7 @@ def test_unknown_screen_mid_navigation_stops(monkeypatch):
     browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
-        sally.run(team_no=1, rounds=1)
+        depart_one_round(sally)
     assert browser.reloads == 0
 
 
@@ -211,7 +226,7 @@ def test_unknown_at_start_reloads_once(monkeypatch):
     browser = FakeDevice([weird])
     sally, logs = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop):
-        sally.run(team_no=1, rounds=1)
+        depart_one_round(sally)
     assert browser.reloads == 1
     assert any('刷新一次页面重来' in line for line in logs)
     assert browser.clicks == []  # 直到停车都没盲点过
@@ -281,10 +296,10 @@ def test_notice_board_closed_during_navigation():
     """公告栏挡在导航路上：认出后点 ✕ 关掉，照常出阵。"""
     browser = FakeDevice([notice_frame()] + happy_frames())
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
+    depart_one_round(sally)
     assert click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
     assert any('公告栏' in line for line in logs)
-    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
 
 
 def test_notice_board_during_boot_gets_closed(monkeypatch):
@@ -310,7 +325,7 @@ def test_notice_during_march_still_stops():
     browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
-        sally.run(team_no=1, rounds=1)
+        depart_one_round(sally)
     assert not click_near(browser.clicks, *NOTICE_CLOSE_CLICK)
 
 
@@ -327,11 +342,11 @@ def test_confirm_dialog_declined_during_navigation():
     """导航路上撞见确认窗：默认点 いいえ 拒绝，照常出阵；绝不碰 はい。"""
     browser = FakeDevice([confirm_frame()] + happy_frames())
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
+    depart_one_round(sally)
     assert click_near(browser.clicks, *DECLINE_CLICK)
     assert not click_near(browser.clicks, *ACCEPT_CLICK)
     assert any('确认窗默认选否' in line for line in logs)
-    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
 
 
 def test_confirm_dialog_during_boot_gets_declined(monkeypatch):
@@ -358,7 +373,7 @@ def test_confirm_during_march_still_stops():
     browser = FakeDevice(frames)
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='不认识'):
-        sally.run(team_no=1, rounds=1)
+        depart_one_round(sally)
     assert not click_near(browser.clicks, *DECLINE_CLICK)
     assert not click_near(browser.clicks, *ACCEPT_CLICK)
 
@@ -402,7 +417,7 @@ def test_heavy_injury_blocks_departure():
     browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='重伤'):
-        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+        depart_one_round(sally, party_watch=FakeWatch(payload))
     assert not click_near(browser.clicks, *DEPART_CLICK)
 
 
@@ -411,30 +426,23 @@ def test_medium_injury_logs_and_departs():
     payload = make_payload(HEALTHY_TEAM + [(3, 103, 7, 20, 56)])  # 中伤
     browser = FakeDevice(happy_frames())
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+    depart_one_round(sally, party_watch=FakeWatch(payload))
     assert any('带伤出发' in line and '中伤' in line for line in logs)
-    assert any('出阵完成' in line for line in logs)
+    assert any('行军中' in line for line in logs)
     assert click_near(browser.clicks, *DEPART_CLICK)
 
 
-def test_stale_or_missing_party_data_blocks(monkeypatch):
-    """没收到队伍数据/数据过期：刷新重拿一次仍没有，宁可停也不带盲区放行。"""
+def test_await_party_data_accepts_only_fresh(monkeypatch):
+    """队伍数据门闩：没收到/过期的不算数，新鲜的才放行。刷新重拿与
+    编排循环是各子类 run 的职责（jp_sortie/jp_edocastle 自带），
+    底座 _await_party_data 只负责 freshness 判定。"""
     monkeypatch.setattr(jp_sally, 'PARTY_DATA_WAIT', 0.05)
-    monkeypatch.setattr(jp_sally.Sally, '_boot_to_home', lambda self: None)
-
-    browser = FakeDevice(happy_frames())
-    sally, _ = make_sally(browser)
-    with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
-        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(None))
-    assert browser.reloads == 1            # 试过刷新重拿，不是直接放弃
-
+    sally, _ = make_sally(FakeDevice([]))
+    assert sally._await_party_data(FakeWatch(None)) is None
     payload = make_payload(HEALTHY_TEAM)
-    browser = FakeDevice(happy_frames())
-    sally, _ = make_sally(browser)
-    with pytest.raises(jp_sally.SallyStop, match='没能确认部队状态'):
-        sally.run(team_no=1, rounds=1,
-                  party_watch=FakeWatch(payload, age=9999))
-    assert browser.reloads == 1
+    assert sally._await_party_data(FakeWatch(payload, age=9999)) is None
+    fresh = sally._await_party_data(FakeWatch(payload))
+    assert fresh is not None and fresh[1] is payload
 
 
 def test_team_away_blocks_departure():
@@ -443,7 +451,7 @@ def test_team_away_blocks_departure():
     browser = FakeDevice(happy_frames())
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop, match='待命'):
-        sally.run(team_no=1, rounds=1, party_watch=FakeWatch(payload))
+        depart_one_round(sally, party_watch=FakeWatch(payload))
     assert not click_near(browser.clicks, *DEPART_CLICK)
 
 
@@ -461,12 +469,12 @@ def test_black_loading_too_long_reloads_and_boots(monkeypatch):
     ] + happy_frames()[1:]                     # 之后照常走到出阵
     browser = FakeDevice(frames)
     sally, logs = make_sally(browser)
-    sally.run(team_no=1, rounds=1)
+    depart_one_round(sally)
     assert browser.reloads == 1
     assert any('自动刷新' in line for line in logs)
     assert any('跳过登录问候' in line for line in logs)
     assert (754, 544) in browser.clicks      # 问候屏基准空间中央
-    assert any('出阵完成' in line for line in logs)
+    assert click_near(browser.clicks, *DEPART_CLICK)
 
 
 def test_reload_only_once_per_navigation(monkeypatch):
@@ -477,7 +485,7 @@ def test_reload_only_once_per_navigation(monkeypatch):
     browser = FakeDevice([black])             # 永远黑屏
     sally, _ = make_sally(browser)
     with pytest.raises(jp_sally.SallyStop):
-        sally.run(team_no=1, rounds=1)
+        depart_one_round(sally)
     assert browser.reloads == 1
     assert browser.clicks == []
 
@@ -554,46 +562,3 @@ def test_boot_white_page_kick_no_effect_reloads_once(monkeypatch):
     sally._boot_to_home()
     assert browser.kicks == 2
     assert browser.reloads == 1
-
-
-def test_run_script_success_path(monkeypatch):
-    """run_script 成功跑完一轮：不抛错、产出空日志迭代器（日志走 print）。"""
-    fake = FakeDevice(happy_frames())
-
-    class FakeGameDevice:
-        def __enter__(self):
-            return fake
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(jp_sally.jp_browser, 'JpBrowser', lambda: object())
-    monkeypatch.setattr(jp_sally.jp_game_device, 'JpGameDevice',
-                        lambda browser: FakeGameDevice())
-
-    class FakePartyWatch:
-        def __enter__(self):
-            return FakeWatch(make_payload(HEALTHY_TEAM))
-
-        def __exit__(self, *exc):
-            return False
-
-    monkeypatch.setattr(jp_sally.jp_party, 'PartyWatch', lambda: FakePartyWatch())
-    lines = list(jp_sally.run_script(params={'team_no': 1, 'rounds': 1}))
-    assert lines == []
-    assert any(abs(c[0] - 0.905 * 1508) < 12 for c in fake.clicks)  # 出发键按过
-
-
-@pytest.mark.parametrize('team_no', [0, 6, '二'])
-def test_bad_team_rejected(team_no):
-    sally, _ = make_sally(FakeDevice([]))
-    with pytest.raises((ValueError, KeyError, TypeError)):
-        sally.run(team_no=team_no, rounds=1)
-
-
-def test_rounds_must_be_sane():
-    sally, _ = make_sally(FakeDevice([]))
-    with pytest.raises(ValueError):
-        sally.run(team_no=1, rounds=0)
-    with pytest.raises(ValueError):
-        sally.run(team_no=1, rounds=201)

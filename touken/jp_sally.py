@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""日服点击出阵（sally）：画面识别 + 点击的状态机，无 OCR。
+"""日服导航底座（JpNavigator / Sally 基类）：画面识别 + 点击，无 OCR。
 
 JpNavigator 是这层已实证的导航底座（画面分类、认了就点、启动序列、
-黑屏/起手陌生自动刷新一次、卡死熔断），远征（jp_expedition）直接继承复用；
-Sally 只保留出阵自己的路线表和行军逻辑。
+黑屏/起手陌生自动刷新一次、卡死熔断），远征（jp_expedition）、
+南瓜（jp_pumpkin）直接继承复用；Sally 在底座之上保留出阵共用件
+（进图导航/选队页签/自动行军委托/盯行军/队伍数据门闩），
+刷图（jp_sortie.JpSortie）与江户城（jp_edocastle.JpEdocastle）
+继承后各自编排圈循环。面板出阵入口统一走 jp-sortie（日服合战场），
+本模块不带独立玩法入口。
 
 安全底线（复刻国服 _safe_depart_stream 的安全语义）：
 
@@ -18,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import time
 
-from . import jp_browser, jp_browser_probe as frames, jp_game_device, jp_party, jp_vision
+from . import jp_browser_probe as frames, jp_party, jp_vision
 from .device_adapter import Point
 
 # 点击目标一律「锚点模板 + 基准分辨率像素偏移」：固定归一化坐标在窗口
@@ -405,8 +409,12 @@ class JpNavigator:
 
 
 class Sally(JpNavigator):
-    """一轮/多轮出阵状态机。device 只需 screenshot(force=...) 与 click(Point)
-    （基准分辨率像素，见 game_device.GameDevice）。"""
+    """出阵共用件底座：进图导航、选队页签、自动行军委托、盯行军、
+    队伍数据门闩。device 只需 screenshot(force=...) 与 click(Point)
+    （基准分辨率像素，见 game_device.GameDevice）。
+
+    多轮编排由子类各自实现：jp_sortie.JpSortie（日服合战场）、
+    jp_edocastle.JpEdocastle（江户城）。"""
 
     def _navigate_to_team(self) -> None:
         """走到部队选择页。支持从本丸/目录/指挥菜单/时代/地域/编成任意一层接续。
@@ -525,60 +533,3 @@ class Sally(JpNavigator):
             self.log('带伤出发：' + '、'.join(
                 f'{m.name or m.serial_id}（{m.injury}）' for m in hurt))
 
-    def run(self, team_no: int = 1, rounds: int = 1, party_watch=None) -> None:
-        """跑 rounds 轮出阵；日志经 self.log 回调输出，返回值无意义。
-
-        party_watch 给到队伍数据通道（jp_party.PartyWatch）：带上时出发前
-        确认队伍状态（重伤拦截）；不带则跳过确认（仅测试这么跑）。"""
-        if team_no not in TEAM_TAB_OFFSETS:
-            raise ValueError('部队番号应在 1-5 之间')
-        if not 1 <= rounds <= 200:
-            raise ValueError('连刷轮数应在 1-200 之间')
-        self.log('连接日服游戏页面…')
-        for round_no in range(1, rounds + 1):
-            self.log(f'第 {round_no}/{rounds} 轮：前往出阵')
-            self._navigate_to_team()
-            if party_watch is not None:
-                latest = self._await_party_data(party_watch)
-                if latest is None:
-                    # 起手已停在部队页等场景：游戏没拉新数据，刷新页面
-                    # 重走一遍导航逼它拉取，再拿不到才停。
-                    self.log('没拿到队伍数据，刷新页面重新拿一次…')
-                    self.device.reload()
-                    self._boot_to_home()
-                    self._navigate_to_team()
-                    latest = self._await_party_data(party_watch)
-                self._check_party(party_watch, team_no, latest)
-            self._select_team(team_no)
-            self._enable_automarch()
-            self.log(f'部队{ "一二三四五"[team_no - 1] }出发')
-            self._click_hit('team/depart', '出阵按钮')
-            self._watch_march()
-            self.log(f'第 {round_no}/{rounds} 轮回本丸')
-        self.log(f'出阵完成，共 {rounds} 轮')
-
-
-def run_script(config_path=None, params: dict | None = None):
-    """面板脚本入口：generator[str]，复用 worker 子进程骨架。
-
-    Sally 的日志走 print（worker 捕获 stdout），run() 本身不产出日志行，
-    所以这里 yield from () 只为保持 generator 形态。
-    SallyStop 转成 FlowAborted，让面板按「安全停止」（退出码 42）收尾，
-    而不是报「脚本崩了」。"""
-    from .flow_control import FlowAborted
-    params = params or {}
-    try:
-        team_no = int(params.get('team_no', 1))
-        rounds = int(params.get('rounds', 1))
-    except (TypeError, ValueError):
-        raise ValueError('参数格式不正确')
-    try:
-        with jp_game_device.JpGameDevice(jp_browser.JpBrowser()) as device:
-            with jp_party.PartyWatch() as watch:
-                Sally(device).run(team_no=team_no, rounds=rounds,
-                                  party_watch=watch)
-    except jp_party.PartyWatchError as exc:
-        raise FlowAborted(str(exc)) from exc
-    except SallyStop as exc:
-        raise FlowAborted(str(exc)) from exc
-    yield from ()

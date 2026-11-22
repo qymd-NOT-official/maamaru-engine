@@ -1381,24 +1381,6 @@ register_script("formation", "编队换人",
 
 
 # ── 日服 ──
-# 浏览器画面识别 + 点击的出阵：走 jp_sally 状态机，与国服设备链路完全分离。
-def _build_jp_sally(config_path, params):
-    from touken import jp_sally
-    return jp_sally.run_script(config_path, params)
-
-
-register_script("jp-sally", "日服出阵",
-                "日服浏览器出阵：当前记忆的图 + 自动行军。只在认得出的画面上点击，"
-                "行军中任何弹窗（包括重伤警告）一律停等人工，绝不点继续行军",
-                _build_jp_sally,
-                params=[{"key": "team_no", "type": "select", "label": "部队",
-                         "options": [[str(i), f"部队{'一二三四五'[i - 1]}"] for i in range(1, 6)],
-                         "default": "1"},
-                        {"key": "rounds", "type": "number", "label": "连刷轮数",
-                         "default": 1, "min": 1, "max": 200}],
-                hidden=True, server="jp")
-
-
 # 日服远征手动派遣：与国服设备链路完全分离，走 touken.jp_expedition。
 # 只派一支部队（选时代+小图卡位），出发前验出重伤绝不派遣；
 # 不收菜、不排班、不补花（共同契约：双服阶段2「远征手动派遣」）。
@@ -1476,16 +1458,16 @@ register_script("jp-edocastle", "日服江户城",
                 hidden=True, server="jp")
 
 
-# 日服普通出阵刷图：指定时代/小图/部队刷圈，委托游戏自动行军。
-# 选图坐标是占位值（待实机标定，见 touken/jp_sortie.py 模块头清单）；
-# 行军中任何弹窗一律停等人工，疲劳触线自动收工。
+# 日服合战场（与国服「合战场」叫法对齐）：jp-sortie 是统一后的唯一入口——
+# 指定时代/小图/部队连刷，委托游戏自动行军，通信错误自愈，逐圈记账。
+# 行军中任何弹窗一律停等人工，疲劳触线自动收工（见 touken/jp_sortie.py）。
 def _build_jp_sortie(config_path, params):
     from touken import jp_sortie
     return jp_sortie.run_script(config_path, params)
 
 
-register_script("jp-sortie", "日服刷图",
-                "日服普通出阵刷图：指定时代和小图连刷，委托游戏自动行军。"
+register_script("jp-sortie", "日服合战场",
+                "指定时代和小图连刷已攻略的图，委托游戏自动行军。"
                 "出发前验伤（重伤绝不出阵），气力掉线自动收工；"
                 "行军中任何弹窗一律停等人工",
                 _build_jp_sortie,

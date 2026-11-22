@@ -6,12 +6,9 @@ from panel import server
 def test_jp_scripts_list_only_jp_scripts():
     client = TestClient(server.app)
     data = client.get("/api/scripts?server=jp").json()
-    assert set(data["scripts"]) == {"jp-sally", "jp-expedition", "jp-pumpkin",
+    assert set(data["scripts"]) == {"jp-expedition", "jp-pumpkin",
                                     "jp-edocastle", "jp-sortie",
                                     "jp-expedition-collect"}
-    sally = data["scripts"]["jp-sally"]
-    assert sally["label"] == "日服出阵"
-    assert {field["key"] for field in sally["params"]} == {"team_no", "rounds"}
     expedition = data["scripts"]["jp-expedition"]
     assert expedition["label"] == "日服远征"
     assert {field["key"] for field in expedition["params"]} == {
@@ -30,7 +27,7 @@ def test_jp_scripts_list_only_jp_scripts():
     assert {field["key"] for field in edocastle["params"]} == {
         "team_no", "difficulty", "rounds"}
     sortie = data["scripts"]["jp-sortie"]
-    assert sortie["label"] == "日服刷图"
+    assert sortie["label"] == "日服合战场"
     assert {field["key"] for field in sortie["params"]} == {
         "chapter", "map_no", "team_no", "rounds",
         "stop_on_fatigue", "fatigue_threshold"}
@@ -42,7 +39,6 @@ def test_jp_scripts_list_only_jp_scripts():
 def test_default_scripts_list_never_includes_jp_scripts():
     client = TestClient(server.app)
     data = client.get("/api/scripts").json()
-    assert "jp-sally" not in data["scripts"]
     assert "jp-expedition" not in data["scripts"]
     assert "jp-pumpkin" not in data["scripts"]
     assert "jp-edocastle" not in data["scripts"]

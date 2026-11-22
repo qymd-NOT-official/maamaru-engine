@@ -28,16 +28,16 @@ def test_independent_settings_and_old_install(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "jp/state/panel_settings.json.bak").read_text(encoding="utf-8"))["theme"] == "washi"
 
 
-def test_jp_sally_params_roundtrip(tmp_path, monkeypatch):
+def test_jp_edocastle_params_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_SETTINGS_FILE", tmp_path / "cn.json")
     monkeypatch.setattr(server, "JP_DATA_DIR", tmp_path / "jp")
     client = TestClient(server.app)
-    body = {"params": {"jp-sally": {"team_no": "3", "rounds": 5}}}
+    body = {"params": {"jp-edocastle": {"team_no": "3", "rounds": 5}}}
     assert client.post("/api/saved-settings?server=jp", json=body).status_code == 200
     saved = client.get("/api/saved-settings?server=jp").json()
-    assert saved["params"]["jp-sally"] == {"team_no": "3", "rounds": 5}
+    assert saved["params"]["jp-edocastle"] == {"team_no": "3", "rounds": 5}
     # 混进其他脚本的参数仍然被拒；国服设置文件不受影响。
-    mixed = {"params": {"jp-sally": {"team_no": "1"}, "daily": {}}}
+    mixed = {"params": {"jp-edocastle": {"team_no": "1"}, "daily": {}}}
     assert client.post("/api/saved-settings?server=jp", json=mixed).status_code == 400
     assert not (tmp_path / "cn.json").exists()
     # 新注册的日服脚本（白名单跟随注册表，不再硬编码）也能保存。
