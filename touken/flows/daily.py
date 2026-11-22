@@ -14,8 +14,10 @@
   ⑨ 合成（白名单喂一把）
   ⑩ 炼糖（收件箱清狗粮 + 习合循环）
   ⑪ 出阵（配置驱动：活动=raid / 普通图=sortie / 不打=none）
-  ⑫ 领任务奖励
-  ⑬ 下线（还没做，可选）
+  ⑫ 手入（出阵打完的伤刀当天顺手修；零成本默认：不烧加速符，黑名单照守）
+  ⑬ 领任务奖励
+  ⑭ 库存快照（看板数据）
+  ⑮ 下线（还没做，可选）
 
 设计原则：每一步独立 try + 消息关键字判成败，翻车不拖死后面，最后给真实成绩单。
 
@@ -42,6 +44,7 @@ from .report_judge import (  # noqa: F401
     _is_fail,
     _is_success_status,
     _practice_report_status,
+    _repair_report_status,
     _shop_report_status,
     _snapshot_report_status,
 )
@@ -144,6 +147,7 @@ class DailyMixin:
                 times=plan.get("forge_times", 3), recipe=forge_recipe)),
             ("刀解", lambda: self._dismantle_step()),
             ("合成", lambda: self.synthesize_stream()),
+            ("手入", lambda: self._daily_repair_step()),
             ("任务奖励", lambda: self.claim_task_rewards_stream()),
             ("库存快照", lambda: self._closing_snapshot_stream(_w("锻刀"))),
         ]
@@ -156,14 +160,16 @@ class DailyMixin:
             "锻刀": "⑦ 锻刀",
             "刀解": "⑧ 刀解",
             "合成": "⑨ 合成",
-            "任务奖励": "⑪ 领任务奖励",
-            "库存快照": "⑫ 库存快照（看板数据）",
+            "手入": "⑫ 手入（伤刀当天修，不烧加速符）",
+            "任务奖励": "⑬ 领任务奖励",
+            "库存快照": "⑭ 库存快照（看板数据）",
         }
 
-        # 出阵插到任务奖励前面（就算没勾任务奖励，单勾出阵也能跑）
+        # 出阵插到手入前面（就算没勾手入，单勾出阵也能跑）；
+        # 手入紧跟出阵：打完的伤刀当天就修，再往后领奖励
         seq = []
         for name, fn in steps:
-            if name == "任务奖励":
+            if name == "手入":
                 seq.append(("出阵", None))
             seq.append((name, fn))
 
@@ -190,7 +196,9 @@ class DailyMixin:
             try:
                 for msg in fn():
                     yield msg
-                    if _is_fail(msg):
+                    # _is_fail 词表之外，「✗」开头的消息本身就是各流程约定的
+                    # 红句，一并判红（工作流 _run_node 同款判定，日课不许假绿）
+                    if _is_fail(msg) or msg.lstrip().startswith("✗"):
                         ok = False
                     if name == "万屋":
                         detail_status = _shop_report_status(msg, detail_status)
@@ -198,6 +206,8 @@ class DailyMixin:
                         detail_status = _practice_report_status(msg, detail_status)
                     if name == "库存快照":
                         detail_status = _snapshot_report_status(msg, detail_status)
+                    if name == "手入":
+                        detail_status = _repair_report_status(msg, detail_status)
             except Exception as exc:
                 ok = False
                 yield f"[日课] {name}翻车: {exc}"
@@ -205,9 +215,9 @@ class DailyMixin:
             self._flush_report(report, finished=False)
             time.sleep(1.0)
 
-        # ========== ⑬ 下线 ==========
+        # ========== ⑮ 下线 ==========
         if after in ("logout", "shutdown", "sleep"):
-            yield "========== ⑬ 下线 =========="
+            yield "========== ⑮ 下线 =========="
             try:
                 for msg in self.logout_stream(
                         kill_game=True, close_emulator=False, sleep_pc=False):
@@ -315,6 +325,20 @@ class DailyMixin:
             yield "[日课] ✓ 游戏记录显示今天已经刀解过了（你自己动手的？），这步跳过"
             return
         yield from self.dismantle_stream(max_dismantle=1)
+
+    def _daily_repair_step(self):
+        """日课的手入步：出阵打完的伤刀当天顺手修一遍。
+
+        零成本默认（老大亲定）：不烧加速符（use_speedup=False 全关），
+        只用空闲手入位慢修；黑名单照配置守。手入名单没配、手入位全占用、
+        没有伤刀都如实记日志跳过，不算翻车（位满/没伤刀的判分见
+        report_judge._repair_report_status）。
+        """
+        if self._repair_config() is None:
+            yield ("[日课] 手入名单还没配置（黑名单/加速部队），本步跳过；"
+                   "要用手入请先在「配置」页设好名单")
+            return
+        yield from self.repair_stream(use_speedup=False)
 
     def _daily_expedition_step(self, routes, fallback_redispatch="same"):
         """收菜后按独立“远征”的常用安排补派；不读取自动排班。"""

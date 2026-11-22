@@ -13,6 +13,7 @@ from panel import daily_autoschedule as das
 from panel import day_conductor as dc
 from panel import day_plan as dp
 from panel import day_timeline as dt
+from panel import expedition_choices as ec
 from panel import server  # noqa: F401 - register gameplay workflow nodes
 from tests.test_day_conductor import FakeRunner
 
@@ -396,6 +397,235 @@ class EndpointLockTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(self.owned), 2)  # load_plan + arm
         self.assertTrue(all(self.owned))
+
+
+class AutoExecutePlanTests(unittest.TestCase):
+    """autoExecutePlan 开关：到点不只预排日课块，直接收编整份今日安排。
+
+    收编本体必须是 today_execution.execute_today 本尊（与按
+    「一键执行今日安排」按钮同一条逻辑），这里只验收口与闸门。
+    """
+
+    EXEC_PRESET = {"id": "builtin-daily", "name": "一键日课", "after": "none",
+                   "daily_mode": True,
+                   "nodes": [{"type": "signin", "params": {}}],
+                   "daily_ui": {"rows": [], "startTime": "03:20",
+                                "autoSchedule": True, "autoExecutePlan": True}}
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        root = Path(self.folder.name)
+        self.state_path = root / "autoschedule.json"
+        self.plan_path = root / "plan.json"
+        self.conductor_path = root / "conductor.json"
+        self.choices_path = root / "choices.json"
+        self.messages = []
+        self.timeline = timeline()
+        self.runner = FakeRunner()
+        self.executes = []
+        self.team_patch = patch.object(dc, "_for_team",
+                                       side_effect=lambda tl, team: tl)
+        self.team_patch.start()
+        self.addCleanup(self.team_patch.stop)
+        self.cfg_patch = patch("panel.scheduler.load_config",
+                               return_value={"automation": {}, "state": {}})
+        self.cfg_patch.start()
+        self.addCleanup(self.cfg_patch.stop)
+        self.find_patch = patch.object(dc.workflow, "find_preset",
+                                       return_value=self.EXEC_PRESET)
+        self.find_patch.start()
+        self.addCleanup(self.find_patch.stop)
+
+    def schedule(self, now=NOW, preset=None, touched=False, execute_fn=None):
+        return das.maybe_schedule(
+            now, emit=lambda script, msg: self.messages.append(msg),
+            timeline_fn=lambda: self.timeline,
+            raid_settings_fn=lambda: {"team_no": "3"},
+            preset_fn=lambda _id: preset if preset is not None else self.EXEC_PRESET,
+            touched_fn=lambda day_start, day_end, name: touched,
+            runner=self.runner, execute_fn=execute_fn,
+            choices_path=self.choices_path,
+            state_path=self.state_path, plan_path=self.plan_path,
+            conductor_path=self.conductor_path)
+
+    def _spy(self, error=None):
+        def _execute(runner, timeline_fn, raid_settings_fn, **kwargs):
+            self.executes.append({"runner": runner, "kwargs": kwargs})
+            if error is not None:
+                raise ValueError(error)
+            return {"ok": True, "message": "今日安排已接班，将按设置的开始时间执行。"}
+        return _execute
+
+    def _clear_day_files(self):
+        for path in (self.plan_path, self.state_path, self.conductor_path,
+                     self.choices_path):
+            path.unlink(missing_ok=True)
+
+    def test_switch_off_keeps_today_behavior(self):
+        # 开关缺省/显式 false：维持现状——只预排日课块，收编不被调用
+        variants = ({"rows": [], "startTime": "03:20", "autoSchedule": True},
+                    {"rows": [], "startTime": "03:20",
+                     "autoSchedule": True, "autoExecutePlan": False})
+        for ui in variants:
+            with self.subTest(ui=ui):
+                spy = self._spy()
+                self.assertEqual(self.schedule(preset={**self.EXEC_PRESET,
+                                                       "daily_ui": ui},
+                                               execute_fn=spy), "armed")
+                self.assertEqual(self.executes, [])
+                self.assertEqual(dp.load_plan(self.plan_path)["blocks"],
+                                 [{"start_min": 1640, "kind": "workflow",
+                                   "workflow_id": "builtin-daily"}])
+                self._clear_day_files()
+
+    def test_inert_when_autoschedule_off(self):
+        # autoSchedule 关着（含没填/非法开始时间）：autoExecutePlan 不生效
+        variants = ({"rows": [], "autoExecutePlan": True},
+                    {"rows": [], "autoSchedule": True, "autoExecutePlan": True},
+                    {"rows": [], "autoSchedule": True, "startTime": "25:99",
+                     "autoExecutePlan": True})
+        for ui in variants:
+            with self.subTest(ui=ui):
+                spy = self._spy()
+                self.assertEqual(self.schedule(preset={**self.EXEC_PRESET,
+                                                       "daily_ui": ui},
+                                               execute_fn=spy), "off")
+                self.assertEqual(self.executes, [])
+                self.assertFalse(self.plan_path.exists())
+
+    def test_execute_branch_calls_today_execution_equivalent(self):
+        spy = self._spy()
+        self.assertEqual(self.schedule(execute_fn=spy), "armed")
+        self.assertEqual(len(self.executes), 1)
+        call = self.executes[0]
+        self.assertIs(call["runner"], self.runner)
+        self.assertEqual(call["kwargs"]["daily_preset"], self.EXEC_PRESET)
+        self.assertEqual(call["kwargs"]["state_path"], self.conductor_path)
+        self.assertEqual(call["kwargs"]["plan_path"], self.plan_path)
+        self.assertEqual(call["kwargs"]["choices_path"], self.choices_path)
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["armed"])
+        self.assertTrue(any("收编" in m for m in self.messages))
+
+    def test_execute_branch_matches_button_end_to_end(self):
+        # 收编等价物（本尊）跑通：plan/conductor 状态与按钮按下的产物一致
+        self.assertEqual(self.schedule(), "armed")
+        plan = dp.load_plan(self.plan_path)
+        self.assertEqual(plan["blocks"], [{"kind": "workflow",
+                                           "workflow_id": "builtin-daily",
+                                           "start_min": 1640}])
+        state = dc.load_state(self.conductor_path)
+        self.assertTrue(state["enabled"])
+        self.assertTrue(state["today_execution"])
+        self.assertTrue(state["unified_today"])
+        self.assertEqual(state["blocks"][0]["kind"], "workflow")
+        self.assertEqual(state["blocks"][0]["status"], "pending")
+        # 第二分钟：块已在安排里，不重复收编
+        self.assertEqual(self.schedule(), "present")
+        self.assertEqual(self.executes, [])
+
+    def test_execute_branch_adopts_expedition_suggestions(self):
+        self.timeline["expedition_suggestions"] = [
+            {"team_no": 4, "map_code": "B2", "start_min": 600,
+             "duration_min": 180}]
+        self.assertEqual(self.schedule(), "armed")
+        forced = ec.load_choice_sets(self.choices_path)[1]
+        self.assertEqual(len(forced), 1)
+        record = next(iter(forced.values()))
+        self.assertEqual(record["map_code"], "B2")
+        self.assertEqual(record["plan_id"],
+                         dc.load_state(self.conductor_path)["plan_id"])
+
+    def test_cancelled_gate_still_blocks_adoption(self):
+        dc._save({"version": 2, "enabled": False, "day_start": DAY_START,
+                  "cancelled_at": NOW, "plan_id": "x", "plan_signature": "y",
+                  "blocks": []}, self.conductor_path)
+        spy = self._spy()
+        self.assertEqual(self.schedule(execute_fn=spy), "cancelled")
+        self.assertEqual(self.executes, [])
+        self.assertFalse(self.plan_path.exists())
+
+    def test_touched_gate_still_blocks_adoption(self):
+        spy = self._spy()
+        self.assertEqual(self.schedule(touched=True, execute_fn=spy), "touched")
+        self.assertEqual(self.executes, [])
+        self.assertFalse(self.plan_path.exists())
+
+    def test_deleted_block_dismisses_adoption_for_the_day(self):
+        counting = self._spy()
+        real = das._execute_today
+
+        def wrapped(runner, timeline_fn, raid_settings_fn, **kwargs):
+            self.executes.append({"runner": runner, "kwargs": kwargs})
+            return real(runner, timeline_fn, raid_settings_fn, **kwargs)
+
+        self.assertEqual(self.schedule(execute_fn=wrapped), "armed")
+        self.assertEqual(len(self.executes), 1)
+        self.plan_path.unlink()  # 她把收编进来的日课块删了
+        self.assertEqual(self.schedule(execute_fn=wrapped), "dismissed")
+        self.assertEqual(len(self.executes), 1)
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["dismissed"])
+
+    def test_corrupted_state_rebuilds_stop_evidence(self):
+        self.state_path.write_text("{损坏", encoding="utf-8")
+        dc._save({"version": 2, "enabled": True, "day_start": DAY_START,
+                  "plan_id": "x", "plan_signature": "y",
+                  "blocks": [{"start_min": 1640, "kind": "workflow",
+                              "workflow_id": "builtin-daily", "label": "一键日课",
+                              "status": "ended", "run_id": "r1",
+                              "workflow_signature": "sig"}]},
+                 self.conductor_path)
+        spy = self._spy()
+        self.assertEqual(self.schedule(execute_fn=spy), "recovered")
+        self.assertEqual(self.executes, [])
+        self.assertFalse(self.plan_path.exists())
+
+    def test_busy_runner_waits_and_retries_next_minute(self):
+        spy = self._spy()
+        self.runner.is_running = True
+        self.assertEqual(self.schedule(execute_fn=spy), "busy")
+        self.assertEqual(self.executes, [])
+        self.assertEqual(self.messages, [])
+        self.runner.is_running = False
+        self.assertEqual(self.schedule(execute_fn=spy), "armed")
+        self.assertEqual(len(self.executes), 1)
+
+    def test_running_conductor_block_waits(self):
+        dc._save({"version": 2, "enabled": True, "day_start": DAY_START,
+                  "plan_id": "x", "plan_signature": "y",
+                  "blocks": [{"start_min": 10, "kind": "raid", "runs": 4,
+                              "label": "联队战 4 圈", "status": "running",
+                              "run_id": "run-1", "workflow_signature": "sig"}]},
+                 self.conductor_path)
+        spy = self._spy()
+        self.assertEqual(self.schedule(execute_fn=spy), "busy")
+        self.assertEqual(self.executes, [])
+        self.assertFalse(self.plan_path.exists())
+
+    def test_adoption_validation_failure_gives_up_once_and_recovers(self):
+        spy = self._spy(error="今天已经收摊了，刷新后再安排")
+        self.assertEqual(self.schedule(execute_fn=spy), "gave_up")
+        self.assertEqual(self.schedule(execute_fn=spy), "gave_up")
+        self.assertEqual(sum("没接成" in m for m in self.messages), 1)
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertFalse(saved["armed"])
+        self.assertTrue(saved["give_up"])
+        # 情况变化（重审通过）自动接上
+        self.assertEqual(self.schedule(execute_fn=self._spy()), "armed")
+        saved = json.loads(self.state_path.read_text(encoding="utf-8"))
+        self.assertTrue(saved["armed"])
+        self.assertIsNone(saved["give_up"])
+
+    def test_reset_window_blocks_adoption(self):
+        reset_now = _ts(3, 55)
+        spy = self._spy()
+        self.assertEqual(self.schedule(now=reset_now, execute_fn=spy),
+                         "reset_window")
+        self.assertEqual(self.executes, [])
+        self.assertFalse(self.plan_path.exists())
+        self.assertEqual(sum("刷新窗口" in m for m in self.messages), 1)
 
 
 if __name__ == "__main__":

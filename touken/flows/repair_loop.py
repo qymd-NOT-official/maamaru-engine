@@ -205,7 +205,7 @@ class RepairLoopMixin:
                   f"黑名单跳过 {skipped} 把"
         elif self.last_repair_stats["unresolved"]:
             yield (f"[手入] ✗ 修了 {repaired} 把，另有 "
-                   f"{self.last_repair_stats['unresolved']} 行未能确认身份，已跳过")
+                   f"{self.last_repair_stats['unresolved']} 行无法确认身份，已跳过")
         else:
             yield f"[手入] ✅ 完事：修了 {repaired} 把，黑名单跳过 {skipped} 把"
         return

@@ -188,7 +188,7 @@ def test_unresolved_row_skipped_and_reported():
     messages = run(host)
     assert any("一之一 五虎退 的实例无法对应，跳过这一行" in m for m in messages)
     assert host.repair_calls == []
-    assert "✗ 修了 0 把，另有 1 行未能确认身份，已跳过" in messages[-1]
+    assert "✗ 修了 0 把，另有 1 行无法确认身份，已跳过" in messages[-1]
 
 
 def test_failed_repair_continues_with_next():

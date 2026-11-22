@@ -105,3 +105,14 @@ def _sugar_report_status(msg: str, current=None):
     if "所持满了领不动、也没重刀可喂" in msg:
         return "⚠ 刀位满了领不动，先去刀解腾位"
     return current
+
+
+def _repair_report_status(msg: str, current=None):
+    """手入专项判分（日课手入步同款）：位满/没伤刀如实记成跳过，不算翻车
+    （零成本日课默认不烧加速符，位满只是没位置）；真翻车（导航失败、有刀
+    身份无法确认、修到一半卡住）照旧走翻车词表判红。"""
+    if "没有空闲修复槽" in msg:
+        return "✓ 手入位全占用，本步跳过"
+    if "完事：修了 0 把，黑名单跳过 0 把" in msg:
+        return "✓ 没有伤刀要修，本步跳过"
+    return current

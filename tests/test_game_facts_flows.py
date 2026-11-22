@@ -94,7 +94,7 @@ def test_ambiguous_repair_row_is_reported_without_claiming_complete(monkeypatch)
     messages = list(host.repair_stream())
     assert host.speed_calls == []
     assert host.last_repair_stats["unresolved"] == 1
-    assert "未能确认身份" in messages[-1]
+    assert "无法确认身份" in messages[-1]
     assert "✅" not in messages[-1]
 
 

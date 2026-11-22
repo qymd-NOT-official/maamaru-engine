@@ -58,7 +58,8 @@ class DailyWorkflowTests(unittest.TestCase):
         types = [n["type"] for n in default["nodes"]]
         self.assertEqual(types, ["login", "signin", "free_gift", "practice", "expedition",
                                  "naihanka", "forge", "dismantle", "synthesize", "daily_sortie",
-                                 "task_rewards", "inbox_scan", "snapshot", "ledger_sync"])
+                                 "daily_repair", "task_rewards", "inbox_scan", "snapshot",
+                                 "ledger_sync"])
         copy = workflow.create_preset({**default, "name": "我的日课"})
         self.assertNotEqual(copy["id"], default["id"])
         self.assertTrue(copy["daily_mode"])
@@ -115,6 +116,49 @@ class DailyWorkflowTests(unittest.TestCase):
         self.assertEqual(template["nodes"][1]["params"], {"times": 5})
         self.assertEqual(template["nodes"][2]["params"]["yosari_runs"], 8)
         self.assertEqual(template["after"], "shutdown")
+
+    def test_repair_step_in_default_template_between_sortie_and_rewards(self):
+        template = make_template({"params": {}}, {}, server._DAILY_STEPS)
+        types = [n["type"] for n in template["nodes"]]
+        self.assertEqual(types.index("daily_repair"),
+                         types.index("daily_sortie") + 1)
+        self.assertLess(types.index("daily_repair"), types.index("task_rewards"))
+
+    def test_repair_step_not_forced_into_old_saved_steps(self):
+        # 存量用户：已保存的步骤清单里没有「手入」，模板不会替他们加上
+        # （安全默认不自动执行新步骤）；默认清单（新用户）才含它。
+        old_saved = {"params": {"daily": {
+            "steps": ["登录", "签到", "出阵", "任务奖励"]}}}
+        template = make_template(old_saved, {}, server._DAILY_STEPS)
+        self.assertNotIn("daily_repair", [n["type"] for n in template["nodes"]])
+
+    def test_saved_daily_steps_pass_through_and_default_list_has_repair(self):
+        # 面板执行层同理：老用户保存的 steps 原样下发（不强行塞手入）；
+        # 没保存过的新用户拿到默认清单，手入紧跟出阵、在任务奖励之前。
+        with patch("panel.scheduler.load_config",
+                   return_value={"common_plan": []}):
+            steps, _, _, _, _ = server._daily_plan_inputs(
+                {"steps": ["登录", "出阵", "任务奖励"]})
+        self.assertEqual(steps, ["登录", "出阵", "任务奖励"])
+        field = next(f for f in server._SCRIPTS["daily"]["params"]
+                     if f["key"] == "steps")
+        self.assertEqual(field["options"], server._DAILY_STEPS)
+        self.assertEqual(field["default"], server._DAILY_STEPS)
+        self.assertEqual(field["default"].index("手入"),
+                         field["default"].index("出阵") + 1)
+        self.assertLess(field["default"].index("手入"),
+                        field["default"].index("任务奖励"))
+
+    def test_daily_repair_node_runs_daily_step_without_speedup_params(self):
+        from touken.flows.report_judge import _repair_report_status
+        defn = server._workflow.NODE_REGISTRY["daily_repair"]
+        self.assertTrue(defn["template_only"])
+        self.assertEqual(defn["detail"], [_repair_report_status])
+        agent = Mock()
+        agent._daily_repair_step.return_value = iter(["[日课] ✓ 没有伤刀要修，本步跳过"])
+        messages = list(defn["run"](agent, {"speedup_teams": ["部队三"]}, None))
+        agent._daily_repair_step.assert_called_once_with()
+        self.assertTrue(any("没有伤刀" in m for m in messages))
 
     def test_ledger_sync_appended_last_and_can_opt_out(self):
         template = make_template({"params": {"daily": {"steps": ["登录"]}}},

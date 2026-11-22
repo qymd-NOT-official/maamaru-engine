@@ -6,23 +6,25 @@
 
 开关与钟点都在日课设置里（builtin-daily 预设的 daily_ui）：
   autoSchedule: true 且 startTime 合法（HH:MM）才生效，默认关。
-只预排日课块本身，绝不像 execute_today 那样收编远征建议
-（建议淡影点了才跑）。
+默认只预排日课块本身；开了 autoExecutePlan（默认关）才在预排时点
+直接复用 today_execution.execute_today 做整份收编（远征建议采纳+
+活动窗口+日课排入），与按「一键执行今日安排」按钮等价。
+autoSchedule 关着时 autoExecutePlan 不生效（收编依赖预排时点）。
 
 玩家优先（她自己上手管了，今天就别插手）：
   - 她手动停了今日安排（conductor cancelled_at）→ 当天罢手；
   - 今天 runs 里有日课痕迹（script=="daily"，或 workflow 形态的
     builtin-daily——runs 表没有 params，按开工时写入的 label 认），
     running/completed/stopped/failed 任一状态都罢手，绝不背靠背双跑；
-  - 我预排过但块已不在 plan → 她手动删了，记 dismissed 当天罢手；
+  - 我预排/收编过但块已不在 plan → 她手动删了，记 dismissed 当天罢手；
   - 状态文件损坏 → 备份后按「conductor state → run 记录 → plan 现状」
     重建罢手证据，有疑义当天不补。
 
 失败分级：
-  - review_plan 校验类（块重叠、超窗口等排不进去）→ 记 give_up 当天不再
-    反复 arm/写盘，每次只重审不轰炸；她改了安排或联队战进度同步后，
-    重审通过自动恢复；
-  - arm 竞争类（runner 忙/块 running）→ 下分钟再试，同一错误只报一次。
+  - review_plan/收编校验类（块重叠、超窗口、建议不可用等排不进去）
+    → 记 give_up 当天不再反复 arm/写盘，每次只重审不轰炸；她改了安排
+    或联队战进度同步后，重审通过自动恢复；
+  - arm/runner 竞争类（runner 忙/块 running）→ 下分钟再试，同一错误只报一次。
 """
 from __future__ import annotations
 
@@ -36,11 +38,18 @@ from pathlib import Path
 from touken.runtime_paths import STATUS_DIR
 
 from . import day_conductor as dc, day_plan as dp, day_timeline as dt, scheduler, workflow
+from . import today_execution as te
 
 STATE_PATH = STATUS_DIR / "daily_autoschedule.json"
 _TICK_SECONDS = 60
 _ROLLOVER_MIN = 4 * 60  # 04:00 换日
 _DEFAULT_DAILY_NAME = "一键日课"
+
+
+def _execute_today(runner, timeline_fn, raid_settings_fn, *, daily_preset, **paths):
+    """收编入口：与「一键执行今日安排」按钮同一条 today_execution 逻辑。"""
+    return te.execute_today(runner, timeline_fn, raid_settings_fn,
+                            daily_preset=daily_preset, **paths)
 
 
 def _load_state(path: Path = STATE_PATH) -> tuple[dict, bool]:
@@ -110,6 +119,48 @@ def _target_start_min(clock) -> int | None:
     return minute if minute >= _ROLLOVER_MIN else minute + 1440
 
 
+def _adopt_today_plan(state: dict, state_path: Path, emit, runner, execute_fn,
+                      timeline_fn, raid_settings_fn, preset: dict,
+                      conductor_path: Path, plan_path: Path,
+                      choices_path: Path | None) -> str:
+    """autoExecutePlan 开关打开时：代按「一键执行今日安排」整份收编。
+
+    收编本体是 today_execution.execute_today（远征建议采纳+日课排入+武装
+    大总管），这里只负责收口：竞争类（runner 忙）下分钟再试，校验类
+    （安排排不进、建议不可用）记 give_up 当天只重审不轰炸。
+    调用方已持 dc._LOCK + CONTROL_LOCK，execute_today 内部的同锁重入安全。
+    """
+    if runner is None:
+        from .script_runner import get_runner
+        runner = get_runner()
+    # 竞争类：runner 被别的任务占着，本次跳过，下分钟再试
+    if runner.is_running:
+        return "busy"
+    paths = {"state_path": conductor_path, "plan_path": plan_path}
+    if choices_path is not None:
+        paths["choices_path"] = choices_path
+    try:
+        result = execute_fn(runner, timeline_fn, raid_settings_fn,
+                            daily_preset=preset, **paths)
+    except ValueError as exc:
+        # 校验类：这版安排/建议本身接不进去，她改了安排或进度同步后
+        # 重审通过自动恢复；同一原因只报一次。
+        message = str(exc)
+        if state.get("give_up") != message:
+            state["give_up"] = message
+            _save_state(state, state_path)
+            emit("autoschedule",
+                 f"[日课预排] 今天自动收编没接成：{message}（情况变化会自己再试）")
+        return "gave_up"
+    state.update(armed=True, give_up=None, last_error=None)
+    _save_state(state, state_path)
+    detail = (result or {}).get("message")
+    emit("autoschedule",
+         f"[日课预排] 已自动收编今日安排：{detail}" if detail else
+         "[日课预排] 已自动收编今日安排，到点大总管自己开工")
+    return "armed"
+
+
 def _wall_clock(start_min: int) -> str:
     wall = start_min % 1440
     return f"{wall // 60:02d}:{wall % 60:02d}"
@@ -122,13 +173,15 @@ def _is_daily_block(block: dict) -> bool:
 
 
 def maybe_schedule(now=None, *, emit=None, timeline_fn=None, raid_settings_fn=None,
-                   preset_fn=None, touched_fn=None,
+                   preset_fn=None, touched_fn=None, runner=None, execute_fn=None,
+                   choices_path: Path | None = None,
                    state_path: Path = STATE_PATH, plan_path: Path = dp.PLAN_PATH,
                    conductor_path: Path = dc.STATE_PATH) -> str:
     """醒一次；返回本次结论（测试与日志用）。失败只记日志，绝不炸线程。"""
     emit = emit or (lambda script, message: None)
     preset_fn = preset_fn or workflow.find_preset
     touched_fn = touched_fn or _daily_touched
+    execute_fn = execute_fn or _execute_today
     now = time.time() if now is None else now
     day_start, day_end = dt._day_window(now)
 
@@ -136,6 +189,8 @@ def maybe_schedule(now=None, *, emit=None, timeline_fn=None, raid_settings_fn=No
     ui = preset.get("daily_ui") or {}
     start_min = (_target_start_min(ui.get("startTime"))
                  if ui.get("autoSchedule") is True else None)
+    # 自动收编：autoSchedule 关着（含没填开始时间）时一律不生效
+    auto_execute = start_min is not None and ui.get("autoExecutePlan") is True
     if start_min is None:
         return "off"
 
@@ -196,6 +251,11 @@ def maybe_schedule(now=None, *, emit=None, timeline_fn=None, raid_settings_fn=No
                 emit("autoschedule",
                      "[日课预排] 已到日课刷新窗口（03:50 之后），今天不再补排")
             return "reset_window"
+
+        if auto_execute:
+            return _adopt_today_plan(state, state_path, emit, runner, execute_fn,
+                                     timeline_fn, raid_settings_fn, preset,
+                                     conductor_path, plan_path, choices_path)
 
         block = {"start_min": max(start_min, now_min), "kind": "workflow",
                  "workflow_id": workflow.DAILY_PRESET_ID,

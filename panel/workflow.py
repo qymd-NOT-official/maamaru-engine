@@ -446,6 +446,8 @@ def _daily_ui(body, nodes):
     result = copy.deepcopy(ui)
     if "autoSchedule" in result:
         result["autoSchedule"] = result["autoSchedule"] is True
+    if "autoExecutePlan" in result:
+        result["autoExecutePlan"] = result["autoExecutePlan"] is True
     return result if compiled == actual else None
 
 

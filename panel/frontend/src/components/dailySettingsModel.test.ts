@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileDaily, dailyRows, withRecommendedRuns } from './dailySettingsModel'
+import { compileDaily, dailyRows, scheduleFlagsOf, withRecommendedRuns } from './dailySettingsModel'
 import type { WorkflowPreset, WorkflowNodeDef } from '../types'
 const definitions = ['boot_emulator','login','signin','free_gift','practice','naihanka','forge','dismantle','synthesize','expedition','yosari','raid','task_rewards','inbox_supplies','inbox_scan','sugar'].map(type => ({type,label:type,desc:'',category:'chore',params:[]})) as WorkflowNodeDef[]
 describe('日课分组执行', () => {
@@ -45,7 +45,7 @@ describe('日课分组执行', () => {
  it('按约定顺序合并签到与锻刀，炼糖默认关闭', () => {
   const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[{type:'login',params:{}},{type:'free_gift',params:{}},{type:'forge',params:{times:7}}]}
   const rows = dailyRows(preset,definitions,'raid')
-  expect(rows.map(r=>r.label)).toEqual(['签到','演练','内番','锻刀刀解','合成','指定远征','异去','当期活动','任务奖励','领杂物箱','收件箱体检','炼糖'])
+  expect(rows.map(r=>r.label)).toEqual(['签到','演练','内番','锻刀刀解','合成','指定远征','异去','当期活动','手入','任务奖励','领杂物箱','收件箱体检','炼糖'])
   expect(rows.find(r=>r.id==='sugar')?.enabled).toBe(false)
   expect(compileDaily(rows,[]).map(n=>n.type)).toEqual(['boot_emulator','login','signin','free_gift','forge','dismantle'])
   expect(preset.nodes[2]?.params.times).toBe(7)
@@ -67,6 +67,13 @@ describe('日课分组执行', () => {
   expect(withRecommendedRuns(manual,12).params).toEqual({runs:12,auto_refill:true,team_no:'2'})
   expect(manual.params).toEqual({runs:3,auto_refill:false,team_no:'2'})
   expect(() => withRecommendedRuns(manual,0)).toThrow()
+ })
+ it('定时预排开关缺省视为关，自动执行今日安排随旧配置保持关闭', () => {
+  expect(scheduleFlagsOf(undefined)).toEqual({autoSchedule:false,autoExecutePlan:false})
+  expect(scheduleFlagsOf({rows:[],startTime:'03:20'})).toEqual({autoSchedule:false,autoExecutePlan:false})
+  expect(scheduleFlagsOf({rows:[],startTime:'03:20',autoSchedule:true})).toEqual({autoSchedule:true,autoExecutePlan:false})
+  expect(scheduleFlagsOf({rows:[],startTime:'03:20',autoSchedule:true,autoExecutePlan:true})).toEqual({autoSchedule:true,autoExecutePlan:true})
+  expect(scheduleFlagsOf({rows:[],startTime:'',autoSchedule:'yes',autoExecutePlan:1} as never)).toEqual({autoSchedule:false,autoExecutePlan:false})
  })
  it('旧异去参数转换为独立节点，清单与执行参数不共享引用', () => {
   const preset: WorkflowPreset = {id:'builtin-daily',name:'日课',nodes:[{type:'daily_sortie',params:{sortie_mode:'yosari',yosari_map_no:4,yosari_runs:8,team_no:'2'}}]}

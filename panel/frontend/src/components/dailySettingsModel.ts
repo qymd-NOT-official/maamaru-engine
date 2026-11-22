@@ -8,7 +8,7 @@ export const dailyGroups = [
   ['practice', '演练', 'practice'], ['naihanka', '内番', 'naihanka'],
   ['forge', '锻刀刀解', 'forge', 'dismantle'], ['synthesize', '合成', 'synthesize'], ['expedition', '指定远征', 'expedition'],
   ['yosari', '异去', 'yosari'], ['activity', '当期活动'],
-  ['rewards', '任务奖励', 'task_rewards'], ['inbox', '领杂物箱', 'inbox_supplies'],
+  ['repair', '手入', 'daily_repair'], ['rewards', '任务奖励', 'task_rewards'], ['inbox', '领杂物箱', 'inbox_supplies'],
   ['scan', '收件箱体检', 'inbox_scan'],
   ['sugar', '炼糖', 'sugar'],
 ]
@@ -72,4 +72,9 @@ export function compileDaily(rows: DailyRow[], tail: WorkflowNode[]): WorkflowNo
 export function withRecommendedRuns(node: WorkflowNode, runs: number): WorkflowNode {
   if (node.type !== 'raid' || !Number.isInteger(runs) || runs < 1 || runs > 99) throw new Error('建议圈数暂不可用')
   return {...clone(node), params: {...clone(node.params), runs, auto_refill: true}}
+}
+
+// 定时开关组：旧配置缺键一律视为关（默认不自动动玩家的游戏）。
+export function scheduleFlagsOf(daily_ui: WorkflowPreset['daily_ui']): { autoSchedule: boolean; autoExecutePlan: boolean } {
+  return { autoSchedule: daily_ui?.autoSchedule === true, autoExecutePlan: daily_ui?.autoExecutePlan === true }
 }

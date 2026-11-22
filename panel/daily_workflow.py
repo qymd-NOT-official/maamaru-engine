@@ -1,6 +1,8 @@
 """默认日课模板：保留日课专属编排，复用现有执行方法，不另写玩法。"""
 import copy
 
+from touken.flows.report_judge import _repair_report_status
+
 RECIPE_KEYS = ("recipe_charcoal", "recipe_steel", "recipe_coolant", "recipe_whetstone")
 
 DAILY_SORTIE_KEYS = {
@@ -44,7 +46,7 @@ def make_template(settings, config, daily_steps):
     mapping = {"登录": "login", "签到": "signin", "万屋": "free_gift",
                "演练": "practice", "远征": "expedition", "内番": "naihanka",
                "锻刀": "forge", "刀解": "dismantle", "合成": "synthesize",
-               "出阵": "daily_sortie", "任务奖励": "task_rewards",
+               "出阵": "daily_sortie", "手入": "daily_repair", "任务奖励": "task_rewards",
                "收件箱体检": "inbox_scan", "库存快照": "snapshot"}
     nodes = []
     for step in daily_steps:
@@ -108,6 +110,11 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
     def daily_dismantle(agent, params, config_path):
         yield from agent._dismantle_step()
 
+    def daily_repair(agent, params, config_path):
+        # 日课手入走零成本默认（不烧加速符、黑名单照守），不吃手入积木的
+        # 加速部队参数——那是单独手入的安排，别从日课这里偷烧符。
+        yield from agent._daily_repair_step()
+
     def daily_forge(agent, params, config_path):
         # 十连限锻（烧加速符）和盯时长都走锻刀积木自己的 run，参数那边全认
         if params.get("watch") or str(params.get("forge_limited")) == "true":
@@ -164,6 +171,10 @@ def install_daily_template(workflow, scripts, *, _load_settings, config, daily_s
     fields.append({"key": "pumpkin_watch", "type": "text", "label": "南瓜目标刀剑",
                    "swords": True, "default": "", "placeholder": "多个名字用逗号分隔",
                    "visibleWhen": {"key": "sortie_mode", "is": "pumpkin"}})
+    workflow.register_node({"type": "daily_repair", "label": "日课手入",
+        "desc": "出阵打完的伤刀当天顺手修：不烧加速符，只用空闲手入位慢修，黑名单照守；没伤刀或手入位全占用就如实跳过。",
+        "category": "chore", "params": [], "run": daily_repair,
+        "detail": [_repair_report_status], "template_only": True})
     workflow.register_node({"type": "daily_sortie", "label": "日课出阵",
         "desc": "按日课的地图和次数出阵；行军、阵形和伤势处理由本节点自己的设置决定，与「配置」页无关。也可以选择不出阵。",
         "category": "battle", "params": fields, "run": daily_sortie,
