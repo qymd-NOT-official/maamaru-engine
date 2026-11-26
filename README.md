@@ -5,6 +5,7 @@
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/qymd-NOT-official/maamaru-engine?style=social)](https://github.com/qymd-NOT-official/maamaru-engine)
 
+虽然无人在意但是今天！11-26！本小姐离职了，回来继续产咯（）
 玩刀剑乱舞九年了，现在还是想玩，只是不想再亲自点完每一轮重复操作，也不想继续手拉 Excel 计算资源。所以我做了まあ丸：需要时替我照看本丸，回来时能翻翻这一天留下的记录。
 
 ![我的本丸：庭院、动态与今天的时间表](docs/assets/product/01-honmaru-home.png)
